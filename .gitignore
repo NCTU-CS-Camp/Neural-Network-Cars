@@ -12,3 +12,4 @@ __pycache__/
 *$py.class
 server/*.db
 server/*.db-*
+shared/__pycache__/

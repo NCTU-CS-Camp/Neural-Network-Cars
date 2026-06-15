@@ -162,9 +162,31 @@ class Car:
         return False
 
   def resetPosition(self):
-      self.x = 120
-      self.y = 480
-      self.angle = 180
+      self.reset_state()
+
+  def reset_state(self, x=120, y=480, angle=180, car_image=None):
+      self.x = x
+      self.y = y
+      self.center = self.x, self.y
+      self.velocity = 0
+      self.acceleration = 0
+      self.angle = angle
+      self.collided = False
+      self.yaReste = False
+      self.score = 0
+      self.d1 = 0
+      self.d2 = 0
+      self.d3 = 0
+      self.d4 = 0
+      self.d5 = 0
+      self.inp = np.array([[self.d1],[self.d2],[self.d3],[self.d4],[self.d5]])
+      self.outp = np.array([[0],[0],[0],[0]])
+      self.d = self.x-(self.width/2),self.y-(self.height/2)
+      self.c = self.x + self.width-(self.width/2), self.y-(self.height/2)
+      self.b = self.x + self.width-(self.width/2), self.y + self.height-(self.height/2)
+      self.a = self.x-(self.width/2), self.y + self.height-(self.height/2)
+      if car_image is not None:
+          self.car_image = car_image
 
   def takeAction(self):
     if self.outp.item(0) > 0.5:
