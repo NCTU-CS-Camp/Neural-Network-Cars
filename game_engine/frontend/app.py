@@ -1,6 +1,6 @@
 import pygame
-from shapely.geometry import Point
-from shapely.geometry.polygon import Polygon
+from shapely.geometry import Point  # type: ignore[import-untyped]
+from shapely.geometry.polygon import Polygon  # type: ignore[import-untyped]
 
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
@@ -19,6 +19,7 @@ from game_engine.backend.track_generator import generate_random_map
 from game_engine.backend.training_session import TrainingSession
 from game_engine.frontend.config_store import load_runtime_settings, save_runtime_settings
 from game_engine.frontend.scenes import AppShell
+from game_engine.frontend.submission_client import submit_car
 
 
 def run():
@@ -38,6 +39,7 @@ def run():
     bg = assets.bg
     number_track = 1
     frames = 0
+    submit_status = "Submit: not sent"
     layer_sizes = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
 
     car = Car(layer_sizes)
@@ -59,6 +61,7 @@ def run():
     text10 = font.render("D - Toggle Info", True, WHITE)
     text11 = font.render("M - Breed and Next Track", True, WHITE)
     text12 = font.render("F1..F4 - Switch Scenes", True, WHITE)
+    text13 = font.render("U - Submit Best", True, WHITE)
     text1_rect = text1.get_rect().move(info_x, info_y)
     text2_rect = text2.get_rect().move(info_x, info_y + text1_rect.height)
     text3_rect = text3.get_rect().move(info_x, info_y + 2 * text1_rect.height)
@@ -71,6 +74,7 @@ def run():
     text10_rect = text10.get_rect().move(info_x, info_y + 9 * text1_rect.height)
     text11_rect = text11.get_rect().move(info_x, info_y + 10 * text1_rect.height)
     text12_rect = text12.get_rect().move(info_x, info_y + 11 * text1_rect.height)
+    text13_rect = text13.get_rect().move(info_x, info_y + 12 * text1_rect.height)
 
     def persist_settings():
         settings.mutation_rate = session.mutation_rate
@@ -115,6 +119,7 @@ def run():
         info_text9 = font.render(
             f"Fitness: {session.fitness_strategy}", True, WHITE
         )
+        info_text10 = font.render(submit_status, True, WHITE)
         info_text1_rect = info_text1.get_rect().move(info_text_x, info_text_y)
         info_text2_rect = info_text2.get_rect().move(
             info_text_x, info_text_y + info_text1_rect.height
@@ -140,6 +145,9 @@ def run():
         info_text9_rect = info_text9.get_rect().move(
             info_text_x, info_text_y + 8 * info_text1_rect.height
         )
+        info_text10_rect = info_text10.get_rect().move(
+            info_text_x, info_text_y + 9 * info_text1_rect.height
+        )
 
         game_display.blit(text1, text1_rect)
         game_display.blit(text2, text2_rect)
@@ -153,6 +161,7 @@ def run():
         game_display.blit(text10, text10_rect)
         game_display.blit(text11, text11_rect)
         game_display.blit(text12, text12_rect)
+        game_display.blit(text13, text13_rect)
 
         game_display.blit(info_text1, info_text1_rect)
         game_display.blit(info_text2, info_text2_rect)
@@ -163,6 +172,7 @@ def run():
         game_display.blit(info_text7, info_text7_rect)
         game_display.blit(info_text8, info_text8_rect)
         game_display.blit(info_text9, info_text9_rect)
+        game_display.blit(info_text10, info_text10_rect)
 
     def breed_selected():
         nonlocal nn_cars
@@ -175,6 +185,33 @@ def run():
         )
         if number_track != 1:
             apply_track_spawn()
+
+    def submit_best_car():
+        nonlocal submit_status
+        if not nn_cars:
+            submit_status = "Submit: no cars"
+            return
+
+        best_car = max(
+            nn_cars,
+            key=lambda nn_car: float(
+                getattr(nn_car, "fitness_score", getattr(nn_car, "score", 0.0))
+            ),
+        )
+        track_id = "generated-track" if number_track != 1 else "default-track"
+        fitness_score = float(
+            getattr(best_car, "fitness_score", getattr(best_car, "score", 0.0))
+        )
+        result = submit_car(
+            server_url=settings.server_url,
+            car=best_car,
+            generation=session.generation,
+            track_id=track_id,
+            track_seed=settings.track_seed,
+            nickname=settings.nickname,
+            fitness_score=fitness_score,
+        )
+        submit_status = result.message
 
     def redraw_game_window():
         nonlocal frames
@@ -254,6 +291,8 @@ def run():
                     bg = pygame.image.load(TRACK_FRONT_PATH)
                     bg4 = pygame.image.load(TRACK_BACK_PATH)
                     set_collision_map(bg4)
+                if event.key == ord("u"):
+                    submit_best_car()
                 if event.key == ord("r"):
                     session.reset_generation()
                     nn_cars.clear()

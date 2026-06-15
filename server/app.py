@@ -1,97 +1,145 @@
 from __future__ import annotations
 
-import json
+import os
+from contextlib import asynccontextmanager
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from pathlib import Path
+from typing import Any
 
-from server.models import SubmissionRecord
-from server.replay_queue import ReplayQueue
-from server.storage import JsonStorage
-from shared.contracts import ReplayRequest, WeightPayload
+import uvicorn
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse
+
+from server.evaluation_worker import EvaluationWorker, Evaluator
+from server.evaluator import OfficialEvaluator
+from server.schemas import AdminReplayRequest, SubmissionCreateResponse, SubmissionIn
+from server.storage import CompetitionStorage
 
 
-STORAGE = JsonStorage()
-REPLAY_QUEUE = ReplayQueue(STORAGE)
+DEFAULT_ADMIN_TOKEN = "admin"
 
 
-class RequestHandler(BaseHTTPRequestHandler):
-    server_version = "NeuralCarsServer/0.1"
+def create_app(
+    *,
+    storage: CompetitionStorage | None = None,
+    evaluator: Evaluator | None = None,
+    start_worker: bool = True,
+    admin_token: str | None = None,
+) -> FastAPI:
+    app_storage = storage or CompetitionStorage()
+    app_evaluator = evaluator or OfficialEvaluator()
+    worker = EvaluationWorker(app_storage, app_evaluator)
+    token = admin_token or os.environ.get("COMPETITION_ADMIN_TOKEN", DEFAULT_ADMIN_TOKEN)
 
-    def _read_json(self) -> dict:
-        content_length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(content_length) if content_length else b"{}"
-        return json.loads(raw.decode("utf-8"))
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        app.state.storage = app_storage
+        app.state.worker = worker
+        app.state.admin_token = token
+        if start_worker:
+            worker.start()
+        try:
+            yield
+        finally:
+            worker.stop()
 
-    def _send_json(self, payload: dict | list, status: HTTPStatus = HTTPStatus.OK) -> None:
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(status.value)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+    app = FastAPI(title="Neural Network Cars Competition", lifespan=lifespan)
 
-    def do_GET(self) -> None:
-        parsed = urlparse(self.path)
-        path = parsed.path
-
-        if path == "/health":
-            self._send_json({"status": "ok"})
-            return
-
-        if path == "/submissions":
-            self._send_json(STORAGE.list_submissions())
-            return
-
-        if path.startswith("/submissions/"):
-            submission_id = path.split("/")[-1]
-            submission = STORAGE.get_submission(submission_id)
-            if submission is None:
-                self._send_json(
-                    {"error": "submission not found"},
-                    status=HTTPStatus.NOT_FOUND,
-                )
-                return
-            self._send_json(submission)
-            return
-
-        if path == "/leaderboard":
-            self._send_json(STORAGE.leaderboard())
-            return
-
-        if path == "/replays":
-            self._send_json(STORAGE.list_replay_jobs())
-            return
-
-        self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
-
-    def do_POST(self) -> None:
-        parsed = urlparse(self.path)
-        path = parsed.path
-        payload = self._read_json()
-
-        if path == "/submissions":
-            weight_payload = WeightPayload.from_dict(payload)
-            submission = SubmissionRecord.create(weight_payload)
-            self._send_json(
-                STORAGE.add_submission(submission.to_dict()),
-                status=HTTPStatus.CREATED,
+    def require_admin(x_admin_token: str | None) -> None:
+        if x_admin_token != token:
+            raise HTTPException(
+                status_code=HTTPStatus.UNAUTHORIZED,
+                detail="invalid admin token",
             )
-            return
 
-        if path == "/replays":
-            replay_request = ReplayRequest.from_dict(payload)
-            replay_job = REPLAY_QUEUE.enqueue(replay_request)
-            self._send_json(replay_job, status=HTTPStatus.CREATED)
-            return
+    @app.get("/health")
+    @app.get("/api/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
 
-        self._send_json({"error": "not found"}, status=HTTPStatus.NOT_FOUND)
+    @app.post(
+        "/api/submissions",
+        response_model=SubmissionCreateResponse,
+        status_code=HTTPStatus.CREATED,
+    )
+    def create_submission(payload: SubmissionIn) -> SubmissionCreateResponse:
+        try:
+            weight_payload = payload.to_weight_payload()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+        submission = app_storage.create_submission(weight_payload)
+        return SubmissionCreateResponse(
+            submission_id=submission["submission_id"],
+            status=submission["status"],
+        )
+
+    @app.get("/api/submissions")
+    def list_submissions() -> list[dict[str, Any]]:
+        return app_storage.list_submissions()
+
+    @app.get("/api/submissions/{submission_id}")
+    def get_submission(submission_id: str) -> dict[str, Any]:
+        submission = app_storage.get_submission(submission_id)
+        if submission is None:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="submission not found",
+            )
+        return submission
+
+    @app.get("/api/leaderboard")
+    def leaderboard() -> list[dict[str, Any]]:
+        return app_storage.leaderboard()
+
+    @app.get("/api/replay/top")
+    def replay_top(n: int = Query(default=5, ge=1, le=20)) -> dict[str, Any]:
+        return {"items": app_storage.replay_top(n)}
+
+    @app.post("/api/admin/reset")
+    def admin_reset(x_admin_token: str | None = Header(default=None)) -> dict[str, str]:
+        require_admin(x_admin_token)
+        app_storage.reset()
+        return {"status": "reset"}
+
+    @app.post("/api/admin/replay")
+    def admin_replay(
+        payload: AdminReplayRequest,
+        x_admin_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(x_admin_token)
+        result = app_storage.set_featured_submission(payload.submission_id)
+        if result is None:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="submission not found",
+            )
+        return result
+
+    @app.get("/leaderboard", response_class=HTMLResponse)
+    def leaderboard_page() -> str:
+        return _load_html("leaderboard.html")
+
+    @app.get("/admin", response_class=HTMLResponse)
+    def admin_page() -> str:
+        return _load_html("admin.html")
+
+    return app
+
+
+def _load_html(filename: str) -> str:
+    path = Path(__file__).resolve().parent / "static" / filename
+    return path.read_text(encoding="utf-8")
+
+
+app = create_app()
 
 
 def run_server(host: str = "127.0.0.1", port: int = 8000) -> None:
-    server = ThreadingHTTPServer((host, port), RequestHandler)
-    print(f"Server listening on http://{host}:{port}")
-    server.serve_forever()
+    uvicorn.run("server.app:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

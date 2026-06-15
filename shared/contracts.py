@@ -4,6 +4,11 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
+EXPECTED_LAYER_SIZES = [6, 6, 4]
+EXPECTED_WEIGHT_SHAPES = [(6, 6), (4, 6)]
+EXPECTED_BIAS_SHAPES = [(6, 1), (4, 1)]
+
+
 @dataclass(slots=True)
 class RuntimeSettings:
     nickname: str = "player1"
@@ -15,6 +20,7 @@ class RuntimeSettings:
     map_mode: str = "default"
     track_seed: int = 42
     fitness_strategy: str = "baseline_distance"
+    server_url: str = "http://127.0.0.1:8000"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
@@ -33,6 +39,7 @@ class RuntimeSettings:
             fitness_strategy=str(
                 data.get("fitness_strategy", defaults.fitness_strategy)
             ),
+            server_url=str(data.get("server_url", defaults.server_url)),
         )
 
     def to_dict(self) -> dict[str, Any]:

@@ -40,7 +40,7 @@ uv run python main.py
 - `game_engine/backend/`：車輛模擬、訓練 session、序列化與地圖生成。
 - `GA/`：genetic operators 與可替換的 fitness strategy。
 - `shared/`：前端、後端與 server 共用的資料格式定義。
-- `server/`：submission、leaderboard 與 replay job 的輕量 HTTP 服務。
+- `server/`：FastAPI submission、leaderboard、official evaluation 與 replay job 服務。
 
 ### 主要模組
 
@@ -55,7 +55,7 @@ uv run python main.py
 - `game_engine/backend/serialization.py`：訓練後模型 weights 的匯出與載入。
 - `game_engine/backend/track_generator.py`：隨機賽道生成與輸出。
 - `shared/contracts.py`：`RuntimeSettings`、`WeightPayload`、`ReplayRequest` 等共享 schema。
-- `server/app.py`：提供 `/health`、`/submissions`、`/leaderboard`、`/replays` API。
+- `server/app.py`：提供 `/api/submissions`、`/api/leaderboard`、`/api/replay/top` 與內建排行榜頁面。
 
 ## Repository 結構
 
@@ -80,14 +80,23 @@ uv run python main.py
 ```
 
 此指令會從 `game_engine/frontend/app.py` 啟動 Pygame simulator。
+訓練時按 `U` 可將目前最佳車的 weights 提交到 `settings.json` 中的 `server_url`。
 
-### 啟動 server stub
+### 啟動 competition server
 
 ```bash
-uv run python server/app.py
+uv run python -m server.app
 ```
 
-此指令會在 `http://127.0.0.1:8000` 啟動本地 server，提供 submission、leaderboard 與 replay job 的基本 API。
+此指令會在 `http://127.0.0.1:8000` 啟動本地 server。排行榜頁面位於 `http://127.0.0.1:8000/leaderboard`，助教管理頁面位於 `http://127.0.0.1:8000/admin`。預設 admin token 是 `admin`，正式活動可用 `COMPETITION_ADMIN_TOKEN` 環境變數覆蓋。
+
+### 啟動大螢幕 replay
+
+```bash
+uv run python replay.py
+```
+
+此指令會開啟 Pygame replay client，從 server 拉取 Top 5 submission 並輪播最佳單圖 replay。
 
 ## 開發指令
 

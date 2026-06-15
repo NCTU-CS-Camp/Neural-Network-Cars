@@ -7,5 +7,6 @@
   "show_debug_overlay": true,
   "map_mode": "default",
   "track_seed": 42,
-  "fitness_strategy": "baseline_distance"
+  "fitness_strategy": "baseline_distance",
+  "server_url": "http://127.0.0.1:8000"
 }
