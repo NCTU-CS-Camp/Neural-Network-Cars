@@ -1,0 +1,5 @@
+from game_engine.frontend.app import run
+
+
+if __name__ == "__main__":
+    run()

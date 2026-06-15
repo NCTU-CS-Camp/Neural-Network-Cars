@@ -1,0 +1,30 @@
+{
+  "submissions": [
+    {
+      "submission_id": "sub_d3a76f75",
+      "payload": {
+        "model_version": "v1",
+        "layer_sizes": [
+          6,
+          6,
+          4
+        ],
+        "weights": [
+          [],
+          []
+        ],
+        "biases": [
+          [],
+          []
+        ],
+        "fitness_score": 12.5,
+        "generation": 1,
+        "track_id": "generated-001",
+        "track_seed": 42,
+        "nickname": "tester"
+      },
+      "submitted_at": "2026-06-15T12:55:05.500646+00:00"
+    }
+  ],
+  "replay_jobs": []
+}

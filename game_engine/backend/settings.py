@@ -1,0 +1,26 @@
+from pathlib import Path
+
+# settings.py 位於 game_engine/backend/，往上兩層才是專案根目錄
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+IMAGES_DIR = PROJECT_ROOT / "Images"
+SPRITES_DIR = IMAGES_DIR / "Sprites"
+TRACK_ASSETS_DIR = IMAGES_DIR / "TracksMapGen"
+
+TRACK_BACK_PATH = PROJECT_ROOT / "randomGeneratedTrackBack.png"
+TRACK_FRONT_PATH = PROJECT_ROOT / "randomGeneratedTrackFront.png"
+
+SCREEN_SIZE = WIDTH, HEIGHT = 1600, 900
+FPS = 30
+MAX_SPEED = 10
+
+WHITE = (255, 255, 255)
+GREEN = (0, 255, 0)
+BLUE = (0, 0, 128)
+BLACK = (0, 0, 0)
+COLOR_LINE = (255, 0, 0)
+
+INPUT_LAYER = 6
+HIDDEN_LAYER = 6
+OUTPUT_LAYER = 4
+NUM_OF_NN_CARS = 50

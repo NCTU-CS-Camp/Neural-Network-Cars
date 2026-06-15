@@ -1,0 +1,11 @@
+{
+  "nickname": "player1",
+  "fps": 30,
+  "population_size": 50,
+  "mutation_rate": 90,
+  "show_player": true,
+  "show_debug_overlay": true,
+  "map_mode": "default",
+  "track_seed": 42,
+  "fitness_strategy": "baseline_distance"
+}
