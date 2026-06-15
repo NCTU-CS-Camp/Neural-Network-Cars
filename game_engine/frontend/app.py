@@ -78,18 +78,39 @@ def run():
         settings.show_debug_overlay = session.show_debug_overlay
         save_runtime_settings(settings)
 
-    def apply_track_spawn():
-        spawn_x = 120 if number_track == 1 else 140
-        spawn_y = 480 if number_track == 1 else 610
+    def track_spawn():
+        return (120, 480) if number_track == 1 else (140, 610)
+
+    def apply_sensor_line_state():
+        car.showlines = session.show_sensor_lines
         for nn_car in nn_cars:
-            nn_car.velocity = 0
-            nn_car.acceleration = 0
-            nn_car.x = spawn_x
-            nn_car.y = spawn_y
-            nn_car.angle = 180
-            nn_car.collided = False
-            nn_car.yaReste = False
-            nn_car.score = 0
+            nn_car.showlines = session.show_sensor_lines
+
+    def apply_track_spawn(reset_player=False, reset_images=False):
+        spawn_x, spawn_y = track_spawn()
+        for nn_car in nn_cars:
+            car_image = assets.white_small_car if reset_images else None
+            nn_car.reset_state(spawn_x, spawn_y, car_image=car_image)
+            nn_car.showlines = session.show_sensor_lines
+        if reset_player:
+            car.reset_state(spawn_x, spawn_y)
+            car.showlines = session.show_sensor_lines
+        session.alive_count = len(nn_cars)
+
+    def remove_selected_car(nn_car):
+        if nn_car in session.selected_cars:
+            session.selected_cars.remove(nn_car)
+
+    def clean_collided_cars():
+        nonlocal nn_cars
+        kept_cars = []
+        for nn_car in nn_cars:
+            if nn_car.collided:
+                remove_selected_car(nn_car)
+            else:
+                kept_cars.append(nn_car)
+        nn_cars = kept_cars
+        session.alive_count = len(nn_cars)
 
     def display_texts():
         info_text_x = 20
@@ -166,6 +187,8 @@ def run():
 
     def breed_selected():
         nonlocal nn_cars
+        if len(session.selected_cars) != 2:
+            return False
         nn_cars = session.breed_population(
             population=nn_cars,
             aux_car=aux_car,
@@ -173,8 +196,8 @@ def run():
             layer_sizes=layer_sizes,
             assets=assets,
         )
-        if number_track != 1:
-            apply_track_spawn()
+        apply_track_spawn()
+        return True
 
     def redraw_game_window():
         nonlocal frames
@@ -207,6 +230,8 @@ def run():
             display_texts()
         pygame.display.update()
 
+    apply_sensor_line_state()
+
     while True:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -224,13 +249,10 @@ def run():
                 if event.key == pygame.K_F4:
                     shell.set_scene("replay")
                 if event.key == ord("l"):
-                    car.showLines()
                     session.show_sensor_lines = not session.show_sensor_lines
+                    apply_sensor_line_state()
                 if event.key == ord("c"):
-                    for nn_car in nn_cars[:]:
-                        if nn_car.collided:
-                            nn_cars.remove(nn_car)
-                            session.mark_collision(nn_car)
+                    clean_collided_cars()
                 if event.key == ord("a"):
                     session.show_player = not session.show_player
                 if event.key == ord("d"):
@@ -238,33 +260,28 @@ def run():
                 if event.key == ord("n"):
                     number_track = 2
                     session.track_index = 2
-                    apply_track_spawn()
                     generate_random_map(game_display)
                     bg = pygame.image.load(TRACK_FRONT_PATH)
                     bg4 = pygame.image.load(TRACK_BACK_PATH)
                     set_collision_map(bg4)
+                    apply_track_spawn(reset_player=True)
                 if event.key == ord("b"):
                     breed_selected()
                 if event.key == ord("m"):
-                    breed_selected()
-                    number_track = 2
-                    session.track_index = 2
-                    apply_track_spawn()
-                    generate_random_map(game_display)
-                    bg = pygame.image.load(TRACK_FRONT_PATH)
-                    bg4 = pygame.image.load(TRACK_BACK_PATH)
-                    set_collision_map(bg4)
+                    if breed_selected():
+                        number_track = 2
+                        session.track_index = 2
+                        generate_random_map(game_display)
+                        bg = pygame.image.load(TRACK_FRONT_PATH)
+                        bg4 = pygame.image.load(TRACK_BACK_PATH)
+                        set_collision_map(bg4)
+                        apply_track_spawn(reset_player=True)
                 if event.key == ord("r"):
                     session.reset_generation()
                     nn_cars.clear()
                     for _ in range(session.population_size):
                         nn_cars.append(Car(layer_sizes))
-                    if number_track == 1:
-                        apply_track_spawn()
-                    else:
-                        for nn_car in nn_cars:
-                            nn_car.x = 100
-                            nn_car.y = 300
+                    apply_track_spawn(reset_player=True, reset_images=True)
                 if event.key == ord("0"):
                     session.mutation_rate = 0
                 if event.key == ord("1"):
@@ -309,7 +326,8 @@ def run():
                             if nn_car.collided:
                                 nn_car.velocity = 0
                                 nn_car.acceleration = 0
-                            nn_car.update()
+                            if not nn_car.collided:
+                                nn_car.update()
                             break
 
                 if mouse_buttons[2]:
@@ -320,7 +338,8 @@ def run():
                         if polygon.contains(point):
                             if nn_car not in session.selected_cars:
                                 nn_cars.remove(nn_car)
-                                session.alive_count = max(0, session.alive_count - 1)
+                                if not nn_car.collided:
+                                    session.alive_count = max(0, session.alive_count - 1)
                             break
 
         keys = pygame.key.get_pressed()
