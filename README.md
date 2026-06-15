@@ -90,13 +90,21 @@ uv run python -m server.app
 
 此指令會在 `http://127.0.0.1:8000` 啟動本地 server。排行榜頁面位於 `http://127.0.0.1:8000/leaderboard`，助教管理頁面位於 `http://127.0.0.1:8000/admin`。預設 admin token 是 `admin`，正式活動可用 `COMPETITION_ADMIN_TOKEN` 環境變數覆蓋。
 
+### 產生五位 demo players
+
+```bash
+uv run python -m server.seed_demo_players
+```
+
+此指令會清空目前的 competition SQLite 資料，建立 `player1` 到 `player5` 五筆 deterministic demo weights，並用正式 evaluator 評分。完成後可開啟 `http://127.0.0.1:8000/leaderboard` 看到五位玩家。
+
 ### 啟動大螢幕 replay
 
 ```bash
 uv run python replay.py
 ```
 
-此指令會開啟 Pygame replay client，從 server 拉取 Top 5 submission 並輪播最佳單圖 replay。
+此指令會開啟 Pygame replay client，從 server 拉取 Top 5 submission，並在同一張 official-default 賽道上同時播放最多五台車。
 
 ## 開發指令
 
