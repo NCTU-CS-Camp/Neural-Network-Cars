@@ -42,6 +42,7 @@ from game_engine.frontend.profile_store import (
     load_login_profile,
 )
 from game_engine.frontend.scenes import AppShell
+from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
     AppQuit,
     run_clear_user_confirm_screen,
@@ -156,6 +157,7 @@ def run_training_loop(
 
     number_track = 2 if map_difficulty == 3 else 1
     generation_started_at = pygame.time.get_ticks()
+    submit_status = "Submit: not sent"
     layer_sizes = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
 
     car = Car(layer_sizes)
@@ -282,6 +284,7 @@ def run_training_loop(
         info_text9 = font.render(
             f"Next generation: {remaining_seconds:.1f}s", True, WHITE
         )
+        info_text10 = font.render(submit_status, True, WHITE)
         info_text1_rect = info_text1.get_rect().move(info_text_x, info_text_y)
         info_text2_rect = info_text2.get_rect().move(
             info_text_x, info_text_y + info_text1_rect.height
@@ -307,6 +310,9 @@ def run_training_loop(
         info_text9_rect = info_text9.get_rect().move(
             info_text_x, info_text_y + 8 * info_text1_rect.height
         )
+        info_text10_rect = info_text10.get_rect().move(
+            info_text_x, info_text_y + 9 * info_text1_rect.height
+        )
 
         game_display.blit(info_text1, info_text1_rect)
         game_display.blit(info_text2, info_text2_rect)
@@ -317,6 +323,7 @@ def run_training_loop(
         game_display.blit(info_text7, info_text7_rect)
         game_display.blit(info_text8, info_text8_rect)
         game_display.blit(info_text9, info_text9_rect)
+        game_display.blit(info_text10, info_text10_rect)
 
     def breed_selected():
         nonlocal nn_cars
@@ -388,6 +395,33 @@ def run_training_loop(
                 border_radius=4,
             )
             target.blit(label, label_rect)
+
+    def submit_best_car():
+        nonlocal submit_status
+        if not nn_cars:
+            submit_status = "Submit: no cars"
+            return
+
+        best_car = max(
+            nn_cars,
+            key=lambda nn_car: float(
+                getattr(nn_car, "fitness_score", getattr(nn_car, "score", 0.0))
+            ),
+        )
+        track_id = "generated-track" if number_track != 1 else "default-track"
+        fitness_score = float(
+            getattr(best_car, "fitness_score", getattr(best_car, "score", 0.0))
+        )
+        result = submit_car(
+            server_url=settings.server_url,
+            car=best_car,
+            generation=session.generation,
+            track_id=track_id,
+            track_seed=settings.track_seed,
+            nickname=settings.nickname,
+            fitness_score=fitness_score,
+        )
+        submit_status = result.message
 
     def redraw_game_window():
         # Draw map + cars on the 1600×900 virtual canvas.
@@ -518,6 +552,9 @@ def run_training_loop(
             if event.type == pygame.QUIT:
                 persist_settings()
                 raise AppQuit()
+
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_u:
+                submit_best_car()
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_buttons = pygame.mouse.get_pressed()

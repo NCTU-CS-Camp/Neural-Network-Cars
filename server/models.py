@@ -2,51 +2,49 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 from uuid import uuid4
 
-from shared.contracts import ReplayRequest, WeightPayload
 
-
-def _utc_now() -> str:
+def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+class SubmissionStatus(StrEnum):
+    PENDING = "pending"
+    EVALUATING = "evaluating"
+    EVALUATED = "evaluated"
+    FAILED = "failed"
+
+
 @dataclass(slots=True)
-class SubmissionRecord:
-    submission_id: str
-    payload: dict
-    submitted_at: str
+class TrackScore:
+    track_id: str
+    track_name: str
+    score: float
+    frames_simulated: int
+    collided: bool
 
-    @classmethod
-    def create(cls, payload: WeightPayload) -> "SubmissionRecord":
-        return cls(
-            submission_id=f"sub_{uuid4().hex[:8]}",
-            payload=payload.to_dict(),
-            submitted_at=_utc_now(),
-        )
-
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
 @dataclass(slots=True)
-class ReplayJob:
-    replay_id: str
-    submission_id: str
-    track_seed: int
-    render_mode: str
-    created_at: str
+class EvaluationResult:
+    official_score: float
+    track_scores: list[TrackScore]
+    best_track_id: str | None
+    best_track_score: float
 
-    @classmethod
-    def create(cls, request: ReplayRequest) -> "ReplayJob":
-        return cls(
-            replay_id=f"replay_{uuid4().hex[:8]}",
-            submission_id=request.submission_id,
-            track_seed=request.track_seed,
-            render_mode=request.render_mode,
-            created_at=_utc_now(),
-        )
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "official_score": self.official_score,
+            "track_scores": [track_score.to_dict() for track_score in self.track_scores],
+            "best_track_id": self.best_track_id,
+            "best_track_score": self.best_track_score,
+        }
 
-    def to_dict(self) -> dict:
-        return asdict(self)
 
+def new_submission_id() -> str:
+    return f"sub_{uuid4().hex[:8]}"

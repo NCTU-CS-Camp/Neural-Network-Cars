@@ -400,3 +400,21 @@ class ReplayRequest:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class ReplayRequest:
+    submission_id: str
+    track_seed: int
+    render_mode: str = "big-screen"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ReplayRequest":
+        return cls(
+            submission_id=str(data["submission_id"]),
+            track_seed=int(data["track_seed"]),
+            render_mode=str(data.get("render_mode", "big-screen")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

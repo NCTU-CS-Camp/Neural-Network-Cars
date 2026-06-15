@@ -80,6 +80,7 @@ uv run python main.py
 ```
 
 此指令會從 `game_engine/frontend/app.py` 啟動 Pygame simulator。
+訓練時按 `U` 可將目前最佳車的 weights 提交到 server。
 
 Client 使用的 API 位址由專案根目錄的 `.env` 設定：
 
@@ -89,13 +90,21 @@ COMPETITION_SERVER_URL=http://127.0.0.1:8000
 
 可複製 `.env.example` 後修改 IP、protocol 與 port。登入畫面不允許使用者修改此位址；若作業系統環境變數中也有 `COMPETITION_SERVER_URL`，環境變數優先。
 
-### 啟動 server stub
+### 啟動 competition server
 
 ```bash
 uv run python server/app.py
 ```
 
-此指令會在 `http://127.0.0.1:8000` 啟動本地 server，提供 submission、leaderboard 與 replay job 的基本 API。
+此指令會在 `http://127.0.0.1:8000` 啟動本地 server。排行榜頁面位於 `http://127.0.0.1:8000/leaderboard`，助教管理頁面位於 `http://127.0.0.1:8000/admin`。預設 admin token 是 `admin`，正式活動可用 `COMPETITION_ADMIN_TOKEN` 環境變數覆蓋。
+
+### 啟動大螢幕 replay
+
+```bash
+uv run python replay.py
+```
+
+此指令會開啟 Pygame replay client，從 server 拉取 Top 5 submission 並輪播最佳單圖 replay。
 
 ## 開發指令
 
