@@ -74,34 +74,32 @@ class TrainingSession:
         if len(self.selected_cars) != 2:
             return population
 
+        parent1, parent2 = self.selected_cars
         self.begin_next_generation()
         next_population = [car_factory(layer_sizes) for _ in range(self.population_size)]
 
         for index in range(0, self.population_size - 2, 2):
             uniformCrossOverWeights(
-                self.selected_cars[0],
-                self.selected_cars[1],
+                parent1,
+                parent2,
                 next_population[index],
                 next_population[index + 1],
             )
             uniformCrossOverBiases(
-                self.selected_cars[0],
-                self.selected_cars[1],
+                parent1,
+                parent2,
                 next_population[index],
                 next_population[index + 1],
             )
 
-        next_population[self.population_size - 2] = self.selected_cars[0]
-        next_population[self.population_size - 1] = self.selected_cars[1]
+        next_population[self.population_size - 2] = parent1
+        next_population[self.population_size - 1] = parent2
 
         next_population[self.population_size - 2].car_image = assets.green_small_car
         next_population[self.population_size - 1].car_image = assets.green_small_car
 
         for champion in next_population[self.population_size - 2 :]:
-            champion.resetPosition()
-            champion.collided = False
-            champion.yaReste = False
-            champion.score = 0
+            champion.reset_state(car_image=assets.green_small_car)
 
         for index in range(self.population_size - 2):
             for _ in range(self.mutation_rate):
