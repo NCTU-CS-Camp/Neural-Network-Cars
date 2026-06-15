@@ -6,3 +6,7 @@ env/
 .mypy_cache/
 .ruff_cache/
 pycache/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class

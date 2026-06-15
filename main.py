@@ -1,4 +1,4 @@
-from frontend.app import run
+from game_engine.frontend.app import run
 
 
 if __name__ == "__main__":

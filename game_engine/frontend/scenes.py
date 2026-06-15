@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 import pygame
 
-from frontend.widgets import Label
+from game_engine.frontend.widgets import Label
 from shared.contracts import RuntimeSettings
 
 

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import pygame
 
-from backend.settings import PROJECT_ROOT, SPRITES_DIR
+from game_engine.backend.settings import PROJECT_ROOT, SPRITES_DIR
 
 
 @dataclass

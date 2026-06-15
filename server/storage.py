@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from backend.settings import PROJECT_ROOT
+from game_engine.backend.settings import PROJECT_ROOT
 
 
 class JsonStorage:

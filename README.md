@@ -16,7 +16,7 @@ git clone https://github.com/NCTU-CS-Camp/Neural-Network-Cars.git
 cd Neural-Network-Cars
 uv python install 3.12
 uv sync
-uv run python nnCarGame.py
+uv run python main.py
 ```
 
 ### 尚未安裝 `uv`
@@ -29,38 +29,40 @@ git clone https://github.com/NCTU-CS-Camp/Neural-Network-Cars.git
 cd Neural-Network-Cars
 uv python install 3.12
 uv sync
-uv run python nnCarGame.py
+uv run python main.py
 ```
 
 ## 目前程式架構
 
 目前專案分成四個主要層次：
 
-- `frontend/`：Pygame app shell、場景切換、UI 元件與本地設定讀寫。
-- `backend/`：車輛模擬、GA 輔助邏輯、fitness strategy、序列化與地圖生成。
+- `game_engine/frontend/`：Pygame app shell、場景切換、UI 元件與本地設定讀寫。
+- `game_engine/backend/`：車輛模擬、訓練 session、序列化與地圖生成。
+- `GA/`：genetic operators 與可替換的 fitness strategy。
 - `shared/`：前端、後端與 server 共用的資料格式定義。
 - `server/`：submission、leaderboard 與 replay job 的輕量 HTTP 服務。
 
 ### 主要模組
 
-- `frontend/app.py`：本地 simulator 的主要入口，負責串接設定、scene、training session 與 render loop。
-- `frontend/scenes.py`：`home`、`settings`、`training`、`replay` 四個場景的基礎殼層。
-- `frontend/config_store.py`：讀寫 `settings.json`。
-- `frontend/widgets.py`：提供基礎 UI 元件骨架。
-- `backend/car.py`：車輛狀態、感測器、碰撞判定與神經網路輸出動作。
-- `backend/genetic.py`：mutation 與 crossover 的既有實作。
-- `backend/fitness.py`：可替換的 fitness strategy 入口。
-- `backend/training_session.py`：管理 generation、selected cars、mutation rate、alive count 等訓練狀態。
-- `backend/serialization.py`：訓練後模型 weights 的匯出與載入。
-- `backend/track_generator.py`：隨機賽道生成與輸出。
+- `game_engine/frontend/app.py`：本地 simulator 的主要入口，負責串接設定、scene、training session 與 render loop。
+- `game_engine/frontend/scenes.py`：`home`、`settings`、`training`、`replay` 四個場景的基礎殼層。
+- `game_engine/frontend/config_store.py`：讀寫 `settings.json`。
+- `game_engine/frontend/widgets.py`：提供基礎 UI 元件骨架。
+- `game_engine/backend/car.py`：車輛狀態、感測器、碰撞判定與神經網路輸出動作。
+- `GA/genetic.py`：mutation 與 crossover 的既有實作。
+- `GA/fitness.py`：可替換的 fitness strategy 入口。
+- `game_engine/backend/training_session.py`：管理 generation、selected cars、mutation rate、alive count 等訓練狀態。
+- `game_engine/backend/serialization.py`：訓練後模型 weights 的匯出與載入。
+- `game_engine/backend/track_generator.py`：隨機賽道生成與輸出。
 - `shared/contracts.py`：`RuntimeSettings`、`WeightPayload`、`ReplayRequest` 等共享 schema。
 - `server/app.py`：提供 `/health`、`/submissions`、`/leaderboard`、`/replays` API。
 
 ## Repository 結構
 
 ```text
-frontend/   本地遊戲 UI、scenes、settings、replay 殼層
-backend/    模擬邏輯、GA、fitness、serialization、assets
+game_engine/frontend/   本地遊戲 UI、scenes、settings、replay 殼層
+game_engine/backend/    模擬邏輯、training session、serialization、assets
+GA/          genetic operators 與 fitness strategy
 shared/     共用資料契約
 server/     submission 與 replay 服務
 Images/     車輛 sprite 與賽道生成素材
@@ -74,10 +76,10 @@ team-issue-breakdown.md  三隊建議任務拆分
 ### 啟動本地 simulator
 
 ```bash
-uv run python nnCarGame.py
+uv run python main.py
 ```
 
-此指令會從 `frontend/app.py` 啟動 Pygame simulator。
+此指令會從 `game_engine/frontend/app.py` 啟動 Pygame simulator。
 
 ### 啟動 server stub
 
@@ -93,13 +95,13 @@ uv run python server/app.py
 uv sync
 uv run pytest
 uv run ruff check .
-uv run mypy backend frontend server shared
+uv run mypy game_engine GA server shared
 ```
 
 ## 三個 Team 的起點
 
-- `GA Team`：建議從 `backend/fitness.py`、`backend/training_session.py`、`backend/serialization.py` 開始。
-- `UI Team`：建議從 `frontend/scenes.py`、`frontend/widgets.py`、`frontend/config_store.py`、`frontend/app.py` 開始。
+- `GA Team`：建議從 `GA/fitness.py`、`GA/genetic.py`、`game_engine/backend/training_session.py`、`game_engine/backend/serialization.py` 開始。
+- `UI Team`：建議從 `game_engine/frontend/scenes.py`、`game_engine/frontend/widgets.py`、`game_engine/frontend/config_store.py`、`game_engine/frontend/app.py` 開始。
 - `BE Team`：建議從 `server/app.py`、`server/models.py`、`server/storage.py`、`shared/contracts.py` 開始。
 
-若要看較完整的規劃與任務拆分，請參考 [design-doc.md](/Users/harryp/Desktop/Projects/Neural-Network-Cars/design-doc.md) 與 [team-issue-breakdown.md](/Users/harryp/Desktop/Projects/Neural-Network-Cars/team-issue-breakdown.md)。
+若要看較完整的規劃，請參考 [design-doc.md](design-doc.md)。

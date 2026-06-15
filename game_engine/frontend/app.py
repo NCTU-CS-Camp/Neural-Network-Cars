@@ -2,10 +2,10 @@ import pygame
 from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
 
-from backend.assets import load_game_assets
-from backend.car import Car, configure_car, set_collision_map
-from backend.fitness import get_fitness_strategy
-from backend.settings import (
+from game_engine.backend.assets import load_game_assets
+from game_engine.backend.car import Car, configure_car, set_collision_map
+from GA.fitness import get_fitness_strategy
+from game_engine.backend.settings import (
     HIDDEN_LAYER,
     INPUT_LAYER,
     MAX_SPEED,
@@ -15,10 +15,10 @@ from backend.settings import (
     TRACK_FRONT_PATH,
     WHITE,
 )
-from backend.track_generator import generate_random_map
-from backend.training_session import TrainingSession
-from frontend.config_store import load_runtime_settings, save_runtime_settings
-from frontend.scenes import AppShell
+from game_engine.backend.track_generator import generate_random_map
+from game_engine.backend.training_session import TrainingSession
+from game_engine.frontend.config_store import load_runtime_settings, save_runtime_settings
+from game_engine.frontend.scenes import AppShell
 
 
 def run():

@@ -3,8 +3,8 @@ import math
 import numpy as np
 import pygame
 
-from backend.geometry import calculateDistance, move, rotation, sigmoid
-from backend.settings import COLOR_LINE, MAX_SPEED, WHITE
+from game_engine.backend.geometry import calculateDistance, move, rotation, sigmoid
+from game_engine.backend.settings import COLOR_LINE, MAX_SPEED, WHITE
 
 collision_surface = None
 default_car_image = None

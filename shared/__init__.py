@@ -1,2 +1,1 @@
-"""Shared contracts used across frontend, backend, and server modules."""
-
+"""Shared contracts used across game_engine, GA, and server modules."""

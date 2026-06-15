@@ -10,11 +10,12 @@
 ## 二、目前專案現況
 目前程式主要以本地 Pygame 執行流程為核心，主要模組如下：
 
-- `frontend/app.py`：主遊戲迴圈、鍵盤輸入、畫面繪製、訓練流程整合。
-- `backend/car.py`：車輛狀態、感測器計算、碰撞判定、神經網路輸出與動作執行。
-- `backend/genetic.py`：目前的 crossover 與 mutation 實作。
-- `backend/track_generator.py`：隨機地圖生成與賽道圖片輸出。
-- `backend/settings.py`：畫面尺寸、神經網路層數、族群大小、資源路徑與常數設定。
+- `game_engine/frontend/app.py`：主遊戲迴圈、鍵盤輸入、畫面繪製、訓練流程整合。
+- `game_engine/backend/car.py`：車輛狀態、感測器計算、碰撞判定、神經網路輸出與動作執行。
+- `GA/genetic.py`：目前的 crossover 與 mutation 實作。
+- `GA/fitness.py`：可替換的 fitness strategy 入口。
+- `game_engine/backend/track_generator.py`：隨機地圖生成與賽道圖片輸出。
+- `game_engine/backend/settings.py`：畫面尺寸、神經網路層數、族群大小、資源路徑與常數設定。
 
 目前已能完成本地訓練與隨機地圖生成，但以下能力仍未模組化：
 
@@ -23,10 +24,11 @@
 - 權重格式、提交流程與 replay 播放機制尚未定義為可共享的資料契約。
 
 ## 三、目標架構
-下一階段將專案整理為四個層次：
+下一階段將專案整理為五個層次：
 
-- `frontend/`：場景切換、操作元件、設定儲存、重播控制。
-- `backend/`：模擬邏輯、車輛行為、GA pipeline、賽道載入、模型序列化。
+- `game_engine/frontend/`：場景切換、操作元件、設定儲存、重播控制。
+- `game_engine/backend/`：模擬邏輯、車輛行為、訓練 session、賽道載入、模型序列化。
+- `GA/`：genetic operators、fitness strategy 與後續演化策略實驗。
 - `server/`：上傳 API、排行榜 API、重播任務 API、資料儲存。
 - `shared contracts`：設定檔、模型權重、重播請求、執行結果等 JSON 格式定義。
 
@@ -37,15 +39,15 @@
 GA Team 的目標是提升訓練效果，並建立可比較、可驗證的演化策略。
 
 主要工作範圍：
-- 將 fitness function 自 `frontend/app.py` 中抽離。
+- 將 fitness function 自 `game_engine/frontend/app.py` 中抽離。
 - 設計可插拔的 fitness strategy。
 - 研究 selection、crossover、mutation 的組合效果。
 - 建立每代訓練結果的實驗紀錄格式。
 
 建議新增模組：
-- `backend/fitness.py`
-- `backend/training_session.py`
-- `backend/serialization.py`
+- `GA/fitness.py`
+- `game_engine/backend/training_session.py`
+- `game_engine/backend/serialization.py`
 
 第一版建議策略：
 - `baseline_distance`：以碰撞前行進距離作為基礎分數。
@@ -67,9 +69,9 @@ UI Team 的目標是將目前以鍵盤操作為主的訓練器，整理成完整
 - 支援本地權重載入、匯出與上傳入口。
 
 建議新增模組：
-- `frontend/scenes.py`
-- `frontend/widgets.py`
-- `frontend/config_store.py`
+- `game_engine/frontend/scenes.py`
+- `game_engine/frontend/widgets.py`
+- `game_engine/frontend/config_store.py`
 
 第一版功能重點：
 - 地圖模式切換：預設地圖、隨機地圖、固定 seed 地圖。
@@ -162,14 +164,14 @@ BE Team 的目標是建立一個可接收模型提交、儲存結果並支援大
 ### 7.1 GA Team 執行項目
 #### 任務 1：抽離 fitness function 模組
 - 目標：將目前訓練分數計算自主迴圈中抽離，建立可替換的 fitness 介面。
-- 涉及檔案：`frontend/app.py`、`backend/fitness.py`
+- 涉及檔案：`game_engine/frontend/app.py`、`GA/fitness.py`
 - 驗收標準：
   - 主訓練流程不直接寫死分數公式。
   - 可透過設定切換不同 fitness strategy。
 
 #### 任務 2：建立 training session 模組
 - 目標：整理每一代訓練所需狀態，避免 GA 邏輯散落於 UI loop。
-- 涉及檔案：`backend/training_session.py`、`frontend/app.py`
+- 涉及檔案：`game_engine/backend/training_session.py`、`game_engine/frontend/app.py`
 - 驗收標準：
   - generation、alive count、selected cars、mutation rate 等狀態集中管理。
   - UI 可讀取訓練狀態，但不負責計算演化流程。
@@ -186,7 +188,7 @@ BE Team 的目標是建立一個可接收模型提交、儲存結果並支援大
 
 #### 任務 4：建立實驗紀錄格式
 - 目標：輸出每代訓練結果，供後續分析與比較。
-- 涉及檔案：`backend/serialization.py`、`logs/` 或 `experiments/`
+- 涉及檔案：`game_engine/backend/serialization.py`、`logs/` 或 `experiments/`
 - 驗收標準：
   - 至少記錄 generation、fitness、track_seed、strategy_name。
   - 同一組設定可重複執行並比較結果。
@@ -200,14 +202,14 @@ BE Team 的目標是建立一個可接收模型提交、儲存結果並支援大
 ### 7.2 UI Team 執行項目
 #### 任務 1：建立 scene-based UI 架構
 - 目標：將目前單一主畫面拆成場景導覽架構。
-- 涉及檔案：`frontend/scenes.py`、`frontend/app.py`
+- 涉及檔案：`game_engine/frontend/scenes.py`、`game_engine/frontend/app.py`
 - 驗收標準：
   - 至少包含 `Home`、`Settings`、`Training`、`Replay` 四個場景。
   - 場景切換不影響既有訓練流程。
 
 #### 任務 2：建立設定儲存機制
 - 目標：將使用者設定寫入本地檔案。
-- 涉及檔案：`frontend/config_store.py`、`settings.json`
+- 涉及檔案：`game_engine/frontend/config_store.py`、`settings.json`
 - 驗收標準：
   - 可儲存 nickname、FPS、population size、mutation rate、map mode。
   - 重啟程式後可恢復設定。

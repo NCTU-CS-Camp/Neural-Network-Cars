@@ -1,7 +1,7 @@
 import pygame
 
-from backend.settings import SCREEN_SIZE
-from backend.track_generator import generate_random_map
+from game_engine.backend.settings import SCREEN_SIZE
+from game_engine.backend.track_generator import generate_random_map
 
 
 def main():

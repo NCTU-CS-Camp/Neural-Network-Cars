@@ -3,7 +3,7 @@ import random
 import pygame
 from PIL import Image
 
-from backend.settings import TRACK_ASSETS_DIR, TRACK_BACK_PATH, TRACK_FRONT_PATH
+from game_engine.backend.settings import TRACK_ASSETS_DIR, TRACK_BACK_PATH, TRACK_FRONT_PATH
 
 
 class Cell:

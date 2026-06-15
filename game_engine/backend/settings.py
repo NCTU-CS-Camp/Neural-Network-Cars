@@ -1,7 +1,7 @@
 from pathlib import Path
 
-# settings.py 所在套件的上一層就是專案根目錄
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# settings.py 位於 game_engine/backend/，往上兩層才是專案根目錄
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 IMAGES_DIR = PROJECT_ROOT / "Images"
 SPRITES_DIR = IMAGES_DIR / "Sprites"

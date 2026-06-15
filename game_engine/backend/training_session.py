@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.genetic import (
+from GA.genetic import (
     mutateOneBiasesGene,
     mutateOneWeightGene,
     uniformCrossOverBiases,
@@ -112,4 +112,3 @@ class TrainingSession:
 
         self.clear_selection()
         return next_population
-
