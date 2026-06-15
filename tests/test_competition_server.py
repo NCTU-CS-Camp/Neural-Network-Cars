@@ -4,9 +4,11 @@ import time
 
 from fastapi.testclient import TestClient
 
+from game_engine.frontend.replay_client import ReplayCar, ReplaySession
 from server.app import create_app
 from server.evaluator import OfficialEvaluator
 from server.models import EvaluationResult, TrackScore
+from server.seed_demo_players import seed_demo_players
 from server.storage import CompetitionStorage
 from shared.contracts import EXPECTED_LAYER_SIZES, WeightPayload
 
@@ -175,6 +177,101 @@ def test_admin_token_controls_reset_and_featured_replay(tmp_path):
     assert featured.status_code == 200
     assert replay_items[0]["submission_id"] == submission_id
     assert reset.status_code == 200
+
+
+def test_seed_demo_players_creates_five_leaderboard_rows_and_replay_items(tmp_path):
+    storage = CompetitionStorage(tmp_path / "competition.db")
+    seed_demo_players(
+        storage=storage,
+        evaluator=FakeEvaluator(),
+        count=5,
+        seed=42,
+    )
+    app = create_app(
+        storage=storage,
+        evaluator=FakeEvaluator(),
+        start_worker=False,
+        admin_token="secret",
+    )
+
+    with TestClient(app) as client:
+        leaderboard = client.get("/api/leaderboard").json()
+        replay_items = client.get("/api/replay/top?n=5").json()["items"]
+
+    assert len(leaderboard) == 5
+    assert {row["nickname"] for row in leaderboard} == {
+        "player1",
+        "player2",
+        "player3",
+        "player4",
+        "player5",
+    }
+    assert len(replay_items) == 5
+
+
+def test_replay_top_keeps_featured_submission_first_with_five_players(tmp_path):
+    storage = CompetitionStorage(tmp_path / "competition.db")
+    submissions = seed_demo_players(
+        storage=storage,
+        evaluator=FakeEvaluator(),
+        count=5,
+        seed=42,
+    )
+    featured_submission_id = submissions[-1]["submission_id"]
+    storage.set_featured_submission(featured_submission_id)
+
+    replay_items = storage.replay_top(5)
+
+    assert len(replay_items) == 5
+    assert replay_items[0]["submission_id"] == featured_submission_id
+
+
+class FakeReplayCar:
+    def __init__(self, collisions: list[bool]) -> None:
+        self.collisions = collisions
+        self.collided = False
+        self.update_count = 0
+        self.feedforward_count = 0
+        self.action_count = 0
+        self.x = 120
+        self.y = 480
+
+    def update(self) -> None:
+        self.update_count += 1
+
+    def collision(self) -> bool:
+        if self.collisions:
+            return self.collisions.pop(0)
+        return False
+
+    def feedforward(self) -> None:
+        self.feedforward_count += 1
+
+    def takeAction(self) -> None:
+        self.action_count += 1
+
+
+def test_replay_session_stops_crashed_car_but_keeps_others_running():
+    crashed_car = FakeReplayCar([True])
+    running_car = FakeReplayCar([False, False])
+    session = ReplaySession(
+        cars=[
+            ReplayCar({"nickname": "crash"}, crashed_car, (255, 0, 0)),
+            ReplayCar({"nickname": "run"}, running_car, (0, 255, 0)),
+        ],
+        frame_limit=2,
+    )
+
+    assert session.tick() is False
+    assert session.cars[0].crashed is True
+    assert crashed_car.update_count == 1
+    assert running_car.update_count == 1
+    assert running_car.action_count == 1
+
+    assert session.tick() is True
+    assert crashed_car.update_count == 1
+    assert running_car.update_count == 2
+    assert running_car.action_count == 2
 
 
 def test_official_evaluator_is_deterministic():

@@ -4,6 +4,7 @@ import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -13,16 +14,19 @@ from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car
 from game_engine.backend.serialization import apply_weight_payload
 from game_engine.backend.settings import (
+    DEFAULT_TRACK_BACK_PATH,
+    DEFAULT_TRACK_FRONT_PATH,
     FPS,
     MAX_SPEED,
     SCREEN_SIZE,
     TRACK_BACK_PATH,
     TRACK_FRONT_PATH,
     WHITE,
-    DEFAULT_TRACK_BACK_PATH,
-    DEFAULT_TRACK_FRONT_PATH,
 )
 from shared.contracts import EXPECTED_LAYER_SIZES, WeightPayload
+
+
+Color = tuple[int, int, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +37,34 @@ class ReplayTrack:
     spawn_x: float
     spawn_y: float
     spawn_angle: float = 180.0
+
+
+@dataclass(slots=True)
+class ReplayCar:
+    item: dict[str, Any]
+    car: Any
+    color: Color
+    crashed: bool = False
+
+    @property
+    def nickname(self) -> str:
+        return str(self.item.get("nickname", "unknown"))
+
+    @property
+    def official_score(self) -> float:
+        return float(self.item.get("official_score") or 0.0)
+
+
+@dataclass(slots=True)
+class ReplaySession:
+    cars: list[ReplayCar]
+    frame_limit: int
+    frames: int = 0
+
+    def tick(self) -> bool:
+        update_replay_cars(self.cars)
+        self.frames += 1
+        return self.frames >= self.frame_limit
 
 
 REPLAY_TRACKS = {
@@ -58,6 +90,15 @@ REPLAY_TRACKS = {
         480.0,
     ),
 }
+SIMULTANEOUS_TRACK_ID = "official-default"
+REPLAY_COLORS: list[Color] = [
+    (60, 145, 255),
+    (255, 196, 70),
+    (85, 220, 145),
+    (255, 95, 115),
+    (190, 130, 255),
+]
+DIM_COLOR: Color = (95, 105, 115)
 
 
 def run(server_url: str = "http://127.0.0.1:8000", top_n: int = 5) -> None:
@@ -69,29 +110,10 @@ def run(server_url: str = "http://127.0.0.1:8000", top_n: int = 5) -> None:
     small_font = pygame.font.Font("freesansbold.ttf", 18)
     assets = load_game_assets()
 
-    items: list[dict] = []
-    item_index = 0
-    car: Car | None = None
+    session: ReplaySession | None = None
     background: pygame.Surface | None = None
     status = "Waiting for replay data"
     next_refresh_at = 0.0
-    frames = 0
-
-    def load_item(item: dict) -> tuple[Car, pygame.Surface]:
-        track_id = str(item.get("best_track_id") or "official-default")
-        track = REPLAY_TRACKS.get(track_id) or REPLAY_TRACKS["official-default"]
-        collision_map = pygame.image.load(track.back_path)
-        configure_car(collision_map, assets.green_small_car, MAX_SPEED)
-        loaded_car = Car(list(EXPECTED_LAYER_SIZES))
-        apply_weight_payload(loaded_car, WeightPayload.from_dict(item["payload"]))
-        loaded_car.x = track.spawn_x
-        loaded_car.y = track.spawn_y
-        loaded_car.angle = track.spawn_angle
-        loaded_car.velocity = 0
-        loaded_car.acceleration = 0
-        loaded_car.score = 0
-        loaded_car.collided = False
-        return loaded_car, pygame.image.load(track.front_path)
 
     while True:
         for event in pygame.event.get():
@@ -101,44 +123,32 @@ def run(server_url: str = "http://127.0.0.1:8000", top_n: int = 5) -> None:
 
         now = time.monotonic()
         if now >= next_refresh_at:
-            next_refresh_at = now + 5.0
             try:
                 items = fetch_replay_items(server_url, top_n)
                 if items:
-                    item_index %= len(items)
-                    car, background = load_item(items[item_index])
-                    frames = 0
-                    status = "Connected"
+                    session, background = load_replay_scene(items, assets, top_n)
+                    status = f"Connected: {len(session.cars)} cars"
+                    next_refresh_at = now + 60.0
                 else:
-                    car = None
+                    session = None
                     background = None
                     status = "Waiting for evaluated submissions"
+                    next_refresh_at = now + 5.0
             except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+                session = None
+                background = None
                 status = f"Disconnected: {exc}"
+                next_refresh_at = now + 5.0
 
         screen.fill((0, 0, 0))
-        if car and background and items:
-            item = items[item_index]
+        if session and background:
             screen.blit(background, (0, 0))
-            try:
-                if not car.collided:
-                    car.update()
-                    if car.collision():
-                        car.collided = True
-                    else:
-                        car.feedforward()
-                        car.takeAction()
-                car.draw(screen)
-            except (IndexError, pygame.error):
-                car.collided = True
-
-            frames += 1
-            if car.collided or frames >= FPS * 60:
-                item_index = (item_index + 1) % len(items)
-                car, background = load_item(items[item_index])
-                frames = 0
-
-            draw_overlay(screen, font, small_font, item, status)
+            round_finished = session.tick()
+            draw_replay_cars(screen, small_font, session.cars)
+            draw_overlay(screen, font, small_font, session, status)
+            if round_finished:
+                session = None
+                next_refresh_at = 0.0
         else:
             text = font.render(status, True, WHITE)
             screen.blit(text, (32, 32))
@@ -147,31 +157,115 @@ def run(server_url: str = "http://127.0.0.1:8000", top_n: int = 5) -> None:
         clock.tick(FPS)
 
 
-def fetch_replay_items(server_url: str, top_n: int) -> list[dict]:
+def fetch_replay_items(server_url: str, top_n: int) -> list[dict[str, Any]]:
     url = server_url.rstrip("/") + f"/api/replay/top?n={top_n}"
     with urlopen(url, timeout=5.0) as response:
         data = json.loads(response.read().decode("utf-8"))
     return list(data.get("items", []))
 
 
+def load_replay_scene(
+    items: list[dict[str, Any]],
+    assets: Any,
+    top_n: int = 5,
+) -> tuple[ReplaySession, pygame.Surface]:
+    track = REPLAY_TRACKS[SIMULTANEOUS_TRACK_ID]
+    collision_map = pygame.image.load(track.back_path)
+    configure_car(collision_map, assets.green_small_car, MAX_SPEED)
+
+    replay_cars = [
+        build_replay_car(
+            item=item,
+            color=REPLAY_COLORS[index % len(REPLAY_COLORS)],
+            track=track,
+            car_image=assets.green_small_car,
+        )
+        for index, item in enumerate(items[:top_n])
+    ]
+    background = pygame.image.load(track.front_path)
+    return ReplaySession(replay_cars, FPS * 60), background
+
+
+def build_replay_car(
+    *,
+    item: dict[str, Any],
+    color: Color,
+    track: ReplayTrack,
+    car_image: pygame.Surface | None,
+) -> ReplayCar:
+    car = Car(list(EXPECTED_LAYER_SIZES))
+    apply_weight_payload(car, WeightPayload.from_dict(item["payload"]))
+    car.reset_state(
+        track.spawn_x,
+        track.spawn_y,
+        angle=track.spawn_angle,
+        car_image=car_image,
+    )
+    return ReplayCar(item=item, car=car, color=color)
+
+
+def update_replay_cars(replay_cars: list[ReplayCar]) -> None:
+    for replay_car in replay_cars:
+        step_replay_car(replay_car)
+
+
+def step_replay_car(replay_car: ReplayCar) -> None:
+    if replay_car.crashed:
+        return
+
+    car = replay_car.car
+    try:
+        car.update()
+        if car.collision():
+            car.collided = True
+            replay_car.crashed = True
+            return
+        car.feedforward()
+        car.takeAction()
+    except (IndexError, pygame.error):
+        car.collided = True
+        replay_car.crashed = True
+
+
+def draw_replay_cars(
+    screen: pygame.Surface,
+    font: pygame.font.Font,
+    replay_cars: list[ReplayCar],
+) -> None:
+    for replay_car in replay_cars:
+        color = DIM_COLOR if replay_car.crashed else replay_car.color
+        replay_car.car.draw(screen)
+        x = int(replay_car.car.x)
+        y = int(replay_car.car.y)
+        pygame.draw.circle(screen, color, (x, y), 7)
+        label = font.render(replay_car.nickname, True, color)
+        screen.blit(label, (x + 10, y - 28))
+
+
 def draw_overlay(
     screen: pygame.Surface,
     font: pygame.font.Font,
     small_font: pygame.font.Font,
-    item: dict,
+    session: ReplaySession,
     status: str,
 ) -> None:
-    nickname = item.get("nickname", "unknown")
-    score = item.get("official_score") or 0.0
-    best_track_score = item.get("best_track_score") or 0.0
-    lines = [
-        f"{nickname}",
-        f"Total: {score:.1f}",
-        f"Best track: {best_track_score:.1f}",
-        status,
-    ]
-    y = 24
-    for index, line in enumerate(lines):
-        rendered = (font if index == 0 else small_font).render(line, True, WHITE)
+    title = font.render("Top 5 Simultaneous Replay", True, WHITE)
+    screen.blit(title, (24, 24))
+    subtitle = small_font.render(
+        f"{status}  |  Frame {session.frames}/{session.frame_limit}",
+        True,
+        (210, 218, 226),
+    )
+    screen.blit(subtitle, (24, 56))
+
+    y = 92
+    for index, replay_car in enumerate(session.cars, start=1):
+        color = DIM_COLOR if replay_car.crashed else replay_car.color
+        state = "crashed" if replay_car.crashed else "running"
+        line = (
+            f"#{index} {replay_car.nickname}  "
+            f"{replay_car.official_score:.1f}  {state}"
+        )
+        rendered = small_font.render(line, True, color)
         screen.blit(rendered, (24, y))
         y += rendered.get_height() + 8
