@@ -10,6 +10,12 @@ collision_surface = None
 default_car_image = None
 maxspeed = MAX_SPEED
 
+# Map is quantised into square cells of this size (px) to measure exploration
+# coverage for the fitness "coverage" feature.
+GRID_CELL_SIZE = 50
+# Below this speed a car is considered stalled (feeds low_speed_frames).
+STALL_SPEED = 0.5
+
 
 def configure_car(collision_map, car_image, max_speed=MAX_SPEED):
     global collision_surface, default_car_image, maxspeed
@@ -59,6 +65,42 @@ class Car:
     self.collided = False
     self.color = WHITE
     self.car_image = default_car_image
+
+    # Per-run metrics consumed by the fitness features (GA/fitness.py).
+    self.frames_alive = 0
+    self.spawn_x = self.x
+    self.spawn_y = self.y
+    self.max_dist = 0.0
+    self.visited_cells = set()
+    self.low_speed_frames = 0
+
+  def track_run_metrics(self):
+    """Advance per-run metrics by one simulation step. Call once per update."""
+    self.frames_alive += 1
+
+    dx = self.x - self.spawn_x
+    dy = self.y - self.spawn_y
+    dist = (dx * dx + dy * dy) ** 0.5
+    if dist > self.max_dist:
+        self.max_dist = dist
+
+    self.visited_cells.add(
+        (int(self.x // GRID_CELL_SIZE), int(self.y // GRID_CELL_SIZE))
+    )
+
+    if self.velocity < STALL_SPEED:
+        self.low_speed_frames += 1
+    else:
+        self.low_speed_frames = 0
+
+  def reset_run_metrics(self):
+    """Reset metrics for a fresh run, recapturing the current position as spawn."""
+    self.frames_alive = 0
+    self.spawn_x = self.x
+    self.spawn_y = self.y
+    self.max_dist = 0.0
+    self.visited_cells = set()
+    self.low_speed_frames = 0
 
   def set_accel(self, accel):
     self.acceleration = accel
@@ -131,6 +173,8 @@ class Car:
     self.d4 = int(calculateDistance(self.center[0], self.center[1], self.c4[0], self.c4[1]))
     self.d5 = int(calculateDistance(self.center[0], self.center[1], self.c5[0], self.c5[1]))
 
+    self.track_run_metrics()
+
   def draw(self, display):
     rotated_image = pygame.transform.rotate(self.car_image, -self.angle-180)
     rect_rotated_image = rotated_image.get_rect()
@@ -187,6 +231,7 @@ class Car:
       self.a = self.x-(self.width/2), self.y + self.height-(self.height/2)
       if car_image is not None:
           self.car_image = car_image
+      self.reset_run_metrics()
 
   def takeAction(self):
     if self.outp.item(0) > 0.5:

@@ -4,7 +4,7 @@ from shapely.geometry.polygon import Polygon
 
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
-from GA.fitness import get_fitness_strategy
+from GA.fitness import get_fitness_strategy, list_strategies, score_population
 from game_engine.backend.settings import (
     HIDDEN_LAYER,
     INPUT_LAYER,
@@ -33,6 +33,7 @@ def run():
     clock = pygame.time.Clock()
 
     configure_car(assets.bg4, assets.white_small_car, MAX_SPEED)
+    fitness_strategy_names = list_strategies()
     fitness_strategy = get_fitness_strategy(session.fitness_strategy)
 
     bg = assets.bg
@@ -52,13 +53,14 @@ def run():
     text3 = font.render("RMB - Delete", True, WHITE)
     text4 = font.render("L - Show/Hide Lines", True, WHITE)
     text5 = font.render("R - Reset", True, WHITE)
-    text6 = font.render("B - Breed", True, WHITE)
+    text6 = font.render("B - Breed (auto top2)", True, WHITE)
     text7 = font.render("C - Clean", True, WHITE)
     text8 = font.render("N - Next Track", True, WHITE)
     text9 = font.render("A - Toggle Player", True, WHITE)
     text10 = font.render("D - Toggle Info", True, WHITE)
     text11 = font.render("M - Breed and Next Track", True, WHITE)
     text12 = font.render("F1..F4 - Switch Scenes", True, WHITE)
+    text13 = font.render("F - Cycle Fitness", True, WHITE)
     text1_rect = text1.get_rect().move(info_x, info_y)
     text2_rect = text2.get_rect().move(info_x, info_y + text1_rect.height)
     text3_rect = text3.get_rect().move(info_x, info_y + 2 * text1_rect.height)
@@ -71,6 +73,7 @@ def run():
     text10_rect = text10.get_rect().move(info_x, info_y + 9 * text1_rect.height)
     text11_rect = text11.get_rect().move(info_x, info_y + 10 * text1_rect.height)
     text12_rect = text12.get_rect().move(info_x, info_y + 11 * text1_rect.height)
+    text13_rect = text13.get_rect().move(info_x, info_y + 12 * text1_rect.height)
 
     def persist_settings():
         settings.mutation_rate = session.mutation_rate
@@ -161,6 +164,13 @@ def run():
         info_text9_rect = info_text9.get_rect().move(
             info_text_x, info_text_y + 8 * info_text1_rect.height
         )
+        best_fitness = 0.0
+        if nn_cars:
+            best_fitness = max(score_population(nn_cars, session.fitness_strategy))
+        info_text10 = font.render(f"Best fit: {best_fitness:.2f}", True, WHITE)
+        info_text10_rect = info_text10.get_rect().move(
+            info_text_x, info_text_y + 9 * info_text1_rect.height
+        )
 
         game_display.blit(text1, text1_rect)
         game_display.blit(text2, text2_rect)
@@ -174,6 +184,7 @@ def run():
         game_display.blit(text10, text10_rect)
         game_display.blit(text11, text11_rect)
         game_display.blit(text12, text12_rect)
+        game_display.blit(text13, text13_rect)
 
         game_display.blit(info_text1, info_text1_rect)
         game_display.blit(info_text2, info_text2_rect)
@@ -184,11 +195,16 @@ def run():
         game_display.blit(info_text7, info_text7_rect)
         game_display.blit(info_text8, info_text8_rect)
         game_display.blit(info_text9, info_text9_rect)
+        game_display.blit(info_text10, info_text10_rect)
 
     def breed_selected():
         nonlocal nn_cars
         if len(session.selected_cars) != 2:
-            return False
+            # No manual pick: breed from the best two under the current strategy.
+            top = session.select_top_cars(nn_cars, session.fitness_strategy, k=2)
+            if len(top) < 2:
+                return False
+            session.selected_cars = list(top)
         nn_cars = session.breed_population(
             population=nn_cars,
             aux_car=aux_car,
@@ -257,6 +273,14 @@ def run():
                     session.show_player = not session.show_player
                 if event.key == ord("d"):
                     session.show_debug_overlay = not session.show_debug_overlay
+                if event.key == ord("f"):
+                    names = fitness_strategy_names
+                    try:
+                        idx = names.index(session.fitness_strategy)
+                    except ValueError:
+                        idx = -1
+                    session.fitness_strategy = names[(idx + 1) % len(names)]
+                    fitness_strategy = get_fitness_strategy(session.fitness_strategy)
                 if event.key == ord("n"):
                     number_track = 2
                     session.track_index = 2

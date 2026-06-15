@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from GA.fitness import score_population
 from GA.genetic import (
     mutateOneBiasesGene,
     mutateOneWeightGene,
@@ -55,6 +56,21 @@ class TrainingSession:
         self.generation += 1
         self.alive_count = self.population_size
         self.clear_selection()
+
+    def select_top_cars(
+        self,
+        population: list[Any],
+        strategy_name: str,
+        k: int = 2,
+        custom_weights: dict[str, float] | None = None,
+    ) -> list[Any]:
+        """Return the ``k`` highest-fitness cars under the given strategy.
+
+        Returns fewer than ``k`` only when the population is smaller. Ties never
+        compare the cars themselves (only their scores)."""
+        scores = score_population(population, strategy_name, custom_weights)
+        ranked = sorted(range(len(population)), key=lambda i: scores[i], reverse=True)
+        return [population[i] for i in ranked[:k]]
 
     def mark_collision(self, car: Any) -> bool:
         if getattr(car, "yaReste", False):
