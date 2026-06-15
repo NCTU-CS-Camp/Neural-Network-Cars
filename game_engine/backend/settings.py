@@ -6,9 +6,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 IMAGES_DIR = PROJECT_ROOT / "Images"
 SPRITES_DIR = IMAGES_DIR / "Sprites"
 TRACK_ASSETS_DIR = IMAGES_DIR / "TracksMapGen"
+TRACKS_DIR = IMAGES_DIR / "Tracks"
 
-TRACK_BACK_PATH = PROJECT_ROOT / "randomGeneratedTrackBack.png"
-TRACK_FRONT_PATH = PROJECT_ROOT / "randomGeneratedTrackFront.png"
+DEFAULT_TRACK_BACK_PATH = TRACKS_DIR / "bg4.png"
+DEFAULT_TRACK_FRONT_PATH = TRACKS_DIR / "bg7.png"
+TRACK_BACK_PATH = TRACKS_DIR / "randomGeneratedTrackBack.png"
+TRACK_FRONT_PATH = TRACKS_DIR / "randomGeneratedTrackFront.png"
 
 SCREEN_SIZE = WIDTH, HEIGHT = 1600, 900
 FPS = 30
