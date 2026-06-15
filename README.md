@@ -66,9 +66,9 @@ GA/          genetic operators 與 fitness strategy
 shared/     共用資料契約
 server/     submission 與 replay 服務
 Images/     車輛 sprite 與賽道生成素材
+Images/Tracks/  預設賽道與隨機產生賽道圖片
+docs/       專案設計與協作文件
 settings.json  本地執行設定
-design-doc.md  專案架構與三隊分工設計文件
-team-issue-breakdown.md  三隊建議任務拆分
 ```
 
 ## 啟動方式
@@ -104,4 +104,4 @@ uv run mypy game_engine GA server shared
 - `UI Team`：建議從 `game_engine/frontend/scenes.py`、`game_engine/frontend/widgets.py`、`game_engine/frontend/config_store.py`、`game_engine/frontend/app.py` 開始。
 - `BE Team`：建議從 `server/app.py`、`server/models.py`、`server/storage.py`、`shared/contracts.py` 開始。
 
-若要看較完整的規劃，請參考 [design-doc.md](design-doc.md)。
+若要看較完整的規劃，請參考 [docs/design-doc.md](docs/design-doc.md)。

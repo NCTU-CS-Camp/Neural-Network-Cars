@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`game_engine/frontend/app.py` contains the main Pygame loop and training UI. Core simulation, geometry, assets, settings, and track generation live in `game_engine/backend/`. Genetic operators and fitness strategies live in `GA/`. Root entry points such as `main.py` and `mapGen.py` are thin launch scripts. Visual assets are stored in `Images/`, with car sprites in `Images/Sprites/` and track tiles in `Images/TracksMapGen/`. Generated track images such as `randomGeneratedTrackFront.png` are repository outputs, not source modules.
+`game_engine/frontend/app.py` contains the main Pygame loop and training UI. Core simulation, geometry, assets, settings, and track generation live in `game_engine/backend/`. Genetic operators and fitness strategies live in `GA/`. Root entry points such as `main.py` and `mapGen.py` are thin launch scripts. Visual assets are stored in `Images/`, with car sprites in `Images/Sprites/`, track tiles in `Images/TracksMapGen/`, and playable/generated track images in `Images/Tracks/`.
 
 ## Build, Test, and Development Commands
 Use `uv` for environment management and `rtk` as the shell wrapper used in this workspace.

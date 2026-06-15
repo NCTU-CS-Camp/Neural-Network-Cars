@@ -2,7 +2,11 @@ from dataclasses import dataclass
 
 import pygame
 
-from game_engine.backend.settings import PROJECT_ROOT, SPRITES_DIR
+from game_engine.backend.settings import (
+    DEFAULT_TRACK_BACK_PATH,
+    DEFAULT_TRACK_FRONT_PATH,
+    SPRITES_DIR,
+)
 
 
 @dataclass
@@ -21,6 +25,6 @@ def load_game_assets():
         white_big_car=pygame.image.load(SPRITES_DIR / "white_big.png"),
         green_small_car=pygame.image.load(SPRITES_DIR / "green_small.png"),
         green_big_car=pygame.image.load(SPRITES_DIR / "green_big.png"),
-        bg=pygame.image.load(PROJECT_ROOT / "bg7.png"),
-        bg4=pygame.image.load(PROJECT_ROOT / "bg4.png"),
+        bg=pygame.image.load(DEFAULT_TRACK_FRONT_PATH),
+        bg4=pygame.image.load(DEFAULT_TRACK_BACK_PATH),
     )
