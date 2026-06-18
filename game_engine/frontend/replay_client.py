@@ -59,11 +59,18 @@ class ReplayCar:
 class ReplaySession:
     cars: list[ReplayCar]
     frame_limit: int
+    crash_hold_frames: int = FPS * 2
     frames: int = 0
+    all_crashed_at_frame: int | None = None
 
     def tick(self) -> bool:
         update_replay_cars(self.cars)
         self.frames += 1
+        if self.cars and all(replay_car.crashed for replay_car in self.cars):
+            if self.all_crashed_at_frame is None:
+                self.all_crashed_at_frame = self.frames
+            held_frames = self.frames - self.all_crashed_at_frame
+            return held_frames >= self.crash_hold_frames
         return self.frames >= self.frame_limit
 
 
