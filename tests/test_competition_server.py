@@ -260,6 +260,7 @@ def test_replay_session_stops_crashed_car_but_keeps_others_running():
             ReplayCar({"nickname": "run"}, running_car, (0, 255, 0)),
         ],
         frame_limit=2,
+        crash_hold_frames=1,
     )
 
     assert session.tick() is False
@@ -272,6 +273,26 @@ def test_replay_session_stops_crashed_car_but_keeps_others_running():
     assert crashed_car.update_count == 1
     assert running_car.update_count == 2
     assert running_car.action_count == 2
+
+
+def test_replay_session_restarts_after_all_cars_crash_and_hold_expires():
+    first_car = FakeReplayCar([True])
+    second_car = FakeReplayCar([True])
+    session = ReplaySession(
+        cars=[
+            ReplayCar({"nickname": "one"}, first_car, (255, 0, 0)),
+            ReplayCar({"nickname": "two"}, second_car, (0, 255, 0)),
+        ],
+        frame_limit=60,
+        crash_hold_frames=2,
+    )
+
+    assert session.tick() is False
+    assert session.all_crashed_at_frame == 1
+    assert session.tick() is False
+    assert session.tick() is True
+    assert first_car.update_count == 1
+    assert second_car.update_count == 1
 
 
 def test_official_evaluator_is_deterministic():
