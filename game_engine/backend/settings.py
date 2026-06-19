@@ -27,3 +27,19 @@ INPUT_LAYER = 6
 HIDDEN_LAYER = 6
 OUTPUT_LAYER = 4
 NUM_OF_NN_CARS = 50
+
+# Placeholder difficulty map pools (1, 2, 3 stars). Training and validation each
+# get their own pool so a record's training tracks never overlap with the tracks
+# used to validate it. Every entry points at the same static track for now until
+# real difficulty-scaled assets are supplied.
+TRAINING_DIFFICULTY_MAPS: dict[int, tuple[Path, Path]] = {
+    1: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
+    2: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
+    3: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
+}
+
+VALIDATION_DIFFICULTY_MAPS: dict[int, tuple[Path, Path]] = {
+    1: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
+    2: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
+    3: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
+}

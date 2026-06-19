@@ -1,10 +1,14 @@
+from datetime import UTC, datetime
+
 import pygame
 from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
 
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
-from GA.fitness import get_fitness_strategy
+from GA.fitness import get_fitness_strategy, select_best_car
+from game_engine.backend.record_store import RecordStore
+from game_engine.backend.serialization import export_weight_payload
 from game_engine.backend.settings import (
     HIDDEN_LAYER,
     INPUT_LAYER,
@@ -13,29 +17,63 @@ from game_engine.backend.settings import (
     SCREEN_SIZE,
     TRACK_BACK_PATH,
     TRACK_FRONT_PATH,
+    TRAINING_DIFFICULTY_MAPS,
     WHITE,
 )
 from game_engine.backend.track_generator import generate_random_map
 from game_engine.backend.training_session import TrainingSession
 from game_engine.frontend.config_store import load_runtime_settings, save_runtime_settings
+from game_engine.frontend.profile_store import load_login_profile
 from game_engine.frontend.scenes import AppShell
+from game_engine.frontend.screens import (
+    AppQuit,
+    run_login_screen,
+    run_main_menu_screen,
+    run_record_name_screen,
+    run_save_confirm_screen,
+    run_training_config_screen,
+    run_validation_list_screen,
+)
+from game_engine.frontend.widgets import Button
+from shared.contracts import TrainingRecord
 
 
 def run():
     pygame.init()
+    screen = pygame.display.set_mode(SCREEN_SIZE)
 
-    settings = load_runtime_settings()
+    try:
+        profile = load_login_profile() or run_login_screen(screen)
+        settings = load_runtime_settings()
+        settings.nickname = profile.username
+
+        while True:
+            choice = run_main_menu_screen(screen, profile)
+            if choice == "training":
+                fitness_config, map_difficulty = run_training_config_screen(screen)
+                run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
+            else:
+                run_validation_list_screen(screen)
+    except AppQuit:
+        pass
+
+    pygame.quit()
+
+
+def run_training_loop(screen, settings, profile, fitness_config, map_difficulty):
     session = TrainingSession.from_settings(settings)
     shell = AppShell(settings)
 
     assets = load_game_assets()
-    game_display = pygame.display.set_mode(SCREEN_SIZE)
+    game_display = screen
     clock = pygame.time.Clock()
 
-    configure_car(assets.bg4, assets.white_small_car, MAX_SPEED)
+    front_path, back_path = TRAINING_DIFFICULTY_MAPS[map_difficulty]
+    bg = pygame.image.load(front_path)
+    bg4 = pygame.image.load(back_path)
+    configure_car(bg4, assets.white_small_car, MAX_SPEED)
     fitness_strategy = get_fitness_strategy(session.fitness_strategy)
 
-    bg = assets.bg
     number_track = 1
     frames = 0
     layer_sizes = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
@@ -43,6 +81,8 @@ def run():
     car = Car(layer_sizes)
     aux_car = Car(layer_sizes)
     nn_cars = [Car(layer_sizes) for _ in range(session.population_size)]
+
+    back_button = Button("Back (Esc)", pygame.Rect(SCREEN_SIZE[0] - 200, 16, 180, 44))
 
     info_x = 1365
     info_y = 600
@@ -228,18 +268,49 @@ def run():
         shell.current_scene.render_overlay(game_display, font)
         if session.show_debug_overlay:
             display_texts()
+
+        back_button.update_hover(pygame.mouse.get_pos())
+        back_button.draw(game_display, font)
+
         pygame.display.update()
+
+    def save_training_record():
+        best_car = select_best_car(nn_cars, fitness_config)
+        payload = export_weight_payload(
+            best_car,
+            generation=session.generation,
+            track_id=f"training-{map_difficulty}",
+            track_seed=settings.track_seed,
+            nickname=profile.username,
+        )
+        record_name = run_record_name_screen(screen)
+        record = TrainingRecord(
+            record_id="",
+            record_name=record_name,
+            saved_at=datetime.now(UTC).isoformat(),
+            group_id=profile.group_id,
+            username=profile.username,
+            layer_sizes=payload.layer_sizes,
+            weights=payload.weights,
+            biases=payload.biases,
+            fitness_config=fitness_config,
+            map_difficulty=map_difficulty,
+        )
+        RecordStore().save_record(record)
 
     apply_sensor_line_state()
 
     while True:
+        leave_requested = False
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 persist_settings()
-                pygame.quit()
-                return
+                raise AppQuit()
 
             if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    leave_requested = True
                 if event.key == pygame.K_F1:
                     shell.set_scene("home")
                 if event.key == pygame.K_F2:
@@ -307,28 +378,31 @@ def run():
                 mouse_buttons = pygame.mouse.get_pressed()
                 if mouse_buttons[0]:
                     pos = pygame.mouse.get_pos()
-                    point = Point(pos[0], pos[1])
-                    for nn_car in nn_cars:
-                        polygon = Polygon([nn_car.a, nn_car.b, nn_car.c, nn_car.d])
-                        if polygon.contains(point):
-                            was_selected = nn_car in session.selected_cars
-                            session.toggle_selected_car(nn_car)
-                            if was_selected:
-                                if nn_car.car_image == assets.white_big_car:
-                                    nn_car.car_image = assets.white_small_car
-                                if nn_car.car_image == assets.green_big_car:
-                                    nn_car.car_image = assets.green_small_car
-                            elif nn_car in session.selected_cars:
-                                if nn_car.car_image == assets.white_small_car:
-                                    nn_car.car_image = assets.white_big_car
-                                if nn_car.car_image == assets.green_small_car:
-                                    nn_car.car_image = assets.green_big_car
-                            if nn_car.collided:
-                                nn_car.velocity = 0
-                                nn_car.acceleration = 0
-                            if not nn_car.collided:
-                                nn_car.update()
-                            break
+                    if back_button.contains(pos):
+                        leave_requested = True
+                    else:
+                        point = Point(pos[0], pos[1])
+                        for nn_car in nn_cars:
+                            polygon = Polygon([nn_car.a, nn_car.b, nn_car.c, nn_car.d])
+                            if polygon.contains(point):
+                                was_selected = nn_car in session.selected_cars
+                                session.toggle_selected_car(nn_car)
+                                if was_selected:
+                                    if nn_car.car_image == assets.white_big_car:
+                                        nn_car.car_image = assets.white_small_car
+                                    if nn_car.car_image == assets.green_big_car:
+                                        nn_car.car_image = assets.green_small_car
+                                elif nn_car in session.selected_cars:
+                                    if nn_car.car_image == assets.white_small_car:
+                                        nn_car.car_image = assets.white_big_car
+                                    if nn_car.car_image == assets.green_small_car:
+                                        nn_car.car_image = assets.green_big_car
+                                if nn_car.collided:
+                                    nn_car.velocity = 0
+                                    nn_car.acceleration = 0
+                                if not nn_car.collided:
+                                    nn_car.update()
+                                break
 
                 if mouse_buttons[2]:
                     pos = pygame.mouse.get_pos()
@@ -341,6 +415,12 @@ def run():
                                 if not nn_car.collided:
                                     session.alive_count = max(0, session.alive_count - 1)
                             break
+
+        if leave_requested:
+            persist_settings()
+            if run_save_confirm_screen(screen):
+                save_training_record()
+            return
 
         keys = pygame.key.get_pressed()
         if keys[pygame.K_LEFT]:

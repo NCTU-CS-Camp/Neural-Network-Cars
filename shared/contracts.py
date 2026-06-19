@@ -76,6 +76,77 @@ class WeightPayload:
 
 
 @dataclass(slots=True)
+class LoginProfile:
+    group_id: str
+    username: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "LoginProfile":
+        return cls(
+            group_id=str(data["group_id"]),
+            username=str(data["username"]),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class FitnessConfig:
+    weights: dict[str, int]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "FitnessConfig":
+        return cls(weights={str(key): int(value) for key, value in data["weights"].items()})
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(slots=True)
+class TrainingRecord:
+    record_id: str
+    record_name: str
+    saved_at: str
+    group_id: str
+    username: str
+    layer_sizes: list[int]
+    weights: list[list[float]]
+    biases: list[list[float]]
+    fitness_config: FitnessConfig
+    map_difficulty: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "TrainingRecord":
+        return cls(
+            record_id=str(data["record_id"]),
+            record_name=str(data["record_name"]),
+            saved_at=str(data["saved_at"]),
+            group_id=str(data["group_id"]),
+            username=str(data["username"]),
+            layer_sizes=[int(size) for size in data["layer_sizes"]],
+            weights=[[float(w) for w in layer] for layer in data["weights"]],
+            biases=[[float(b) for b in layer] for layer in data["biases"]],
+            fitness_config=FitnessConfig.from_dict(data["fitness_config"]),
+            map_difficulty=int(data["map_difficulty"]),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "record_id": self.record_id,
+            "record_name": self.record_name,
+            "saved_at": self.saved_at,
+            "group_id": self.group_id,
+            "username": self.username,
+            "layer_sizes": self.layer_sizes,
+            "weights": self.weights,
+            "biases": self.biases,
+            "fitness_config": self.fitness_config.to_dict(),
+            "map_difficulty": self.map_difficulty,
+        }
+
+
+@dataclass(slots=True)
 class ReplayRequest:
     submission_id: str
     track_seed: int

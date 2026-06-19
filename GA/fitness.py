@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Callable
 
+from shared.contracts import FitnessConfig
+
 
 FitnessStrategy = Callable[[object], float]
 
@@ -42,4 +44,15 @@ def get_fitness_strategy(name: str) -> FitnessStrategy:
 def score_population(population: list[object], strategy_name: str) -> list[float]:
     strategy = get_fitness_strategy(strategy_name)
     return [strategy(car) for car in population]
+
+
+def score_with_config(car: object, fitness_config: FitnessConfig) -> float:
+    return sum(
+        weight * get_fitness_strategy(name)(car)
+        for name, weight in fitness_config.weights.items()
+    )
+
+
+def select_best_car(population: list[object], fitness_config: FitnessConfig) -> object:
+    return max(population, key=lambda car: score_with_config(car, fitness_config))
 
