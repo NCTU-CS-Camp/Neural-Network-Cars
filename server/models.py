@@ -11,6 +11,11 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+class CompetitionPhase(StrEnum):
+    PERSONAL = "personal"
+    GROUP = "group"
+
+
 class SubmissionStatus(StrEnum):
     PENDING = "pending"
     EVALUATING = "evaluating"
@@ -18,32 +23,90 @@ class SubmissionStatus(StrEnum):
     FAILED = "failed"
 
 
-@dataclass(slots=True)
-class TrackScore:
-    track_id: str
-    track_name: str
-    score: float
-    frames_simulated: int
-    collided: bool
+@dataclass(frozen=True, slots=True)
+class CheckpointGate:
+    index: int
+    center: tuple[float, float]
+    a: tuple[float, float]
+    b: tuple[float, float]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CheckpointGate":
+        return cls(
+            index=int(data["index"]),
+            center=(float(data["center"][0]), float(data["center"][1])),
+            a=(float(data["a"][0]), float(data["a"][1])),
+            b=(float(data["b"][0]), float(data["b"][1])),
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            "index": self.index,
+            "center": list(self.center),
+            "a": list(self.a),
+            "b": list(self.b),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class OfficialMap:
+    map_id: str
+    name: str
+    front_path: str
+    back_path: str
+    metadata_path: str
+    spawn_x: float
+    spawn_y: float
+    spawn_angle: float
+    checkpoints: list[CheckpointGate]
+
+    @classmethod
+    def from_metadata(cls, metadata: dict[str, Any]) -> "OfficialMap":
+        spawn = metadata["spawn"]
+        return cls(
+            map_id=str(metadata["map_id"]),
+            name=str(metadata["name"]),
+            front_path=str(metadata["front_path"]),
+            back_path=str(metadata["back_path"]),
+            metadata_path=str(metadata["metadata_path"]),
+            spawn_x=float(spawn["x"]),
+            spawn_y=float(spawn["y"]),
+            spawn_angle=float(spawn.get("angle", 180.0)),
+            checkpoints=[
+                CheckpointGate.from_dict(checkpoint)
+                for checkpoint in metadata["checkpoints"]
+            ],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "map_id": self.map_id,
+            "name": self.name,
+            "front_path": self.front_path,
+            "back_path": self.back_path,
+            "metadata_path": self.metadata_path,
+            "spawn": {
+                "x": self.spawn_x,
+                "y": self.spawn_y,
+                "angle": self.spawn_angle,
+            },
+            "checkpoints": [
+                checkpoint.to_dict() for checkpoint in self.checkpoints
+            ],
+        }
 
 
 @dataclass(slots=True)
 class EvaluationResult:
-    official_score: float
-    track_scores: list[TrackScore]
-    best_track_id: str | None
-    best_track_score: float
+    score_laps: float
+    frames_simulated: int
+    collided: bool
+    checkpoints_completed: int
+    completed_laps: int
+    map_id: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "official_score": self.official_score,
-            "track_scores": [track_score.to_dict() for track_score in self.track_scores],
-            "best_track_id": self.best_track_id,
-            "best_track_score": self.best_track_score,
-        }
+        return asdict(self)
 
 
 def new_submission_id() -> str:

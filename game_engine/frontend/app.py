@@ -408,18 +408,11 @@ def run_training_loop(
                 getattr(nn_car, "fitness_score", getattr(nn_car, "score", 0.0))
             ),
         )
-        track_id = "generated-track" if number_track != 1 else "default-track"
-        fitness_score = float(
-            getattr(best_car, "fitness_score", getattr(best_car, "score", 0.0))
-        )
         result = submit_car(
             server_url=settings.server_url,
             car=best_car,
-            generation=session.generation,
-            track_id=track_id,
-            track_seed=settings.track_seed,
-            nickname=settings.nickname,
-            fitness_score=fitness_score,
+            group_id=profile.group_id,
+            username=profile.username,
         )
         submit_status = result.message
 

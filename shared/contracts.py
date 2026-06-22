@@ -39,6 +39,8 @@ def _float_layers(raw_layers: Any, expected_lengths: list[int], field_name: str)
 
 @dataclass(slots=True)
 class RuntimeSettings:
+    group_id: str = "1"
+    username: str = "player1"
     nickname: str = "player1"
     server_url: str = DEFAULT_SERVER_URL
     fps: int = 30
@@ -54,8 +56,13 @@ class RuntimeSettings:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
         defaults = cls()
+        username = str(
+            data.get("username", data.get("nickname", defaults.username))
+        )
         return cls(
-            nickname=str(data.get("nickname", defaults.nickname)),
+            group_id=str(data.get("group_id", defaults.group_id)),
+            username=username,
+            nickname=str(data.get("nickname", username)),
             server_url=str(data.get("server_url", defaults.server_url)),
             fps=int(data.get("fps", defaults.fps)),
             population_size=int(data.get("population_size", defaults.population_size)),

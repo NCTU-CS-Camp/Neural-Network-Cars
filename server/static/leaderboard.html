@@ -11,16 +11,8 @@
       background: #0f1419;
       color: #f5f7fa;
     }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: #0f1419;
-    }
-    main {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 32px 24px 48px;
-    }
+    body { margin: 0; min-height: 100vh; background: #0f1419; }
+    main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 48px; }
     header {
       display: flex;
       align-items: end;
@@ -30,21 +22,9 @@
       padding-bottom: 20px;
       margin-bottom: 20px;
     }
-    h1 {
-      margin: 0;
-      font-size: 44px;
-      line-height: 1.05;
-      font-weight: 800;
-    }
-    .status {
-      color: #aeb9c5;
-      font-size: 16px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-    }
+    h1 { margin: 0; font-size: 44px; line-height: 1.05; font-weight: 800; }
+    .status { color: #aeb9c5; font-size: 16px; text-align: right; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th, td {
       padding: 16px 14px;
       text-align: left;
@@ -59,40 +39,12 @@
       letter-spacing: 0;
       text-transform: uppercase;
     }
-    tbody tr:first-child {
-      background: #182430;
-    }
-    .rank {
-      width: 72px;
-      color: #aeb9c5;
-      font-weight: 700;
-    }
-    .name {
-      font-size: 22px;
-      font-weight: 800;
-    }
-    .score {
-      font-variant-numeric: tabular-nums;
-      font-weight: 800;
-    }
-    .tracks {
-      color: #b9c5d1;
-      font-variant-numeric: tabular-nums;
-    }
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid #3a4652;
-      border-radius: 999px;
-      padding: 4px 10px;
-      color: #c7d1db;
-      font-size: 13px;
-    }
-    .empty {
-      padding: 48px 16px;
-      color: #9da9b5;
-      text-align: center;
-    }
+    tbody tr:first-child { background: #182430; }
+    .rank { width: 72px; color: #aeb9c5; font-weight: 700; }
+    .name { font-size: 22px; font-weight: 800; }
+    .score { font-variant-numeric: tabular-nums; font-weight: 800; }
+    .muted { color: #b9c5d1; }
+    .empty { padding: 48px 16px; color: #9da9b5; text-align: center; }
   </style>
 </head>
 <body>
@@ -105,24 +57,21 @@
       <thead>
         <tr>
           <th class="rank">Rank</th>
-          <th>Nickname</th>
-          <th>Official Score</th>
-          <th>Track Scores</th>
-          <th>Status</th>
+          <th>Identity</th>
+          <th>Group</th>
+          <th>User</th>
+          <th>Laps</th>
+          <th>Submission</th>
         </tr>
       </thead>
       <tbody id="rows">
-        <tr><td colspan="5" class="empty">Waiting for submissions</td></tr>
+        <tr><td colspan="6" class="empty">Waiting for submissions</td></tr>
       </tbody>
     </table>
   </main>
   <script>
     const rows = document.getElementById("rows");
     const statusEl = document.getElementById("status");
-
-    function scoreText(value) {
-      return value === null || value === undefined ? "-" : Number(value).toFixed(1);
-    }
 
     function escapeHtml(value) {
       return String(value).replace(/[&<>"']/g, (char) => ({
@@ -134,36 +83,68 @@
       }[char]));
     }
 
-    function trackScoresText(trackScores) {
-      if (!trackScores || trackScores.length === 0) return "-";
-      return trackScores.map((track) => scoreText(track.score)).join(" / ");
+    function scoreText(value) {
+      return value === null || value === undefined ? "-" : Number(value).toFixed(3);
     }
 
-    async function refresh() {
-      try {
-        const response = await fetch("/api/leaderboard", { cache: "no-store" });
-        const leaderboard = await response.json();
-        statusEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-        if (leaderboard.length === 0) {
-          rows.innerHTML = '<tr><td colspan="5" class="empty">Waiting for submissions</td></tr>';
-          return;
-        }
-        rows.innerHTML = leaderboard.map((item, index) => `
-          <tr>
-            <td class="rank">#${index + 1}</td>
-            <td class="name">${escapeHtml(item.nickname)}</td>
-            <td class="score">${scoreText(item.official_score)}</td>
-            <td class="tracks">${trackScoresText(item.track_scores)}</td>
-            <td><span class="pill">${item.status}</span></td>
-          </tr>
-        `).join("");
-      } catch (error) {
-        statusEl.textContent = `Disconnected: ${error}`;
+    function renderLeaderboard(leaderboard, phase, mapId) {
+      statusEl.textContent = `${phase} | ${mapId} | ${new Date().toLocaleTimeString()}`;
+      if (!leaderboard || leaderboard.length === 0) {
+        rows.innerHTML = '<tr><td colspan="6" class="empty">Waiting for evaluated submissions</td></tr>';
+        return;
       }
+      rows.innerHTML = leaderboard.map((item) => {
+        const identity = phase === "group" ? item.group_id : item.username;
+        const user = item.best_username || item.username;
+        return `
+          <tr>
+            <td class="rank">#${item.rank}</td>
+            <td class="name">${escapeHtml(identity)}</td>
+            <td class="muted">${escapeHtml(item.group_id)}</td>
+            <td class="muted">${escapeHtml(user)}</td>
+            <td class="score">${scoreText(item.score_laps)}</td>
+            <td class="muted">${escapeHtml(item.submission_id)}</td>
+          </tr>
+        `;
+      }).join("");
     }
 
-    refresh();
-    setInterval(refresh, 1000);
+    async function refreshHttp() {
+      const [stateResponse, leaderboardResponse] = await Promise.all([
+        fetch("/api/state", { cache: "no-store" }),
+        fetch("/api/leaderboard", { cache: "no-store" })
+      ]);
+      const state = await stateResponse.json();
+      const leaderboard = await leaderboardResponse.json();
+      renderLeaderboard(leaderboard, state.active_phase, state.active_map_id);
+    }
+
+    function connectWs() {
+      const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      const ws = new WebSocket(`${protocol}//${location.host}/ws/events`);
+      ws.onopen = () => {
+        statusEl.textContent = "Connected";
+      };
+      ws.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        renderLeaderboard(payload.leaderboard, payload.phase, payload.map.map_id);
+      };
+      ws.onclose = () => {
+        statusEl.textContent = "Disconnected; retrying...";
+        setTimeout(connectWs, 3000);
+      };
+      ws.onerror = () => {
+        ws.close();
+      };
+    }
+
+    refreshHttp().catch((error) => {
+      statusEl.textContent = `Disconnected: ${error}`;
+    });
+    connectWs();
+    setInterval(() => {
+      refreshHttp().catch(() => {});
+    }, 15000);
   </script>
 </body>
 </html>
