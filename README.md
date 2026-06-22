@@ -52,10 +52,11 @@ uv run python main.py
 - `GA/genetic.py`：mutation 與 crossover 的既有實作。
 - `GA/fitness.py`：可替換的 fitness strategy 入口。
 - `game_engine/backend/training_session.py`：管理 generation、selected cars、mutation rate、alive count 等訓練狀態。
-- `game_engine/backend/serialization.py`：訓練後模型 weights 的匯出與載入。
+- `game_engine/backend/serialization.py`：新版 submission weights/biases 的匯出與載入。
 - `game_engine/backend/track_generator.py`：隨機賽道生成與輸出。
-- `shared/contracts.py`：`RuntimeSettings`、`WeightPayload`、`ReplayRequest` 等共享 schema。
-- `server/app.py`：提供 `/api/submissions`、`/api/leaderboard`、`/api/replay/top` 與內建排行榜頁面。
+- `game_engine/backend/official_track_generator.py`：產生官方競賽地圖與 checkpoint metadata。
+- `shared/contracts.py`：`RuntimeSettings`、`SubmissionPayload`、`ReplayRequest` 等共享 schema。
+- `server/app.py`：提供新版 submission、leaderboard、replay、admin 與 WebSocket API。
 
 ## Repository 結構
 
@@ -67,6 +68,7 @@ shared/     共用資料契約
 server/     submission 與 replay 服務
 Images/     車輛 sprite 與賽道生成素材
 Images/Tracks/  預設賽道與隨機產生賽道圖片
+Images/OfficialTracks/  官方競賽地圖與 checkpoint metadata
 docs/       專案設計與協作文件
 settings.json  本地執行設定
 ```
@@ -90,13 +92,13 @@ uv run python -m server.app
 
 此指令會在 `http://127.0.0.1:8000` 啟動本地 server。排行榜頁面位於 `http://127.0.0.1:8000/leaderboard`，助教管理頁面位於 `http://127.0.0.1:8000/admin`。預設 admin token 是 `admin`，正式活動可用 `COMPETITION_ADMIN_TOKEN` 環境變數覆蓋。
 
-### 產生五位 demo players
+### 產生 mock submissions
 
 ```bash
-uv run python -m server.seed_demo_players
+uv run python -m server.mock_data --count 10 --state evaluated --reset
 ```
 
-此指令會清空目前的 competition SQLite 資料，建立 `player1` 到 `player5` 五筆 deterministic demo weights，並用正式 evaluator 評分。完成後可開啟 `http://127.0.0.1:8000/leaderboard` 看到五位玩家。
+此指令會直接寫入 competition SQLite 資料，建立 deterministic mock submissions。`--state pending` 可用來測試 60 秒批次評分流程，`--state evaluated` 可快速讓 leaderboard 與 replay 顯示資料。
 
 ### 啟動大螢幕 replay
 
@@ -104,7 +106,7 @@ uv run python -m server.seed_demo_players
 uv run python replay.py
 ```
 
-此指令會開啟 Pygame replay client，從 server 拉取 Top 5 submission，並在同一張 official-default 賽道上同時播放最多五台車。
+此指令會開啟 Pygame replay client，從 server 拉取 active phase 的 Top 10 submission，並依目前 admin 選定的官方地圖播放 30 秒 replay。
 
 ## 開發指令
 

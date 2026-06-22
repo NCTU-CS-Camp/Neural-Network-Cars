@@ -7,10 +7,34 @@ from typing import Any
 EXPECTED_LAYER_SIZES = [6, 6, 4]
 EXPECTED_WEIGHT_SHAPES = [(6, 6), (4, 6)]
 EXPECTED_BIAS_SHAPES = [(6, 1), (4, 1)]
+EXPECTED_WEIGHT_LENGTHS = [rows * cols for rows, cols in EXPECTED_WEIGHT_SHAPES]
+EXPECTED_BIAS_LENGTHS = [rows * cols for rows, cols in EXPECTED_BIAS_SHAPES]
+
+
+def _float_layers(raw_layers: Any, expected_lengths: list[int], field_name: str) -> list[list[float]]:
+    if not isinstance(raw_layers, list):
+        raise ValueError(f"{field_name} must be a list of layers")
+    if len(raw_layers) != len(expected_lengths):
+        raise ValueError(f"{field_name} must contain exactly {len(expected_lengths)} layers")
+
+    layers: list[list[float]] = []
+    for index, expected_length in enumerate(expected_lengths):
+        raw_layer = raw_layers[index]
+        if not isinstance(raw_layer, list):
+            raise ValueError(f"{field_name}[{index}] must be a list")
+        if len(raw_layer) != expected_length:
+            raise ValueError(
+                f"{field_name}[{index}] must contain {expected_length} values"
+            )
+        layers.append([float(value) for value in raw_layer])
+    return layers
 
 
 @dataclass(slots=True)
 class RuntimeSettings:
+    group_id: str = "1"
+    username: str = "player1"
+    # Deprecated UI compatibility field. New submissions use username.
     nickname: str = "player1"
     fps: int = 30
     population_size: int = 50
@@ -25,8 +49,11 @@ class RuntimeSettings:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
         defaults = cls()
+        username = str(data.get("username", data.get("nickname", defaults.username)))
         return cls(
-            nickname=str(data.get("nickname", defaults.nickname)),
+            group_id=str(data.get("group_id", defaults.group_id)),
+            username=username,
+            nickname=username,
             fps=int(data.get("fps", defaults.fps)),
             population_size=int(data.get("population_size", defaults.population_size)),
             mutation_rate=int(data.get("mutation_rate", defaults.mutation_rate)),
@@ -47,39 +74,33 @@ class RuntimeSettings:
 
 
 @dataclass(slots=True)
-class WeightPayload:
-    model_version: str
-    layer_sizes: list[int]
+class SubmissionPayload:
+    group_id: str
+    username: str
     weights: list[list[float]]
     biases: list[list[float]]
-    fitness_score: float
-    generation: int
-    track_id: str
-    track_seed: int
-    nickname: str
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "WeightPayload":
+    def from_dict(cls, data: dict[str, Any]) -> "SubmissionPayload":
+        group_id = str(data["group_id"]).strip()
+        username = str(data["username"]).strip()
+        if not group_id:
+            raise ValueError("group_id must not be empty")
+        if not username:
+            raise ValueError("username must not be empty")
         return cls(
-            model_version=str(data["model_version"]),
-            layer_sizes=[int(value) for value in data["layer_sizes"]],
-            weights=[
-                [float(weight) for weight in layer_weights]
-                for layer_weights in data["weights"]
-            ],
-            biases=[
-                [float(bias) for bias in layer_biases]
-                for layer_biases in data["biases"]
-            ],
-            fitness_score=float(data["fitness_score"]),
-            generation=int(data["generation"]),
-            track_id=str(data["track_id"]),
-            track_seed=int(data["track_seed"]),
-            nickname=str(data["nickname"]),
+            group_id=group_id,
+            username=username,
+            weights=_float_layers(data.get("weights"), EXPECTED_WEIGHT_LENGTHS, "weights"),
+            biases=_float_layers(data.get("biases"), EXPECTED_BIAS_LENGTHS, "biases"),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+# Backwards-compatible internal alias while modules migrate to the new API name.
+WeightPayload = SubmissionPayload
 
 
 @dataclass(slots=True)

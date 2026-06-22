@@ -1,4 +1,6 @@
 {
+  "group_id": "1",
+  "username": "player1",
   "nickname": "player1",
   "fps": 30,
   "population_size": 50,

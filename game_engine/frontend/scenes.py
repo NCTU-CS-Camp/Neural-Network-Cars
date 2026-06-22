@@ -27,7 +27,7 @@ class Scene:
 def build_default_scenes(settings: RuntimeSettings) -> dict[str, Scene]:
     common_labels = [
         Label("F1 Home  F2 Settings  F3 Training  F4 Replay", (20, 76)),
-        Label(f"Nickname: {settings.nickname}", (20, 104)),
+        Label(f"User: {settings.username}  Group: {settings.group_id}", (20, 104)),
         Label(f"Fitness: {settings.fitness_strategy}", (20, 132)),
     ]
     return {
@@ -74,4 +74,3 @@ class AppShell:
     def set_scene(self, scene_name: str) -> None:
         if scene_name in self.scenes:
             self.current_scene_name = scene_name
-

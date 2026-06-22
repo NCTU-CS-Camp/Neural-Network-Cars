@@ -6,52 +6,62 @@ from typing import Any
 
 import numpy as np
 
-from shared.contracts import WeightPayload
+from shared.contracts import EXPECTED_LAYER_SIZES, SubmissionPayload, WeightPayload
 
 
 def _flatten_layers(layers: list[np.ndarray]) -> list[list[float]]:
     return [layer.astype(float).flatten().tolist() for layer in layers]
 
 
-def export_weight_payload(
+def export_submission_payload(
+    *,
     car: Any,
-    generation: int,
-    track_id: str,
-    track_seed: int,
-    nickname: str,
-    fitness_score: float | None = None,
-) -> WeightPayload:
-    score = float(car.score if fitness_score is None else fitness_score)
-    return WeightPayload(
-        model_version="v1",
-        layer_sizes=[int(size) for size in car.sizes],
+    group_id: str,
+    username: str,
+) -> SubmissionPayload:
+    return SubmissionPayload(
+        group_id=group_id,
+        username=username,
         weights=_flatten_layers(car.weights),
         biases=_flatten_layers(car.biases),
-        fitness_score=score,
-        generation=generation,
-        track_id=track_id,
-        track_seed=track_seed,
-        nickname=nickname,
     )
 
 
-def apply_weight_payload(car: Any, payload: WeightPayload) -> None:
-    expected_layers = len(payload.layer_sizes) - 1
+def export_weight_payload(
+    car: Any,
+    generation: int | None = None,
+    track_id: str | None = None,
+    track_seed: int | None = None,
+    nickname: str | None = None,
+    fitness_score: float | None = None,
+    *,
+    group_id: str = "1",
+    username: str | None = None,
+) -> WeightPayload:
+    del generation, track_id, track_seed, fitness_score
+    return export_submission_payload(
+        car=car,
+        group_id=group_id,
+        username=username or nickname or "player1",
+    )
+
+
+def apply_weight_payload(car: Any, payload: SubmissionPayload) -> None:
+    expected_layers = len(EXPECTED_LAYER_SIZES) - 1
     if expected_layers != len(car.weights):
         raise ValueError("Layer count does not match car model.")
 
     for index in range(expected_layers):
-        rows = payload.layer_sizes[index + 1]
-        cols = payload.layer_sizes[index]
+        rows = EXPECTED_LAYER_SIZES[index + 1]
+        cols = EXPECTED_LAYER_SIZES[index]
         car.weights[index] = np.array(payload.weights[index]).reshape(rows, cols)
         car.biases[index] = np.array(payload.biases[index]).reshape(rows, 1)
 
 
-def save_weight_payload(payload: WeightPayload, path: Path) -> None:
+def save_weight_payload(payload: SubmissionPayload, path: Path) -> None:
     path.write_text(json.dumps(payload.to_dict(), indent=2), encoding="utf-8")
 
 
-def load_weight_payload(path: Path) -> WeightPayload:
+def load_weight_payload(path: Path) -> SubmissionPayload:
     data = json.loads(path.read_text(encoding="utf-8"))
-    return WeightPayload.from_dict(data)
-
+    return SubmissionPayload.from_dict(data)

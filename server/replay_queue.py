@@ -9,16 +9,14 @@ class ReplayQueue:
         self.storage = storage
 
     def enqueue(self, request: ReplayRequest) -> dict:
-        result = self.storage.set_featured_submission(request.submission_id)
-        if result is None:
+        submission = self.storage.get_submission(request.submission_id)
+        if submission is None:
             return {
                 "submission_id": request.submission_id,
                 "status": "missing",
             }
         return {
             "submission_id": request.submission_id,
-            "track_seed": request.track_seed,
             "render_mode": request.render_mode,
-            "status": "featured",
-            "requested_at": result["requested_at"],
+            "status": "available",
         }
