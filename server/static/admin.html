@@ -40,6 +40,29 @@
     }
     button.danger { background: #d94848; }
     .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .map-preview {
+      border: 1px solid #28323d;
+      border-radius: 8px;
+      background: #0d1218;
+      overflow: hidden;
+      margin: 4px 0 16px;
+    }
+    .preview-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 12px 14px;
+      color: #cbd5df;
+      border-bottom: 1px solid #202a34;
+      font-size: 14px;
+    }
+    .preview-meta { color: #8ea0b3; white-space: nowrap; }
+    canvas {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #0a0f14;
+    }
     pre {
       min-height: 72px;
       white-space: pre-wrap;
@@ -76,11 +99,25 @@
     <section>
       <label for="personal-map">Personal phase map</label>
       <select id="personal-map"></select>
+      <div class="map-preview">
+        <div class="preview-head">
+          <strong id="personal-preview-title">Map preview</strong>
+          <span class="preview-meta" id="personal-preview-meta"></span>
+        </div>
+        <canvas id="personal-preview" width="1600" height="900"></canvas>
+      </div>
       <button data-map-phase="personal">Set Personal Map</button>
     </section>
     <section>
       <label for="group-map">Group phase map</label>
       <select id="group-map"></select>
+      <div class="map-preview">
+        <div class="preview-head">
+          <strong id="group-preview-title">Map preview</strong>
+          <span class="preview-meta" id="group-preview-meta"></span>
+        </div>
+        <canvas id="group-preview" width="1600" height="900"></canvas>
+      </div>
       <button data-map-phase="group">Set Group Map</button>
     </section>
     <section>
@@ -95,6 +132,7 @@
     const personalMap = document.getElementById("personal-map");
     const groupMap = document.getElementById("group-map");
     const output = document.getElementById("output");
+    let mapsById = new Map();
 
     function headers() {
       return {
@@ -117,6 +155,7 @@
       ]);
       const state = await stateResponse.json();
       const maps = await mapsResponse.json();
+      mapsById = new Map(maps.map((map) => [map.map_id, map]));
       phase.value = state.active_phase;
       for (const select of [personalMap, groupMap]) {
         select.innerHTML = maps.map((map) => `
@@ -125,6 +164,89 @@
       }
       personalMap.value = state.personal_map_id;
       groupMap.value = state.group_map_id;
+      updateMapPreview("personal");
+      updateMapPreview("group");
+    }
+
+    function updateMapPreview(mapPhase) {
+      const select = mapPhase === "personal" ? personalMap : groupMap;
+      const map = mapsById.get(select.value);
+      const canvas = document.getElementById(`${mapPhase}-preview`);
+      const title = document.getElementById(`${mapPhase}-preview-title`);
+      const meta = document.getElementById(`${mapPhase}-preview-meta`);
+      const ctx = canvas.getContext("2d");
+
+      if (!map) {
+        title.textContent = "No map selected";
+        meta.textContent = "";
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        return;
+      }
+
+      title.textContent = `${map.map_id} - ${map.name}`;
+      meta.textContent = `${map.checkpoints.length} checkpoints`;
+
+      const image = new Image();
+      image.onload = () => {
+        canvas.width = image.naturalWidth || 1600;
+        canvas.height = image.naturalHeight || 900;
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        drawCheckpointOverlay(ctx, map);
+      };
+      image.onerror = () => {
+        canvas.width = 1600;
+        canvas.height = 900;
+        ctx.fillStyle = "#0a0f14";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#cbd5df";
+        ctx.font = "28px ui-sans-serif, system-ui";
+        ctx.fillText("Preview unavailable", 48, 72);
+      };
+      image.src = `/api/maps/${encodeURIComponent(map.map_id)}/preview`;
+    }
+
+    function drawCheckpointOverlay(ctx, map) {
+      ctx.save();
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.font = "bold 22px ui-sans-serif, system-ui";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      for (const checkpoint of map.checkpoints) {
+        const [ax, ay] = checkpoint.a;
+        const [bx, by] = checkpoint.b;
+        const [cx, cy] = checkpoint.center;
+
+        ctx.strokeStyle = "rgba(66, 202, 255, 0.88)";
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(66, 202, 255, 0.95)";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#071018";
+        ctx.fillText(String(checkpoint.index + 1), cx, cy);
+      }
+
+      const spawn = map.spawn;
+      ctx.fillStyle = "rgba(99, 255, 158, 0.95)";
+      ctx.strokeStyle = "#071018";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(spawn.x, spawn.y, 18, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#071018";
+      ctx.font = "bold 18px ui-sans-serif, system-ui";
+      ctx.fillText("S", spawn.x, spawn.y + 1);
+      ctx.restore();
     }
 
     document.getElementById("set-phase").addEventListener("click", () => {
@@ -146,6 +268,9 @@
         });
       });
     });
+
+    personalMap.addEventListener("change", () => updateMapPreview("personal"));
+    groupMap.addEventListener("change", () => updateMapPreview("group"));
 
     document.getElementById("reset").addEventListener("click", () => {
       if (!confirm("Reset submissions for the active phase?")) return;
