@@ -44,7 +44,8 @@ Response:
 
 ### `GET /api/maps`
 
-回傳可選官方地圖 metadata。
+回傳可選官方地圖 metadata。每張地圖包含 `route_cells` 與 boundary-based
+`checkpoints`，checkpoint 數量等於 route cell transition 數量。
 
 ### `GET /api/maps/{map_id}/preview`
 
@@ -100,6 +101,11 @@ Request:
 ### `POST /api/admin/reset`
 
 清除目前 active phase 的 submissions/results。
+
+### `POST /api/admin/reset-all`
+
+清除 personal 與 group 兩個 phase 的 submissions/results，保留目前 phase 與各
+phase 的地圖設定。
 
 ### `POST /api/admin/process-pending`
 

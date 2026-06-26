@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import numpy as np
+import pygame
 from fastapi.testclient import TestClient
 
 from game_engine.frontend.replay_client import ReplayCar, ReplaySession
+from server import evaluator as evaluator_module
 from server.app import create_app
-from server.evaluator import OfficialEvaluator
+from server.evaluator import CheckpointTracker, OfficialEvaluator
 from server.mock_data import create_mock_submissions
-from server.models import EvaluationResult, OfficialMap
+from server.models import CheckpointGate, EvaluationResult, OfficialMap
 from server.storage import CompetitionStorage
 from shared.contracts import SubmissionPayload
 
@@ -217,6 +220,44 @@ def test_phase_switch_preserves_separate_results_and_reset_clears_active_phase(t
     assert personal_rows_again[0]["username"] == "solo"
 
 
+def test_reset_all_clears_both_phases_and_preserves_state(tmp_path):
+    with make_client(tmp_path) as client:
+        client.post(
+            "/api/submissions",
+            json=make_payload(username="solo", score_hint=2.0),
+        )
+        process_pending(client)
+        client.post(
+            "/api/admin/phase",
+            headers={"X-Admin-Token": "secret"},
+            json={"phase": "group"},
+        )
+        client.post(
+            "/api/submissions",
+            json=make_payload(group_id="2", username="member", score_hint=4.0),
+        )
+        process_pending(client)
+        state_before = client.get("/api/state").json()
+
+        reset = client.post(
+            "/api/admin/reset-all",
+            headers={"X-Admin-Token": "secret"},
+        )
+        state_after = client.get("/api/state").json()
+        group_rows = client.get("/api/leaderboard").json()
+        client.post(
+            "/api/admin/phase",
+            headers={"X-Admin-Token": "secret"},
+            json={"phase": "personal"},
+        )
+        personal_rows = client.get("/api/leaderboard").json()
+
+    assert reset.json() == {"status": "reset", "scope": "all"}
+    assert state_after == state_before
+    assert group_rows == []
+    assert personal_rows == []
+
+
 def test_map_change_reruns_best_submission_for_phase(tmp_path):
     with make_client(tmp_path) as client:
         client.post(
@@ -301,6 +342,96 @@ def test_mock_data_creates_pending_and_evaluated_submissions(tmp_path):
     assert len(evaluated) == 3
     assert len(storage.leaderboard(limit=30)) == 3
     assert len(storage.replay_top(limit=10)) == 3
+
+
+def test_checkpoint_tracker_advances_only_next_gate():
+    tracker = CheckpointTracker(
+        [
+            CheckpointGate(0, (10, 5), (10, 0), (10, 10)),
+            CheckpointGate(1, (20, 5), (20, 0), (20, 10)),
+        ]
+    )
+
+    tracker.advance((15, 5), (25, 5))
+    assert tracker.score_laps == 0
+
+    tracker.advance((0, 5), (15, 5))
+    assert tracker.score_laps == 0.5
+
+    tracker.advance((15, 5), (25, 5))
+    assert tracker.score_laps == 1.0
+
+
+def test_checkpoint_tracker_no_longer_uses_large_center_radius_fallback():
+    tracker = CheckpointTracker(
+        [
+            CheckpointGate(0, (10, 5), (10, 0), (10, 10)),
+        ]
+    )
+
+    tracker.advance((20, 5), (20, 5))
+
+    assert tracker.score_laps == 0
+
+
+def test_official_evaluator_does_not_count_checkpoint_on_collision_frame(monkeypatch):
+    class CollidingCheckpointCar:
+        def __init__(self, sizes):
+            self.weights = [
+                np.zeros((sizes[1], sizes[0])),
+                np.zeros((sizes[2], sizes[1])),
+            ]
+            self.biases = [
+                np.zeros((sizes[1], 1)),
+                np.zeros((sizes[2], 1)),
+            ]
+            self.x = 0
+            self.y = 5
+
+        def reset_state(self, x, y, angle=180, car_image=None):
+            del angle, car_image
+            self.x = x
+            self.y = y
+
+        def update(self):
+            self.x = 15
+            self.y = 5
+
+        def collision(self):
+            return True
+
+        def feedforward(self):
+            raise AssertionError("colliding frame should not feed forward")
+
+        def takeAction(self):
+            raise AssertionError("colliding frame should not take action")
+
+    monkeypatch.setattr(evaluator_module, "Car", CollidingCheckpointCar)
+    monkeypatch.setattr(
+        evaluator_module.pygame.image,
+        "load",
+        lambda path: pygame.Surface((32, 32), pygame.SRCALPHA),
+    )
+    payload = SubmissionPayload.from_dict(make_payload())
+    official_map = OfficialMap(
+        map_id="test",
+        name="Test Track",
+        front_path="unused_front.png",
+        back_path="unused_back.png",
+        metadata_path="unused.json",
+        spawn_x=0,
+        spawn_y=5,
+        spawn_angle=180,
+        checkpoints=[CheckpointGate(0, (10, 5), (10, 0), (10, 10))],
+        route_cells=[],
+    )
+
+    result = OfficialEvaluator(seconds_per_run=1).evaluate(payload, official_map)
+
+    assert result.collided is True
+    assert result.frames_simulated == 1
+    assert result.checkpoints_completed == 0
+    assert result.score_laps == 0
 
 
 class FakeReplayCar:

@@ -185,6 +185,15 @@ def create_app(
         publish_current_update()
         return {"status": "reset", "phase": phase.value}
 
+    @app.post("/api/admin/reset-all")
+    def admin_reset_all(
+        x_admin_token: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        require_admin(x_admin_token)
+        app_storage.reset()
+        publish_current_update()
+        return {"status": "reset", "scope": "all"}
+
     @app.post("/api/admin/process-pending")
     def admin_process_pending(
         x_admin_token: str | None = Header(default=None),
