@@ -46,6 +46,10 @@ Response:
 
 回傳可選官方地圖 metadata。
 
+### `GET /api/maps/{map_id}/preview`
+
+回傳指定官方地圖的 front image PNG，供 admin 頁或其他控制台預覽地圖。
+
 ### `GET /api/leaderboard`
 
 回傳 active phase top30。只包含 evaluated submissions。

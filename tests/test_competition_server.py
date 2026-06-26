@@ -254,6 +254,18 @@ def test_replay_top_is_public_and_contains_payload(tmp_path):
     assert len(replay["items"][0]["weights"][0]) == 36
 
 
+def test_map_preview_serves_official_track_image(tmp_path):
+    with make_client(tmp_path) as client:
+        map_id = client.get("/api/maps").json()[0]["map_id"]
+        preview = client.get(f"/api/maps/{map_id}/preview")
+        missing = client.get("/api/maps/not-a-map/preview")
+
+    assert preview.status_code == 200
+    assert preview.headers["content-type"] == "image/png"
+    assert preview.content.startswith(b"\x89PNG")
+    assert missing.status_code == 404
+
+
 def test_websocket_sends_complete_update_after_batch(tmp_path):
     with make_client(tmp_path) as client:
         client.post(

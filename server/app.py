@@ -9,7 +9,7 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from server.evaluation_worker import EvaluationWorker, Evaluator
 from server.evaluator import OfficialEvaluator
@@ -83,6 +83,24 @@ def create_app(
     @app.get("/api/maps")
     def maps() -> list[dict[str, Any]]:
         return app_storage.list_official_maps()
+
+    @app.get("/api/maps/{map_id}/preview")
+    def map_preview(map_id: str) -> FileResponse:
+        try:
+            official_map = app_storage.get_official_map(map_id)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="map not found",
+            ) from exc
+
+        preview_path = _project_path(official_map.front_path)
+        if not preview_path.exists():
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="map preview not found",
+            )
+        return FileResponse(preview_path, media_type="image/png")
 
     @app.post(
         "/api/submissions",
@@ -197,6 +215,13 @@ def create_app(
 def _load_html(filename: str) -> str:
     path = Path(__file__).resolve().parent / "static" / filename
     return path.read_text(encoding="utf-8")
+
+
+def _project_path(path: str) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    return Path(__file__).resolve().parents[1] / candidate
 
 
 app = create_app()
