@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "name": "kaggle_comp",
+  "canvas": {
+    "width": 1600,
+    "height": 900
+  },
+  "grid": {
+    "cols": 10,
+    "rows": 5,
+    "cell_size": 146,
+    "offset_x": 70,
+    "offset_y": 85
+  },
+  "asset_root": "Images/TracksMapGen",
+  "start": {
+    "x": 0,
+    "y": 2
+  },
+  "finish": {
+    "x": 0,
+    "y": 3
+  },
+  "tiles": [
+    {
+      "x": 0,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve1"
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve2"
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve1"
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve2"
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve1"
+    },
+    {
+      "x": 5,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve2"
+    },
+    {
+      "x": 6,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve1"
+    },
+    {
+      "x": 7,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve2"
+    },
+    {
+      "x": 8,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve1"
+    },
+    {
+      "x": 9,
+      "y": 0,
+      "background": "Background.png",
+      "tile": "Curve2"
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Straight2"
+    },
+    {
+      "x": 1,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Curve4"
+    },
+    {
+      "x": 2,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Curve3"
+    },
+    {
+      "x": 3,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Curve4"
+    },
+    {
+      "x": 4,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Curve3"
+    },
+    {
+      "x": 5,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Curve4"
+    },
+    {
+      "x": 6,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Curve3"
+    },
+    {
+      "x": 7,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Curve4"
+    },
+    {
+      "x": 8,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Curve3"
+    },
+    {
+      "x": 9,
+      "y": 1,
+      "background": "Background.png",
+      "tile": "Straight2"
+    },
+    {
+      "x": 0,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Initial"
+    },
+    {
+      "x": 1,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Curve1"
+    },
+    {
+      "x": 2,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Straight1"
+    },
+    {
+      "x": 3,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Straight1"
+    },
+    {
+      "x": 4,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Straight1"
+    },
+    {
+      "x": 5,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Straight1"
+    },
+    {
+      "x": 6,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Straight1"
+    },
+    {
+      "x": 7,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Straight1"
+    },
+    {
+      "x": 8,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Curve2"
+    },
+    {
+      "x": 9,
+      "y": 2,
+      "background": "Background.png",
+      "tile": "Straight2"
+    },
+    {
+      "x": 0,
+      "y": 3,
+      "background": "Background.png",
+      "tile": "Straight2"
+    },
+    {
+      "x": 1,
+      "y": 3,
+      "background": "Background.png",
+      "tile": "Straight2"
+    },
+    {
+      "x": 8,
+      "y": 3,
+      "background": "Background.png",
+      "tile": "Straight2"
+    },
+    {
+      "x": 9,
+      "y": 3,
+      "background": "Background.png",
+      "tile": "Straight2"
+    },
+    {
+      "x": 0,
+      "y": 4,
+      "background": "Background.png",
+      "tile": "Curve4"
+    },
+    {
+      "x": 1,
+      "y": 4,
+      "background": "Background.png",
+      "tile": "Curve3"
+    },
+    {
+      "x": 8,
+      "y": 4,
+      "background": "Background.png",
+      "tile": "Curve4"
+    },
+    {
+      "x": 9,
+      "y": 4,
+      "background": "Background.png",
+      "tile": "Curve3"
+    }
+  ],
+  "metrics": {
+    "topology": "closed_circuit",
+    "road_tiles": 38,
+    "route_cells": 38,
+    "total_length_px": 5548,
+    "segment_count": 38,
+    "turn_count": 24,
+    "turn_density": 0.632,
+    "early_turn_count": 4,
+    "longest_straight_cells": 7,
+    "tight_turn_sequence_count": 21,
+    "long_straight_before_turn": true,
+    "difficulty_score": 121.95,
+    "estimated_difficulty": "hard"
+  }
+}
