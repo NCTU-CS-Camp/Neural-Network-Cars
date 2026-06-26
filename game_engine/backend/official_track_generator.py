@@ -5,7 +5,10 @@ from pathlib import Path
 
 from game_engine.backend.settings import OFFICIAL_TRACKS_DIR
 from game_engine.backend.track_generator import render_track_layout
-from game_engine.backend.track_layout import build_checkpoints, generate_track_layout
+from game_engine.backend.track_layout import (
+    build_boundary_checkpoints,
+    generate_track_layout,
+)
 from server.official_maps import DEFAULT_OFFICIAL_MAP_IDS
 
 
@@ -16,7 +19,6 @@ OFFICIAL_TRACK_SEEDS = {
     "official_004": 4004,
     "official_005": 5005,
 }
-CHECKPOINT_COUNT = 18
 
 
 def generate_official_tracks(
@@ -58,9 +60,12 @@ def _generate_track(
                 "front_path": front_name,
                 "back_path": back_name,
                 "spawn": layout.spawn,
-                "checkpoints": build_checkpoints(
+                "route_cells": [
+                    [cell[0], cell[1]] for cell in layout.route_cells
+                ],
+                "checkpoints": build_boundary_checkpoints(
                     layout,
-                    count=CHECKPOINT_COUNT,
+                    back_path,
                 ),
             },
             indent=2,

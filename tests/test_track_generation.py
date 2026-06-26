@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pygame
 from PIL import Image
 
 from game_engine.backend import track_generator
 from game_engine.backend.official_track_generator import (
-    CHECKPOINT_COUNT,
     OFFICIAL_TRACK_SEEDS,
     generate_official_tracks,
 )
@@ -16,8 +16,9 @@ from game_engine.backend.track_layout import (
     END_CELL,
     MIN_ROUTE_CELLS,
     START_CELL,
-    build_checkpoints,
+    build_boundary_checkpoints,
     generate_track_layout,
+    shared_cell_edge,
 )
 
 
@@ -45,16 +46,27 @@ def test_official_seeds_create_five_distinct_layouts():
 
 def test_checkpoints_follow_the_generated_route():
     layout = generate_track_layout(OFFICIAL_TRACK_SEEDS["official_001"])
-    checkpoints = build_checkpoints(layout, count=CHECKPOINT_COUNT)
+    back_path = Path("Images/OfficialTracks/official_001_back.png")
+    checkpoints = build_boundary_checkpoints(layout, back_path)
 
-    assert len(checkpoints) == CHECKPOINT_COUNT
+    assert len(checkpoints) == len(layout.route_cells)
     assert [checkpoint["index"] for checkpoint in checkpoints] == list(
-        range(CHECKPOINT_COUNT)
+        range(len(layout.route_cells))
     )
-    assert checkpoints[-1]["center"] == [
-        layout.spawn["x"],
-        layout.spawn["y"],
-    ]
+
+    alpha = Image.open(back_path).convert("RGBA").getchannel("A")
+    route = layout.route_cells
+    for index, checkpoint in enumerate(checkpoints):
+        current = route[index]
+        following = route[(index + 1) % len(route)]
+        orientation, fixed_coordinate, _ = shared_cell_edge(current, following)
+        for point_name in ("a", "b", "center"):
+            x, y = (round(value) for value in checkpoint[point_name])
+            assert alpha.getpixel((x, y)) == 255
+            if orientation == "vertical":
+                assert x == fixed_coordinate
+            else:
+                assert y == fixed_coordinate
 
 
 def test_simulator_random_map_uses_seeded_shared_generator(
@@ -100,14 +112,19 @@ def test_official_generator_writes_valid_front_back_and_metadata(tmp_path):
         assert {value for _, value in alpha_colors} == {0, 255}
         assert metadata["map_id"] == map_id
         assert metadata["seed"] == expected_seed
-        assert len(metadata["checkpoints"]) == CHECKPOINT_COUNT
+        assert metadata["route_cells"] == [
+            [cell[0], cell[1]]
+            for cell in generate_track_layout(expected_seed).route_cells
+        ]
+        assert len(metadata["checkpoints"]) == len(metadata["route_cells"])
 
         spawn = metadata["spawn"]
         spawn_pixel = (round(spawn["x"]), round(spawn["y"]))
         assert alpha.getpixel(spawn_pixel) == 255
         for checkpoint in metadata["checkpoints"]:
-            center = tuple(round(value) for value in checkpoint["center"])
-            assert alpha.getpixel(center) == 255
+            for point_name in ("a", "b", "center"):
+                point = tuple(round(value) for value in checkpoint[point_name])
+                assert alpha.getpixel(point) == 255
 
         back_hashes.add(hashlib.sha256(back_path.read_bytes()).hexdigest())
         route_seeds.add(metadata["seed"])

@@ -59,6 +59,7 @@ class OfficialMap:
     spawn_y: float
     spawn_angle: float
     checkpoints: list[CheckpointGate]
+    route_cells: list[tuple[int, int]]
 
     @classmethod
     def from_metadata(cls, metadata: dict[str, Any]) -> "OfficialMap":
@@ -76,6 +77,10 @@ class OfficialMap:
                 CheckpointGate.from_dict(checkpoint)
                 for checkpoint in metadata["checkpoints"]
             ],
+            route_cells=[
+                (int(cell[0]), int(cell[1]))
+                for cell in metadata.get("route_cells", [])
+            ],
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,6 +95,9 @@ class OfficialMap:
                 "y": self.spawn_y,
                 "angle": self.spawn_angle,
             },
+            "route_cells": [
+                [cell[0], cell[1]] for cell in self.route_cells
+            ],
             "checkpoints": [
                 checkpoint.to_dict() for checkpoint in self.checkpoints
             ],

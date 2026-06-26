@@ -122,6 +122,7 @@
     </section>
     <section>
       <button class="danger" id="reset">Reset Active Phase</button>
+      <button class="danger" id="reset-all">Reset All Phases</button>
       <button id="process">Process Pending Now</button>
     </section>
     <pre id="output">Ready</pre>
@@ -275,6 +276,11 @@
     document.getElementById("reset").addEventListener("click", () => {
       if (!confirm("Reset submissions for the active phase?")) return;
       call("/api/admin/reset", { method: "POST", headers: headers() });
+    });
+
+    document.getElementById("reset-all").addEventListener("click", () => {
+      if (!confirm("Reset submissions for personal and group phases?")) return;
+      call("/api/admin/reset-all", { method: "POST", headers: headers() });
     });
 
     document.getElementById("process").addEventListener("click", () => {
