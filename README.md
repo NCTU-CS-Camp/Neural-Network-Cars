@@ -83,7 +83,7 @@ uv run python main.py
 
 此指令會從 `game_engine/frontend/app.py` 啟動 Pygame simulator。
 `main.py` 保留為訓練用 simulator。競賽提交請使用符合 v2 `client_result` 契約的
-competition client；repository 內提供 `judge_demo.py` 作為測試入口。
+competition client；repository 內提供 `competition_main.py` 作為人工訓練與測試提交入口。
 
 ### 啟動 competition server
 
@@ -112,14 +112,14 @@ uv run python replay.py
 會切換為單一 group competition 畫面。它需要 `COMPETITION_REPLAY_TOKEN`，預設值是本地
 admin token `admin`。
 
-### 啟動 judge demo
+### 啟動 competition test main
 
 ```bash
-uv run python judge_demo.py
+uv run python competition_main.py
 ```
 
-此測試 client 可切換本機 user/group profile、檢查 submission eligibility，並送出 fixture
-或本地 demo run 的 `client_result`。
+此測試 client 可在 Easy、Hard、Final competition maps 上訓練新 weights，手動輸入
+User ID 與 Group ID，產生或覆寫 test-only `client_result`，並提交到 v2 APIs。
 
 ## Competition 操作流程
 
@@ -142,18 +142,21 @@ export COMPETITION_SERVER_URL=http://127.0.0.1:8010
 
 Admin 頁也會固定顯示 Easy、Hard、Final 三張 competition map 預覽。這三張 map 不能在 admin 頁任意替換。
 
-### 2. Judge Demo：模擬不同玩家提交
+### 2. Competition Test Main：訓練並模擬不同玩家提交
 
 ```bash
-COMPETITION_SERVER_URL=http://127.0.0.1:8000 uv run python judge_demo.py
+COMPETITION_SERVER_URL=http://127.0.0.1:8000 uv run python competition_main.py
 ```
 
-Judge demo 的操作：
+Competition test main 的操作：
 
-- `1` 到 `4`：切換測試 profile。每個 profile 都有不同的 `username`、`group_id` 與固定模型。
-- `E`、`H`、`F`：選擇 Easy、Hard、Final competition。
-- `R`：切換 fixture result 與本地 demo run result。
-- `Space`：先呼叫 eligibility API；可提交時才執行本地結果並送出 submission。
+- 直接在右側表單輸入 `User ID`、`Group ID`、server URL 與選用 admin token。
+- `E`、`H`、`F`：切換 Easy、Hard、Final competition map；切圖會保留目前 weights。
+- 左鍵選兩台車、`B` 手動 breed；或按 `G` 自動挑目前分數最高的兩台車 breed。
+- `V`：用目前 best car 在選定 competition map 上跑一次，產生 test-only `client_result`。
+- `O`：切換 manual result override，可手動輸入 completed、lap ticks、max progress 與 ticks。
+- `U`：先呼叫 eligibility API；可提交時才送出目前 best car weights 與 `client_result`。
+- `P`：用 admin token 呼叫 `Create Demo Snapshot`，讓 queued Easy/Hard submissions 立即進 leaderboard/replay。
 
 Easy/Hard 對同一 `(group_id, username)` 各自有五分鐘 cooldown。Final 必須先由 admin 切到 `final` stage，且每個 group 只能成功提交一次。
 

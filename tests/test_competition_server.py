@@ -189,6 +189,23 @@ def test_final_stage_gates_submissions_and_locks_one_model_per_group(tmp_path):
     assert [row["group_id"] for row in leaderboard] == ["2", "1"]
 
 
+def test_final_eligibility_keeps_current_group_and_username_schema(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        client.post(
+            "/v2/admin/stage",
+            headers={"X-Admin-Token": "secret"},
+            json={"stage": "final"},
+        )
+        eligibility = client.post(
+            "/v2/finals/eligibility",
+            json={"group_id": "1", "username": "ada"},
+        )
+
+    assert eligibility.status_code == 200
+    assert eligibility.json()["eligible"] is True
+
+
 def test_submission_validation_rejects_bad_client_result_shape_and_non_finite_genes(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
