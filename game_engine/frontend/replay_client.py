@@ -5,6 +5,7 @@ import math
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -13,6 +14,7 @@ import pygame
 
 from game_engine.backend.assets import GameAssets, load_game_assets
 from game_engine.backend.car import Car
+from game_engine.backend.competition_track import CompetitionRunTracker
 from game_engine.backend.serialization import apply_weight_payload
 from game_engine.backend.settings import FPS, SCREEN_SIZE
 from server.competition_config import (
@@ -36,6 +38,7 @@ HARD_ACCENT: Color = (244, 177, 111)
 FINAL_ACCENT: Color = (217, 168, 255)
 DIM_COLOR: Color = (92, 105, 116)
 REPLAY_PROGRESS_DISTANCE_PX = 24.0
+REPLAY_HOLD_SECONDS = 3.0
 REPLAY_COLORS: list[Color] = [
     (76, 169, 255),
     (255, 105, 124),
@@ -71,8 +74,12 @@ class ReplayCar:
     item: dict[str, Any]
     car: Car
     color: Color
+    tracker: CompetitionRunTracker
     crashed: bool = False
+    finished: bool = False
+    finish_ticks: int | None = None
     stalled: bool = False
+    ticks: int = 0
     stagnation_ticks: int = 0
     last_progress_position: tuple[float, float] | None = None
 
@@ -81,7 +88,16 @@ class ReplayCar:
 
     @property
     def label(self) -> str:
-        state = " STALLED" if self.stalled else ""
+        state = ""
+        if self.finished:
+            if self.finish_ticks is not None:
+                state = f" FINISHED {self.finish_ticks / FPS:.1f}s"
+            else:
+                state = " FINISHED"
+        elif self.stalled:
+            state = " STALLED"
+        elif self.crashed:
+            state = " CRASHED"
         return f"#{self.item.get('rank', '?')} {self.item.get('username', 'unknown')}{state}"
 
     def observe_position(self) -> None:
@@ -107,16 +123,21 @@ class ReplaySession:
     leaderboard: list[dict[str, Any]]
     frame_limit: int = FRAME_LIMIT
     frames: int = 0
-    all_crashed_at_frame: int | None = None
+    stopped: bool = False
 
     def tick(self) -> bool:
+        if self.stopped:
+            return True
         update_replay_cars(self.cars)
         self.frames += 1
-        if self.cars and all(replay_car.crashed or replay_car.stalled for replay_car in self.cars):
-            if self.all_crashed_at_frame is None:
-                self.all_crashed_at_frame = self.frames
-            return self.frames - self.all_crashed_at_frame >= FPS * 2
-        return self.frames >= self.frame_limit
+        self.stopped = (
+            bool(self.cars)
+            and all(
+                replay_car.crashed or replay_car.stalled or replay_car.finished
+                for replay_car in self.cars
+            )
+        ) or self.frames >= self.frame_limit
+        return self.stopped
 
 
 def run(
@@ -140,6 +161,7 @@ def run(
     next_generation_check_at = 0.0
     replay_generation: int | None = None
     status = "Connecting to protected replay feed"
+    hold_until: float | None = None
 
     try:
         while True:
@@ -153,7 +175,8 @@ def run(
                     state = fetch_replay_state(replay_url, replay_token)
                     sessions = load_replay_sessions(state, assets)
                     replay_generation = int(state.get("replay_generation", 0))
-                    status = "LIVE REPLAY"
+                    hold_until = None
+                    status = "RUNNING"
                 except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
                     status = f"Replay feed unavailable: {exc}"
                     next_fetch_at = now + 5.0
@@ -164,6 +187,7 @@ def run(
                     if replay_generation is not None and current_generation != replay_generation:
                         sessions = {}
                         state = None
+                        hold_until = None
                         next_fetch_at = 0.0
                         status = "Restarting replay"
                     next_generation_check_at = now + 1.0
@@ -176,23 +200,47 @@ def run(
             elif state.get("stage") == "final":
                 session = sessions.get("final")
                 if session is not None:
-                    finished = _draw_final(screen, session, fonts, status)
-                    if finished:
-                        sessions = {}
-                        next_fetch_at = 0.0
+                    display_status = _replay_status_text(
+                        "FINAL",
+                        (session,),
+                        state,
+                        now,
+                        hold_until,
+                    )
+                    finished = _draw_final(screen, session, fonts, display_status)
+                    hold_until = _handle_finished_cycle(
+                        finished,
+                        now,
+                        hold_until,
+                        state,
+                        assets,
+                        sessions,
+                    )
                 else:
-                    _draw_final_waiting(screen, fonts, status)
+                    _draw_final_waiting(screen, fonts, _waiting_status_text(state))
                     next_fetch_at = now + 3.0
             else:
                 easy = sessions.get("easy")
                 hard = sessions.get("hard")
                 if easy is not None and hard is not None:
-                    finished = _draw_phase_one(screen, easy, hard, fonts, status)
-                    if finished:
-                        sessions = {}
-                        next_fetch_at = 0.0
+                    display_status = _replay_status_text(
+                        "PHASE 1",
+                        (easy, hard),
+                        state,
+                        now,
+                        hold_until,
+                    )
+                    finished = _draw_phase_one(screen, easy, hard, fonts, display_status)
+                    hold_until = _handle_finished_cycle(
+                        finished,
+                        now,
+                        hold_until,
+                        state,
+                        assets,
+                        sessions,
+                    )
                 else:
-                    _draw_phase_one_waiting(screen, fonts, status)
+                    _draw_phase_one_waiting(screen, fonts, _waiting_status_text(state))
                     next_fetch_at = now + 3.0
 
             pygame.display.flip()
@@ -215,6 +263,61 @@ def fetch_replay_generation(server_url: str) -> int:
     with urlopen(server_url.rstrip("/") + "/v2/state", timeout=5.0) as response:
         state = json.loads(response.read().decode("utf-8"))
     return int(state["replay_generation"])
+
+
+def _replay_status_text(
+    stage: str,
+    sessions: tuple[ReplaySession, ...],
+    state: dict[str, Any],
+    now: float,
+    hold_until: float | None,
+) -> str:
+    elapsed = max((session.frames for session in sessions), default=0) / FPS
+    snapshot = _snapshot_countdown_text(state)
+    if hold_until is not None:
+        remaining = max(0.0, hold_until - now)
+        return (
+            f"REPLAY COMPLETE / {stage}  |  elapsed {elapsed:.1f}s"
+            f"  |  next replay {remaining:.0f}s  |  snapshot {snapshot}"
+        )
+    return f"RUNNING / {stage}  |  elapsed {elapsed:.1f}s  |  snapshot {snapshot}"
+
+
+def _waiting_status_text(state: dict[str, Any]) -> str:
+    return f"WAITING  |  snapshot {_snapshot_countdown_text(state)}"
+
+
+def _snapshot_countdown_text(state: dict[str, Any]) -> str:
+    target = state.get("config", {}).get("next_phase_one_batch_at")
+    if not target:
+        return "-"
+    try:
+        target_time = datetime.fromisoformat(str(target))
+    except ValueError:
+        return "-"
+    remaining = max(0.0, target_time.timestamp() - time.time())
+    minutes = int(remaining // 60)
+    seconds = int(remaining % 60)
+    return f"{minutes}:{seconds:02d}"
+
+
+def _handle_finished_cycle(
+    finished: bool,
+    now: float,
+    hold_until: float | None,
+    state: dict[str, Any],
+    assets: GameAssets,
+    sessions: dict[str, ReplaySession],
+) -> float | None:
+    if not finished:
+        return None
+    if hold_until is None:
+        return now + REPLAY_HOLD_SECONDS
+    if now < hold_until:
+        return hold_until
+    sessions.clear()
+    sessions.update(load_replay_sessions(state, assets))
+    return None
 
 
 def load_replay_sessions(state: dict[str, Any], assets: GameAssets) -> dict[str, ReplaySession]:
@@ -280,7 +383,8 @@ def build_replay_car(
         angle=spawn["angle"],
         car_image=car_image,
     )
-    return ReplayCar(item=item, car=car, color=color)
+    tracker = CompetitionRunTracker.from_metadata_path(track.competition_map.metadata_path)
+    return ReplayCar(item=item, car=car, color=color, tracker=tracker)
 
 
 def update_replay_cars(replay_cars: list[ReplayCar]) -> None:
@@ -289,13 +393,21 @@ def update_replay_cars(replay_cars: list[ReplayCar]) -> None:
 
 
 def step_replay_car(replay_car: ReplayCar) -> None:
-    if replay_car.crashed or replay_car.stalled:
+    if replay_car.crashed or replay_car.stalled or replay_car.finished:
         return
     try:
+        previous = (float(replay_car.car.x), float(replay_car.car.y))
         replay_car.car.update()
+        replay_car.ticks += 1
         if replay_car.car.collision():
             replay_car.car.collided = True
             replay_car.crashed = True
+            return
+        current = (float(replay_car.car.x), float(replay_car.car.y))
+        replay_car.tracker.advance(previous, current, tick=replay_car.ticks)
+        if replay_car.tracker.completed:
+            replay_car.finished = True
+            replay_car.finish_ticks = replay_car.tracker.lap_ticks
             return
         replay_car.car.feedforward()
         replay_car.car.takeAction()
@@ -358,7 +470,11 @@ def _draw_map_panel(
     pygame.draw.rect(screen, BORDER, rect, 1)
     native = session.track.front.copy()
     for replay_car in session.cars:
-        color = DIM_COLOR if replay_car.crashed or replay_car.stalled else replay_car.color
+        color = (
+            DIM_COLOR
+            if replay_car.crashed or replay_car.stalled or replay_car.finished
+            else replay_car.color
+        )
         replay_car.car.draw(native)
         pygame.draw.circle(native, color, (int(replay_car.car.x), int(replay_car.car.y)), 7)
     scaled = pygame.transform.smoothscale(native, rect.size)
@@ -369,7 +485,11 @@ def _draw_map_panel(
     screen.blit(fonts["panel"].render(title, True, TEXT), (rect.x + 12, rect.y + 6))
     occupied_labels: list[pygame.Rect] = []
     for replay_car in session.cars:
-        color = DIM_COLOR if replay_car.crashed or replay_car.stalled else replay_car.color
+        color = (
+            DIM_COLOR
+            if replay_car.crashed or replay_car.stalled or replay_car.finished
+            else replay_car.color
+        )
         x = rect.x + int(replay_car.car.x / SCREEN_SIZE[0] * rect.width)
         y = rect.y + int(replay_car.car.y / SCREEN_SIZE[1] * rect.height)
         label = fonts["label"].render(replay_car.label, True, color)

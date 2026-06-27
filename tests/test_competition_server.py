@@ -349,6 +349,7 @@ def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
 
 
 def test_replay_marks_a_stationary_car_as_stalled_after_stagnation_limit():
+    from game_engine.backend.competition_track import CompetitionRunTracker
     from game_engine.frontend.replay_client import ReplayCar, update_replay_cars
 
     class StationaryCar:
@@ -372,11 +373,60 @@ def test_replay_marks_a_stationary_car_as_stalled_after_stagnation_limit():
         item={"rank": 1, "username": "spinner"},
         car=StationaryCar(),  # type: ignore[arg-type]
         color=(255, 255, 255),
+        tracker=CompetitionRunTracker.from_metadata_path(
+            get_competition_map("easy").metadata_path
+        ),
     )
     for _ in range(STAGNATION_TICKS):
         update_replay_cars([replay_car])
 
     assert replay_car.stalled is True
+
+
+def test_replay_marks_a_route_finisher_as_finished():
+    from game_engine.backend.competition_track import (
+        CompetitionRunTracker,
+        load_competition_track_metadata,
+    )
+    from game_engine.backend.track_layout import cell_center
+    from game_engine.frontend.replay_client import ReplayCar, update_replay_cars
+
+    competition_map = get_competition_map("easy")
+    metadata = load_competition_track_metadata(competition_map.metadata_path)
+    centers = [cell_center(cell) for cell in metadata.route_cells]
+
+    class RouteCar:
+        collided = False
+
+        def __init__(self) -> None:
+            self.index = 0
+            self.x, self.y = centers[0]
+
+        def update(self) -> None:
+            self.index = min(self.index + 1, len(centers))
+            self.x, self.y = centers[self.index % len(centers)]
+
+        def collision(self) -> bool:
+            return False
+
+        def feedforward(self) -> None:
+            return None
+
+        def takeAction(self) -> None:
+            return None
+
+    replay_car = ReplayCar(
+        item={"rank": 1, "username": "finisher"},
+        car=RouteCar(),  # type: ignore[arg-type]
+        color=(255, 255, 255),
+        tracker=CompetitionRunTracker.from_metadata_path(competition_map.metadata_path),
+    )
+
+    for _ in range(len(centers)):
+        update_replay_cars([replay_car])
+
+    assert replay_car.finished is True
+    assert replay_car.finish_ticks == len(centers)
 
 
 def test_admin_can_restart_replay_generation(tmp_path):
