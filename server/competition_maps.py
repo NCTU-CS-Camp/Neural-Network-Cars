@@ -8,8 +8,8 @@ from typing import Any
 import pygame
 
 from game_engine.backend.competition_track import load_competition_track_metadata
-from game_engine.backend.settings import PROJECT_ROOT, SCREEN_SIZE, TRACK_ASSETS_DIR
-from game_engine.backend.track_layout import angle_for_vector, cell_center, cell_origin
+from game_engine.backend.settings import PROJECT_ROOT
+from game_engine.backend.track_layout import angle_for_vector, cell_center
 from server.models import CompetitionId
 
 
@@ -24,6 +24,7 @@ class CompetitionMap:
     name: str
     metadata_path: Path
     front_path: Path
+    back_path: Path
     start_cell: tuple[int, int]
     finish_cell: tuple[int, int]
     total_length_px: float
@@ -55,24 +56,8 @@ class CompetitionMap:
         }
 
     def build_collision_surface(self) -> pygame.Surface:
-        """Recreate the transparent road layer without altering source map PNGs."""
-        metadata = json.loads(self.metadata_path.read_text(encoding="utf-8"))
-        surface = pygame.Surface(SCREEN_SIZE, pygame.SRCALPHA)
-        surface.fill((0, 0, 0, 0))
-
-        for tile in metadata["tiles"]:
-            tile_name = str(tile["tile"])
-            if tile_name == "Initial":
-                tile_name = self._initial_collision_tile()
-            road_tile = pygame.image.load(TRACK_ASSETS_DIR / f"{tile_name}.png")
-            origin = cell_origin((int(tile["x"]), int(tile["y"])))
-            surface.blit(road_tile, origin)
-        return surface
-
-    def _initial_collision_tile(self) -> str:
-        if self.start_cell[0] == self.finish_cell[0]:
-            return "Straight2"
-        return "Straight1"
+        """Load the authored collision layer for the competition map."""
+        return pygame.image.load(self.back_path)
 
 
 _MAP_FILES = {
@@ -95,6 +80,7 @@ def get_competition_map(competition_id: CompetitionId | str) -> CompetitionMap:
         name=str(data["name"]),
         metadata_path=metadata_path,
         front_path=KAGGLE_MAPS_DIR / f"{map_id}.png",
+        back_path=KAGGLE_MAPS_DIR / f"{map_id}_back.png",
         start_cell=(int(data["start"]["x"]), int(data["start"]["y"])),
         finish_cell=(int(data["finish"]["x"]), int(data["finish"]["y"])),
         total_length_px=float(metrics.get("total_length_px", 0.0)),

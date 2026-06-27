@@ -39,6 +39,7 @@ FINAL_ACCENT: Color = (217, 168, 255)
 DIM_COLOR: Color = (92, 105, 116)
 REPLAY_PROGRESS_DISTANCE_PX = 24.0
 REPLAY_HOLD_SECONDS = 3.0
+VIRTUAL_SIZE = SCREEN_SIZE
 REPLAY_COLORS: list[Color] = [
     (76, 169, 255),
     (255, 105, 124),
@@ -145,7 +146,11 @@ def run(
     token: str | None = None,
 ) -> None:
     pygame.init()
-    screen = pygame.display.set_mode(SCREEN_SIZE)
+    display = create_replay_display()
+    virtual_screen = pygame.Surface(VIRTUAL_SIZE)
+    window_size = VIRTUAL_SIZE
+    windowed_size = VIRTUAL_SIZE
+    fullscreen = False
     pygame.display.set_caption("Neural Cars Competition Replay")
     clock = pygame.time.Clock()
     fonts = _fonts()
@@ -168,6 +173,36 @@ def run(
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     return
+                if event.type == pygame.VIDEORESIZE and not fullscreen:
+                    window_size = (max(1, event.w), max(1, event.h))
+                    windowed_size = window_size
+                    display = create_replay_display(window_size)
+                    pygame.display.set_caption("Neural Cars Competition Replay")
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_f:
+                        fullscreen = not fullscreen
+                        if fullscreen:
+                            windowed_size = window_size
+                            display = create_replay_display(fullscreen=True)
+                            window_size = display.get_size()
+                        else:
+                            window_size = windowed_size
+                            display = create_replay_display(window_size)
+                        pygame.display.set_caption("Neural Cars Competition Replay")
+                    elif event.key == pygame.K_r:
+                        fullscreen = False
+                        window_size = VIRTUAL_SIZE
+                        windowed_size = VIRTUAL_SIZE
+                        display = create_replay_display(window_size)
+                        pygame.display.set_caption("Neural Cars Competition Replay")
+                    elif event.key == pygame.K_ESCAPE:
+                        if fullscreen:
+                            fullscreen = False
+                            window_size = windowed_size
+                            display = create_replay_display(window_size)
+                            pygame.display.set_caption("Neural Cars Competition Replay")
+                        else:
+                            return
 
             now = time.monotonic()
             if not sessions and now >= next_fetch_at:
@@ -194,9 +229,14 @@ def run(
                 except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError):
                     next_generation_check_at = now + 5.0
 
-            screen.fill(BACKGROUND)
+            virtual_screen.fill(BACKGROUND)
             if state is None:
-                _draw_centered(screen, fonts["title"], status, SCREEN_SIZE[1] // 2)
+                _draw_centered(
+                    virtual_screen,
+                    fonts["title"],
+                    status,
+                    SCREEN_SIZE[1] // 2,
+                )
             elif state.get("stage") == "final":
                 session = sessions.get("final")
                 if session is not None:
@@ -207,7 +247,12 @@ def run(
                         now,
                         hold_until,
                     )
-                    finished = _draw_final(screen, session, fonts, display_status)
+                    finished = _draw_final(
+                        virtual_screen,
+                        session,
+                        fonts,
+                        display_status,
+                    )
                     hold_until = _handle_finished_cycle(
                         finished,
                         now,
@@ -217,7 +262,11 @@ def run(
                         sessions,
                     )
                 else:
-                    _draw_final_waiting(screen, fonts, _waiting_status_text(state))
+                    _draw_final_waiting(
+                        virtual_screen,
+                        fonts,
+                        _waiting_status_text(state),
+                    )
                     next_fetch_at = now + 3.0
             else:
                 easy = sessions.get("easy")
@@ -230,7 +279,13 @@ def run(
                         now,
                         hold_until,
                     )
-                    finished = _draw_phase_one(screen, easy, hard, fonts, display_status)
+                    finished = _draw_phase_one(
+                        virtual_screen,
+                        easy,
+                        hard,
+                        fonts,
+                        display_status,
+                    )
                     hold_until = _handle_finished_cycle(
                         finished,
                         now,
@@ -240,13 +295,54 @@ def run(
                         sessions,
                     )
                 else:
-                    _draw_phase_one_waiting(screen, fonts, _waiting_status_text(state))
+                    _draw_phase_one_waiting(
+                        virtual_screen,
+                        fonts,
+                        _waiting_status_text(state),
+                    )
                     next_fetch_at = now + 3.0
 
+            scale_virtual_screen(virtual_screen, display, window_size)
             pygame.display.flip()
             clock.tick(FPS)
     finally:
         pygame.quit()
+
+
+def create_replay_display(
+    window_size: tuple[int, int] = VIRTUAL_SIZE,
+    *,
+    fullscreen: bool = False,
+) -> pygame.Surface:
+    flags = pygame.FULLSCREEN if fullscreen else pygame.RESIZABLE
+    size = (0, 0) if fullscreen else window_size
+    return pygame.display.set_mode(size, flags)
+
+
+def scaled_rect_for_window(window_size: tuple[int, int]) -> pygame.Rect:
+    window_width = max(1, window_size[0])
+    window_height = max(1, window_size[1])
+    scale = min(
+        window_width / VIRTUAL_SIZE[0],
+        window_height / VIRTUAL_SIZE[1],
+    )
+    width = max(1, round(VIRTUAL_SIZE[0] * scale))
+    height = max(1, round(VIRTUAL_SIZE[1] * scale))
+    x = (window_width - width) // 2
+    y = (window_height - height) // 2
+    return pygame.Rect(x, y, width, height)
+
+
+def scale_virtual_screen(
+    virtual_screen: pygame.Surface,
+    display: pygame.Surface,
+    window_size: tuple[int, int],
+) -> pygame.Rect:
+    rect = scaled_rect_for_window(window_size)
+    display.fill(BACKGROUND)
+    scaled = pygame.transform.smoothscale(virtual_screen, rect.size)
+    display.blit(scaled, rect)
+    return rect
 
 
 def fetch_replay_state(server_url: str, token: str) -> dict[str, Any]:
