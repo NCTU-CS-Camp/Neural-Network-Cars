@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -26,7 +27,10 @@ def _float_layers(raw_layers: Any, expected_lengths: list[int], field_name: str)
             raise ValueError(
                 f"{field_name}[{index}] must contain {expected_length} values"
             )
-        layers.append([float(value) for value in raw_layer])
+        values = [float(value) for value in raw_layer]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError(f"{field_name}[{index}] must contain only finite values")
+        layers.append(values)
     return layers
 
 
@@ -97,6 +101,66 @@ class SubmissionPayload:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ClientResult:
+    """Client-side run metrics used by the trusted competition service."""
+
+    completed: bool
+    lap_ticks: int | None
+    max_progress: float
+    ticks_to_max_progress: int
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ClientResult":
+        if not isinstance(data, dict):
+            raise ValueError("client_result must be an object")
+
+        completed = data.get("completed")
+        if not isinstance(completed, bool):
+            raise ValueError("client_result.completed must be a boolean")
+
+        lap_ticks = data.get("lap_ticks")
+        if completed:
+            if isinstance(lap_ticks, bool) or not isinstance(lap_ticks, int) or lap_ticks <= 0:
+                raise ValueError(
+                    "client_result.lap_ticks must be a positive integer for completed runs"
+                )
+        elif lap_ticks is not None:
+            raise ValueError("client_result.lap_ticks must be null for incomplete runs")
+
+        max_progress_raw = data.get("max_progress")
+        if max_progress_raw is None or isinstance(max_progress_raw, bool):
+            raise ValueError("client_result.max_progress must be a finite number")
+        try:
+            max_progress = float(max_progress_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("client_result.max_progress must be a finite number") from exc
+        if not math.isfinite(max_progress) or max_progress < 0:
+            raise ValueError("client_result.max_progress must be finite and non-negative")
+
+        ticks_raw = data.get("ticks_to_max_progress")
+        if isinstance(ticks_raw, bool) or not isinstance(ticks_raw, int) or ticks_raw < 0:
+            raise ValueError(
+                "client_result.ticks_to_max_progress must be a non-negative integer"
+            )
+
+        return cls(
+            completed=completed,
+            lap_ticks=lap_ticks,
+            max_progress=max_progress,
+            ticks_to_max_progress=ticks_raw,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def ranking_key(self) -> tuple[int, int, float, int]:
+        """Lower keys rank ahead of higher keys."""
+        if self.completed:
+            return (0, self.lap_ticks or 0, 0.0, 0)
+        return (1, 0, -self.max_progress, self.ticks_to_max_progress)
 
 
 # Backwards-compatible internal alias while modules migrate to the new API name.

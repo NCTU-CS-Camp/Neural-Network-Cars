@@ -16,10 +16,21 @@ class CompetitionPhase(StrEnum):
     GROUP = "group"
 
 
+class CompetitionStage(StrEnum):
+    PHASE_ONE = "phase_one"
+    FINAL = "final"
+
+
+class CompetitionId(StrEnum):
+    EASY = "easy"
+    HARD = "hard"
+    FINAL = "final"
+
+
 class SubmissionStatus(StrEnum):
-    PENDING = "pending"
-    EVALUATING = "evaluating"
-    EVALUATED = "evaluated"
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
     FAILED = "failed"
 
 
@@ -119,3 +130,7 @@ class EvaluationResult:
 
 def new_submission_id() -> str:
     return f"sub_{uuid4().hex[:8]}"
+
+
+def new_batch_id() -> str:
+    return f"batch_{uuid4().hex[:10]}"

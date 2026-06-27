@@ -3,148 +3,133 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Neural Cars Leaderboard</title>
+  <title>Neural Cars Competition</title>
   <style>
     :root {
       color-scheme: dark;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0f1419;
-      color: #f5f7fa;
+      background: #0b1118;
+      color: #f4f7fb;
     }
-    body { margin: 0; min-height: 100vh; background: #0f1419; }
-    main { max-width: 1180px; margin: 0 auto; padding: 32px 24px 48px; }
-    header {
-      display: flex;
-      align-items: end;
-      justify-content: space-between;
-      gap: 24px;
-      border-bottom: 1px solid #28323d;
-      padding-bottom: 20px;
-      margin-bottom: 20px;
-    }
-    h1 { margin: 0; font-size: 44px; line-height: 1.05; font-weight: 800; }
-    .status { color: #aeb9c5; font-size: 16px; text-align: right; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: #0b1118; }
+    main { max-width: 1180px; margin: 0 auto; padding: 30px 24px 48px; }
+    header { display: flex; align-items: end; justify-content: space-between; gap: 24px; border-bottom: 1px solid #263442; padding-bottom: 20px; }
+    h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: 0; }
+    .eyebrow, .status { color: #96a8ba; font-size: 14px; }
+    .status { text-align: right; font-variant-numeric: tabular-nums; }
+    .tabs { display: flex; gap: 4px; border-bottom: 1px solid #263442; margin: 24px 0 0; }
+    .tab { border: 0; background: transparent; color: #9cadbf; padding: 13px 18px; font: inherit; font-weight: 700; cursor: pointer; border-bottom: 3px solid transparent; }
+    .tab.active[data-competition="easy"] { color: #57d3cf; border-color: #57d3cf; }
+    .tab.active[data-competition="hard"] { color: #f4b16f; border-color: #f4b16f; }
+    .tab.active[data-competition="final"] { color: #d9a8ff; border-color: #d9a8ff; }
+    .summary { display: flex; justify-content: space-between; gap: 18px; padding: 18px 0; color: #b8c5d2; font-size: 14px; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td {
-      padding: 16px 14px;
-      text-align: left;
-      border-bottom: 1px solid #202a34;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+    th, td { border-bottom: 1px solid #1d2935; padding: 15px 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    th { color: #8295a8; font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
+    tbody tr:first-child { background: #14202b; }
+    .rank { width: 72px; color: #aebdcb; font-weight: 800; }
+    .name { font-size: 19px; font-weight: 800; }
+    .group, .muted { color: #9badbf; }
+    .result { font-weight: 800; font-variant-numeric: tabular-nums; }
+    .time { font-variant-numeric: tabular-nums; }
+    .empty { color: #8ea0b1; text-align: center; padding: 48px 12px; }
+    @media (max-width: 680px) {
+      main { padding: 22px 14px 34px; }
+      header { align-items: start; flex-direction: column; }
+      h1 { font-size: 32px; }
+      .status { text-align: left; }
+      th:nth-child(4), td:nth-child(4) { display: none; }
     }
-    th {
-      color: #8ea0b3;
-      font-size: 13px;
-      letter-spacing: 0;
-      text-transform: uppercase;
-    }
-    tbody tr:first-child { background: #182430; }
-    .rank { width: 72px; color: #aeb9c5; font-weight: 700; }
-    .name { font-size: 22px; font-weight: 800; }
-    .score { font-variant-numeric: tabular-nums; font-weight: 800; }
-    .muted { color: #b9c5d1; }
-    .empty { padding: 48px 16px; color: #9da9b5; text-align: center; }
   </style>
 </head>
 <body>
   <main>
     <header>
-      <h1>Neural Cars Leaderboard</h1>
+      <div>
+        <div class="eyebrow">NEURAL CARS COMPETITION</div>
+        <h1 id="title">Phase 1 / Easy</h1>
+      </div>
       <div class="status" id="status">Connecting...</div>
     </header>
+    <nav class="tabs" aria-label="Competition leaderboard">
+      <button class="tab active" data-competition="easy">Easy</button>
+      <button class="tab" data-competition="hard">Hard</button>
+      <button class="tab" data-competition="final">Final</button>
+    </nav>
+    <div class="summary"><span id="summary">Loading leaderboard</span><span id="next-batch"></span></div>
     <table>
-      <thead>
-        <tr>
-          <th class="rank">Rank</th>
-          <th>Identity</th>
-          <th>Group</th>
-          <th>User</th>
-          <th>Laps</th>
-          <th>Submission</th>
-        </tr>
-      </thead>
-      <tbody id="rows">
-        <tr><td colspan="6" class="empty">Waiting for submissions</td></tr>
-      </tbody>
+      <thead><tr><th class="rank">Rank</th><th>Player</th><th>Group</th><th>Result</th><th>Completed</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="empty">Waiting for snapshot</td></tr></tbody>
     </table>
   </main>
   <script>
     const rows = document.getElementById("rows");
+    const title = document.getElementById("title");
     const statusEl = document.getElementById("status");
+    const summary = document.getElementById("summary");
+    const nextBatch = document.getElementById("next-batch");
+    let activeCompetition = "easy";
+    let state = null;
 
-    function escapeHtml(value) {
-      return String(value).replace(/[&<>"']/g, (char) => ({
-        "&": "&amp;",
-        "<": "&lt;",
-        ">": "&gt;",
-        '"': "&quot;",
-        "'": "&#039;"
-      }[char]));
+    function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[char]); }
+    function formatTicks(value) {
+      const seconds = Number(value) / 30;
+      const minutes = Math.floor(seconds / 60);
+      return `${minutes}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
     }
-
-    function scoreText(value) {
-      return value === null || value === undefined ? "-" : Number(value).toFixed(3);
+    function resultText(result) {
+      return result.completed ? `FINISHED ${formatTicks(result.lap_ticks)}` : `${Number(result.max_progress).toFixed(1)} progress`;
     }
-
-    function renderLeaderboard(leaderboard, phase, mapId) {
-      statusEl.textContent = `${phase} | ${mapId} | ${new Date().toLocaleTimeString()}`;
-      if (!leaderboard || leaderboard.length === 0) {
-        rows.innerHTML = '<tr><td colspan="6" class="empty">Waiting for evaluated submissions</td></tr>';
+    function render(leaderboard) {
+      const stageLabel = activeCompetition === "final" ? "Final / Group" : `Phase 1 / ${activeCompetition[0].toUpperCase()}${activeCompetition.slice(1)}`;
+      title.textContent = stageLabel;
+      summary.textContent = `${leaderboard.length} ranked submissions`;
+      nextBatch.textContent = state?.config?.next_phase_one_batch_at && activeCompetition !== "final" ? `Next snapshot ${new Date(state.config.next_phase_one_batch_at).toLocaleTimeString()}` : "";
+      if (!leaderboard.length) {
+        rows.innerHTML = '<tr><td colspan="5" class="empty">No completed submissions yet</td></tr>';
         return;
       }
-      rows.innerHTML = leaderboard.map((item) => {
-        const identity = phase === "group" ? item.group_id : item.username;
-        const user = item.best_username || item.username;
-        return `
-          <tr>
-            <td class="rank">#${item.rank}</td>
-            <td class="name">${escapeHtml(identity)}</td>
-            <td class="muted">${escapeHtml(item.group_id)}</td>
-            <td class="muted">${escapeHtml(user)}</td>
-            <td class="score">${scoreText(item.score_laps)}</td>
-            <td class="muted">${escapeHtml(item.submission_id)}</td>
-          </tr>
-        `;
-      }).join("");
+      rows.innerHTML = leaderboard.map((item) => `
+        <tr>
+          <td class="rank">#${item.rank}</td>
+          <td><div class="name">${escapeHtml(activeCompetition === "final" ? `Group ${item.group_id}` : item.username)}</div><div class="muted">${escapeHtml(activeCompetition === "final" ? item.username : "individual")}</div></td>
+          <td class="group">${escapeHtml(item.group_id)}</td>
+          <td class="result">${resultText(item.client_result)}</td>
+          <td class="time">${item.completed_at ? new Date(item.completed_at).toLocaleTimeString() : "-"}</td>
+        </tr>`).join("");
     }
-
-    async function refreshHttp() {
+    async function refresh() {
       const [stateResponse, leaderboardResponse] = await Promise.all([
-        fetch("/api/state", { cache: "no-store" }),
-        fetch("/api/leaderboard", { cache: "no-store" })
+        fetch("/v2/state", {cache:"no-store"}),
+        fetch(`/v2/competitions/${activeCompetition}/leaderboard`, {cache:"no-store"})
       ]);
-      const state = await stateResponse.json();
-      const leaderboard = await leaderboardResponse.json();
-      renderLeaderboard(leaderboard, state.active_phase, state.active_map_id);
+      state = await stateResponse.json();
+      render(await leaderboardResponse.json());
+      statusEl.textContent = `${state.stage.replace("_", " ")} | ${state.config.version}`;
     }
-
+    document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
+      activeCompetition = tab.dataset.competition;
+      document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button === tab));
+      refresh().catch((error) => { statusEl.textContent = `Disconnected: ${error}`; });
+    }));
     function connectWs() {
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${protocol}//${location.host}/ws/events`);
-      ws.onopen = () => {
-        statusEl.textContent = "Connected";
-      };
       ws.onmessage = (event) => {
         const payload = JSON.parse(event.data);
-        renderLeaderboard(payload.leaderboard, payload.phase, payload.map.map_id);
+        if (payload.leaderboards) {
+          state = {...state, stage: payload.stage, config: payload.config};
+          render(payload.leaderboards[activeCompetition] || []);
+          statusEl.textContent = `${payload.stage.replace("_", " ")} | ${payload.config.version}`;
+        }
       };
-      ws.onclose = () => {
-        statusEl.textContent = "Disconnected; retrying...";
-        setTimeout(connectWs, 3000);
-      };
-      ws.onerror = () => {
-        ws.close();
-      };
+      ws.onclose = () => setTimeout(connectWs, 3000);
+      ws.onerror = () => ws.close();
     }
-
-    refreshHttp().catch((error) => {
-      statusEl.textContent = `Disconnected: ${error}`;
-    });
+    refresh().catch((error) => { statusEl.textContent = `Disconnected: ${error}`; });
     connectWs();
-    setInterval(() => {
-      refreshHttp().catch(() => {});
-    }, 15000);
+    setInterval(() => refresh().catch(() => {}), 15000);
   </script>
 </body>
 </html>

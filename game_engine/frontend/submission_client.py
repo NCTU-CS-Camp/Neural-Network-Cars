@@ -7,6 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from game_engine.backend.serialization import export_submission_payload
+from shared.contracts import ClientResult
 
 
 @dataclass(slots=True)
@@ -22,15 +23,27 @@ def submit_car(
     car: Any,
     group_id: str,
     username: str,
+    competition_id: str = "easy",
+    client_result: ClientResult | None = None,
     timeout: float = 5.0,
 ) -> SubmissionResult:
+    if client_result is None:
+        return SubmissionResult(
+            False,
+            "Trusted v2 submission requires a client_result. Use judge_demo or the competition client.",
+        )
     payload = export_submission_payload(
         car=car,
         group_id=group_id,
         username=username,
     )
-    body = json.dumps(payload.to_dict()).encode("utf-8")
-    url = server_url.rstrip("/") + "/api/submissions"
+    body = json.dumps({**payload.to_dict(), "client_result": client_result.to_dict()}).encode(
+        "utf-8"
+    )
+    if competition_id == "final":
+        url = server_url.rstrip("/") + "/v2/finals/submissions"
+    else:
+        url = server_url.rstrip("/") + f"/v2/competitions/{competition_id}/submissions"
     request = Request(
         url,
         data=body,
@@ -48,7 +61,10 @@ def submit_car(
         return SubmissionResult(False, f"Submit failed: {exc}")
 
     submission_id = data.get("submission_id")
-    phase = data.get("phase", "unknown")
     if not submission_id:
         return SubmissionResult(False, "Submit failed: missing submission id")
-    return SubmissionResult(True, f"Submitted {submission_id} ({phase})", submission_id)
+    return SubmissionResult(
+        True,
+        f"Submitted {submission_id} ({data.get('competition_id', competition_id)})",
+        submission_id,
+    )

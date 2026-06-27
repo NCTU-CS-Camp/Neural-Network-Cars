@@ -59,6 +59,8 @@ class Car:
     self.collided = False
     self.color = WHITE
     self.car_image = default_car_image
+    # Existing training code configures a global map. Replays can override it per car.
+    self.collision_surface = collision_surface
 
   def set_accel(self, accel):
     self.acceleration = accel
@@ -94,7 +96,7 @@ class Car:
     self.c = rotation((self.x,self.y), self.c, math.radians(self.angle))
     self.d = rotation((self.x,self.y), self.d, math.radians(self.angle))
 
-    bg4 = collision_surface
+    bg4 = self.collision_surface or collision_surface
     self.c1 = move((self.x,self.y),self.angle,10)
     while bg4.get_at((int(self.c1[0]),int(self.c1[1]))).a!=0:
         self.c1 = move((self.c1[0],self.c1[1]),self.angle,10)
@@ -155,11 +157,14 @@ class Car:
     return self.outp
 
   def collision(self):
-      bg4 = collision_surface
+      bg4 = self.collision_surface or collision_surface
       if (bg4.get_at((int(self.a[0]),int(self.a[1]))).a==0) or (bg4.get_at((int(self.b[0]),int(self.b[1]))).a==0) or (bg4.get_at((int(self.c[0]),int(self.c[1]))).a==0) or (bg4.get_at((int(self.d[0]),int(self.d[1]))).a==0):
         return True
       else:
         return False
+
+  def set_collision_surface(self, surface):
+      self.collision_surface = surface
 
   def resetPosition(self):
       self.reset_state()
