@@ -3,7 +3,10 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Iterable
+from pathlib import Path
+from typing import Iterable, cast
+
+from PIL import Image
 
 
 GRID_COLUMNS = 10
@@ -173,6 +176,29 @@ def build_checkpoints(
     return checkpoints
 
 
+def build_boundary_checkpoints(
+    layout: TrackLayout,
+    collision_image_path: Path | str,
+    *,
+    alpha_threshold: int = 0,
+) -> list[dict]:
+    with Image.open(collision_image_path) as image:
+        alpha = image.convert("RGBA").getchannel("A")
+        checkpoints = []
+        route = layout.route_cells
+        for index, current in enumerate(route):
+            following = route[(index + 1) % len(route)]
+            checkpoint = _boundary_checkpoint(
+                alpha,
+                index=index,
+                current=current,
+                following=following,
+                alpha_threshold=alpha_threshold,
+            )
+            checkpoints.append(checkpoint)
+    return checkpoints
+
+
 def cell_origin(cell: tuple[int, int]) -> tuple[int, int]:
     return (
         MAP_OFFSET_X + cell[0] * BLOCK_SIZE,
@@ -184,6 +210,21 @@ def cell_center(cell: tuple[int, int]) -> tuple[float, float]:
     origin_x, origin_y = cell_origin(cell)
     half_block = BLOCK_SIZE / 2
     return origin_x + half_block, origin_y + half_block
+
+
+def shared_cell_edge(
+    current: tuple[int, int],
+    following: tuple[int, int],
+) -> tuple[str, int, range]:
+    direction = direction_between(current, following)
+    origin_x, origin_y = cell_origin(current)
+    if direction == "E":
+        return "vertical", origin_x + BLOCK_SIZE, range(origin_y, origin_y + BLOCK_SIZE + 1)
+    if direction == "W":
+        return "vertical", origin_x, range(origin_y, origin_y + BLOCK_SIZE + 1)
+    if direction == "S":
+        return "horizontal", origin_y + BLOCK_SIZE, range(origin_x, origin_x + BLOCK_SIZE + 1)
+    return "horizontal", origin_y, range(origin_x, origin_x + BLOCK_SIZE + 1)
 
 
 def direction_between(
@@ -261,3 +302,85 @@ def _point_and_tangent_at_distance(
         (end[0] - start[0]) / length,
         (end[1] - start[1]) / length,
     )
+
+
+def _boundary_checkpoint(
+    alpha: Image.Image,
+    *,
+    index: int,
+    current: tuple[int, int],
+    following: tuple[int, int],
+    alpha_threshold: int,
+) -> dict:
+    orientation, fixed_coordinate, scan_range = shared_cell_edge(current, following)
+    filled_coordinates = [
+        coordinate
+        for coordinate in scan_range
+        if _alpha_at(alpha, orientation, fixed_coordinate, coordinate) > alpha_threshold
+    ]
+    span = _longest_contiguous_run(filled_coordinates)
+    if span is None:
+        raise ValueError(
+            "No drivable alpha span for checkpoint "
+            f"{index}: {current} -> {following}"
+        )
+
+    start, end = span
+    center_coordinate = round((start + end) / 2, 2)
+    if orientation == "vertical":
+        center = [float(fixed_coordinate), center_coordinate]
+        a = [float(fixed_coordinate), float(start)]
+        b = [float(fixed_coordinate), float(end)]
+    else:
+        center = [center_coordinate, float(fixed_coordinate)]
+        a = [float(start), float(fixed_coordinate)]
+        b = [float(end), float(fixed_coordinate)]
+
+    return {
+        "index": index,
+        "center": center,
+        "a": a,
+        "b": b,
+    }
+
+
+def _alpha_at(
+    alpha: Image.Image,
+    orientation: str,
+    fixed_coordinate: int,
+    scanned_coordinate: int,
+) -> int:
+    if orientation == "vertical":
+        x, y = fixed_coordinate, scanned_coordinate
+    else:
+        x, y = scanned_coordinate, fixed_coordinate
+    if x < 0 or y < 0 or x >= alpha.width or y >= alpha.height:
+        return 0
+    pixel = alpha.getpixel((x, y))
+    if pixel is None:
+        return 0
+    if isinstance(pixel, tuple):
+        return int(pixel[0])
+    return int(cast(float, pixel))
+
+
+def _longest_contiguous_run(values: list[int]) -> tuple[int, int] | None:
+    if not values:
+        return None
+
+    best_start = values[0]
+    best_end = values[0]
+    current_start = values[0]
+    current_end = values[0]
+    for value in values[1:]:
+        if value == current_end + 1:
+            current_end = value
+        else:
+            if current_end - current_start > best_end - best_start:
+                best_start, best_end = current_start, current_end
+            current_start = value
+            current_end = value
+
+    if current_end - current_start > best_end - best_start:
+        best_start, best_end = current_start, current_end
+    return best_start, best_end

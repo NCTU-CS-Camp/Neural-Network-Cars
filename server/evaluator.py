@@ -16,6 +16,9 @@ from server.official_maps import load_official_map
 from shared.contracts import EXPECTED_LAYER_SIZES, SubmissionPayload
 
 
+CHECKPOINT_CROSSING_TOLERANCE = 2.0
+
+
 class CheckpointTracker:
     def __init__(self, checkpoints: list[CheckpointGate]) -> None:
         if not checkpoints:
@@ -46,8 +49,12 @@ class CheckpointTracker:
         current: tuple[float, float],
         checkpoint: CheckpointGate,
     ) -> bool:
-        return _segments_intersect(previous, current, checkpoint.a, checkpoint.b) or (
-            _distance(current, checkpoint.center) <= 52.0
+        return _segments_intersect(
+            previous,
+            current,
+            checkpoint.a,
+            checkpoint.b,
+            tolerance=CHECKPOINT_CROSSING_TOLERANCE,
         )
 
 
@@ -94,12 +101,12 @@ class OfficialEvaluator:
             try:
                 car.update()
                 current = (float(car.x), float(car.y))
-                tracker.advance(previous, current)
-                previous = current
                 if car.collision():
                     collided = True
                     frames_simulated = frame + 1
                     break
+                tracker.advance(previous, current)
+                previous = current
                 car.feedforward()
                 car.takeAction()
             except (IndexError, pygame.error, ValueError):
@@ -125,25 +132,91 @@ def _project_path(path: str) -> Path:
     return PROJECT_ROOT / candidate
 
 
-def _distance(a: tuple[float, float], b: tuple[float, float]) -> float:
-    return math.hypot(a[0] - b[0], a[1] - b[1])
-
-
 def _segments_intersect(
     a: tuple[float, float],
     b: tuple[float, float],
     c: tuple[float, float],
     d: tuple[float, float],
+    *,
+    tolerance: float = 0.0,
 ) -> bool:
-    def orientation(
-        p: tuple[float, float],
-        q: tuple[float, float],
-        r: tuple[float, float],
-    ) -> float:
-        return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+    if _segments_cross(a, b, c, d):
+        return True
+    return _segment_distance(a, b, c, d) <= tolerance
 
-    o1 = orientation(a, b, c)
-    o2 = orientation(a, b, d)
-    o3 = orientation(c, d, a)
-    o4 = orientation(c, d, b)
-    return (o1 > 0) != (o2 > 0) and (o3 > 0) != (o4 > 0)
+
+def _segments_cross(
+    a: tuple[float, float],
+    b: tuple[float, float],
+    c: tuple[float, float],
+    d: tuple[float, float],
+    *,
+    epsilon: float = 1e-9,
+) -> bool:
+    o1 = _orientation(a, b, c)
+    o2 = _orientation(a, b, d)
+    o3 = _orientation(c, d, a)
+    o4 = _orientation(c, d, b)
+
+    if abs(o1) <= epsilon and _on_segment(a, c, b, epsilon=epsilon):
+        return True
+    if abs(o2) <= epsilon and _on_segment(a, d, b, epsilon=epsilon):
+        return True
+    if abs(o3) <= epsilon and _on_segment(c, a, d, epsilon=epsilon):
+        return True
+    if abs(o4) <= epsilon and _on_segment(c, b, d, epsilon=epsilon):
+        return True
+
+    return (o1 > epsilon) != (o2 > epsilon) and (o3 > epsilon) != (o4 > epsilon)
+
+
+def _orientation(
+    p: tuple[float, float],
+    q: tuple[float, float],
+    r: tuple[float, float],
+) -> float:
+    return (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+
+
+def _on_segment(
+    p: tuple[float, float],
+    q: tuple[float, float],
+    r: tuple[float, float],
+    *,
+    epsilon: float,
+) -> bool:
+    return (
+        min(p[0], r[0]) - epsilon <= q[0] <= max(p[0], r[0]) + epsilon
+        and min(p[1], r[1]) - epsilon <= q[1] <= max(p[1], r[1]) + epsilon
+    )
+
+
+def _segment_distance(
+    a: tuple[float, float],
+    b: tuple[float, float],
+    c: tuple[float, float],
+    d: tuple[float, float],
+) -> float:
+    return min(
+        _point_segment_distance(a, c, d),
+        _point_segment_distance(b, c, d),
+        _point_segment_distance(c, a, b),
+        _point_segment_distance(d, a, b),
+    )
+
+
+def _point_segment_distance(
+    p: tuple[float, float],
+    a: tuple[float, float],
+    b: tuple[float, float],
+) -> float:
+    dx = b[0] - a[0]
+    dy = b[1] - a[1]
+    length_squared = dx * dx + dy * dy
+    if length_squared == 0:
+        return math.hypot(p[0] - a[0], p[1] - a[1])
+
+    t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / length_squared
+    t = max(0.0, min(1.0, t))
+    closest = (a[0] + t * dx, a[1] + t * dy)
+    return math.hypot(p[0] - closest[0], p[1] - closest[1])

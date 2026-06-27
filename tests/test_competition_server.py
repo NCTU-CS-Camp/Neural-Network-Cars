@@ -1,384 +1,377 @@
 from __future__ import annotations
 
+import json
+from datetime import UTC, datetime, timedelta
+
+import pygame
 from fastapi.testclient import TestClient
 
-from game_engine.frontend.replay_client import ReplayCar, ReplaySession
 from server.app import create_app
-from server.evaluator import OfficialEvaluator
-from server.mock_data import create_mock_submissions
-from server.models import EvaluationResult, OfficialMap
+from server.competition_config import STAGNATION_TICKS
+from server.competition_maps import get_competition_map
 from server.storage import CompetitionStorage
-from shared.contracts import SubmissionPayload
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.current = datetime(2026, 6, 26, 10, 1, tzinfo=UTC)
+
+    def __call__(self) -> datetime:
+        return self.current
+
+    def advance(self, **kwargs: int) -> None:
+        self.current += timedelta(**kwargs)
 
 
 def make_payload(
     *,
     group_id: str = "1",
     username: str = "tester",
-    score_hint: float = 1.0,
-    weights: list[list[float]] | None = None,
-    biases: list[list[float]] | None = None,
+    completed: bool = False,
+    lap_ticks: int | None = None,
+    max_progress: float = 1_000.0,
+    ticks_to_max_progress: int = 300,
 ) -> dict:
-    first_weights = [0.0] * 36
-    first_weights[0] = score_hint
+    if completed and lap_ticks is None:
+        lap_ticks = 500
     return {
         "group_id": group_id,
         "username": username,
-        "weights": weights or [first_weights, [0.0] * 24],
-        "biases": biases or [[0.0] * 6, [0.0] * 4],
+        "weights": [[0.0] * 36, [0.0] * 24],
+        "biases": [[0.0] * 6, [0.0] * 4],
+        "client_result": {
+            "completed": completed,
+            "lap_ticks": lap_ticks,
+            "max_progress": max_progress,
+            "ticks_to_max_progress": ticks_to_max_progress,
+        },
     }
 
 
-class FakeEvaluator:
-    def evaluate(
-        self,
-        payload: SubmissionPayload,
-        official_map: OfficialMap,
-    ) -> EvaluationResult:
-        map_bonus = int(official_map.map_id.rsplit("_", 1)[-1]) / 100.0
-        return EvaluationResult(
-            score_laps=float(payload.weights[0][0]) + map_bonus,
-            frames_simulated=30,
-            collided=False,
-            checkpoints_completed=3,
-            completed_laps=0,
-            map_id=official_map.map_id,
-        )
+def make_client(tmp_path, clock: Clock) -> TestClient:
+    storage = CompetitionStorage(tmp_path / "competition.db", clock=clock)
+    return TestClient(create_app(storage=storage, start_worker=False, admin_token="secret"))
 
 
-def make_client(tmp_path, *, start_worker: bool = False):
-    storage = CompetitionStorage(tmp_path / "competition.db")
-    app = create_app(
-        storage=storage,
-        evaluator=FakeEvaluator(),
-        start_worker=start_worker,
-        admin_token="secret",
-        worker_poll_interval=0.05,
-    )
-    return TestClient(app)
-
-
-def process_pending(client: TestClient) -> int:
+def submit(client: TestClient, competition_id: str, **kwargs) -> dict:
     response = client.post(
-        "/api/admin/process-pending",
+        f"/v2/competitions/{competition_id}/submissions",
+        json=make_payload(**kwargs),
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def process_now(client: TestClient) -> int:
+    response = client.post(
+        "/v2/admin/batches/run-now",
         headers={"X-Admin-Token": "secret"},
     )
-    response.raise_for_status()
+    assert response.status_code == 200
     return int(response.json()["processed"])
 
 
-def test_new_submission_format_creates_pending_submission(tmp_path):
-    with make_client(tmp_path) as client:
-        response = client.post("/api/submissions", json=make_payload())
+def test_phase_one_submission_is_queued_and_cooldown_is_per_competition(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        eligibility = client.post(
+            "/v2/competitions/easy/eligibility",
+            json={"group_id": "1", "username": "ada"},
+        )
+        first = submit(client, "easy", username="ada")
+        easy_again = client.post(
+            "/v2/competitions/easy/eligibility",
+            json={"group_id": "1", "username": "ada"},
+        )
+        hard = client.post(
+            "/v2/competitions/hard/eligibility",
+            json={"group_id": "1", "username": "ada"},
+        )
+        duplicate = client.post(
+            "/v2/competitions/easy/submissions",
+            json=make_payload(username="ada"),
+        )
 
-    assert response.status_code == 201
-    assert response.json()["status"] == "pending"
-    assert response.json()["phase"] == "personal"
+    assert eligibility.json()["eligible"] is True
+    assert first["status"] == "queued"
+    assert easy_again.json()["reason"] == "submission_cooldown"
+    assert hard.json()["eligible"] is True
+    assert duplicate.status_code == 429
+    assert duplicate.json()["error"] == "submission_cooldown"
 
 
-def test_old_submission_format_and_invalid_shapes_are_rejected(tmp_path):
-    old_payload = {
-        "model_version": "v1",
-        "layer_sizes": [6, 6, 4],
+def test_batch_boundary_seals_queued_submissions_and_persists_snapshot(tmp_path):
+    clock = Clock()
+    storage = CompetitionStorage(tmp_path / "competition.db", clock=clock)
+    from shared.contracts import ClientResult, SubmissionPayload
+
+    payload = SubmissionPayload("1", "ada", [[0.0] * 36, [0.0] * 24], [[0.0] * 6, [0.0] * 4])
+    storage.create_submission("easy", payload, ClientResult(False, None, 1_200.0, 300))
+
+    assert storage.seal_phase_one_batches(now=clock.current) == 0
+    clock.advance(minutes=4)
+    assert storage.seal_phase_one_batches(now=clock.current) == 1
+    leaderboard = storage.leaderboard("easy")
+    snapshot = storage.latest_snapshot("easy")
+
+    assert leaderboard[0]["status"] == "completed"
+    assert snapshot is not None
+    assert snapshot["snapshot"]["submission_ids"] == [leaderboard[0]["submission_id"]]
+
+
+def test_ranking_uses_client_result_and_keeps_individual_historical_best(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        first = submit(client, "easy", username="ada", max_progress=2_000.0)
+        submit(client, "easy", group_id="2", username="ada", completed=True, lap_ticks=520)
+        submit(client, "easy", group_id="3", username="ben", completed=True, lap_ticks=480)
+        assert process_now(client) == 3
+
+        clock.advance(minutes=5)
+        better = submit(client, "easy", username="ada", completed=True, lap_ticks=510)
+        assert process_now(client) == 1
+        leaderboard = client.get("/v2/competitions/easy/leaderboard").json()
+
+    assert [row["username"] for row in leaderboard] == ["ben", "ada", "ada"]
+    assert leaderboard[1]["submission_id"] == better["submission_id"]
+    assert first["submission_id"] not in [row["submission_id"] for row in leaderboard]
+    assert leaderboard[2]["group_id"] == "2"
+
+
+def test_ranking_prefers_completion_then_lap_ticks_then_progress_then_time(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        submit(client, "hard", username="slow_finish", completed=True, lap_ticks=600)
+        submit(client, "hard", username="fast_finish", completed=True, lap_ticks=500)
+        submit(client, "hard", username="far", max_progress=3_000.0, ticks_to_max_progress=400)
+        submit(client, "hard", username="near", max_progress=2_000.0, ticks_to_max_progress=100)
+        process_now(client)
+        leaderboard = client.get("/v2/competitions/hard/leaderboard").json()
+
+    assert [row["username"] for row in leaderboard] == [
+        "fast_finish",
+        "slow_finish",
+        "far",
+        "near",
+    ]
+
+
+def test_final_stage_gates_submissions_and_locks_one_model_per_group(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        closed = client.post("/v2/finals/submissions", json=make_payload(group_id="1", username="ada"))
+        stage = client.post(
+            "/v2/admin/stage",
+            headers={"X-Admin-Token": "secret"},
+            json={"stage": "final"},
+        )
+        first = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=520),
+        )
+        duplicate = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
+        )
+        other = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="2", username="cy", completed=True, lap_ticks=480),
+        )
+        leaderboard = client.get("/v2/competitions/final/leaderboard").json()
+
+    assert closed.status_code == 409
+    assert stage.json()["stage"] == "final"
+    assert first.status_code == 201
+    assert first.json()["status"] == "completed"
+    assert duplicate.status_code == 409
+    assert duplicate.json()["error"] == "final_locked"
+    assert other.status_code == 201
+    assert [row["group_id"] for row in leaderboard] == ["2", "1"]
+
+
+def test_submission_validation_rejects_bad_client_result_shape_and_non_finite_genes(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        bad_result = make_payload(lap_ticks=20)
+        bad_result["client_result"]["lap_ticks"] = 20
+        result_response = client.post("/v2/competitions/easy/submissions", json=bad_result)
+
+        bad_shape = make_payload()
+        bad_shape["weights"][0] = [0.0]
+        shape_response = client.post("/v2/competitions/easy/submissions", json=bad_shape)
+
+        non_finite = make_payload()
+        non_finite["weights"][0][0] = float("nan")
+        finite_response = client.post(
+            "/v2/competitions/easy/submissions",
+            content=json.dumps(non_finite),
+            headers={"Content-Type": "application/json"},
+        )
+
+    assert result_response.status_code == 400
+    assert "lap_ticks" in result_response.json()["detail"]
+    assert shape_response.status_code == 400
+    assert "weights[0]" in shape_response.json()["detail"]
+    assert finite_response.status_code == 400
+    assert "finite" in finite_response.json()["detail"]
+
+
+def test_public_endpoints_do_not_expose_models_and_protected_replay_returns_top_15(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        for index in range(16):
+            submit(
+                client,
+                "easy",
+                group_id=str(index + 1),
+                username=f"player{index}",
+                max_progress=float(index),
+            )
+        process_now(client)
+        public_submission = client.get(
+            "/v2/competitions/easy/submissions/" + client.get("/v2/competitions/easy/leaderboard").json()[0]["submission_id"]
+        )
+        denied_replay = client.get("/v2/admin/replay")
+        replay = client.get("/v2/admin/replay", headers={"X-Admin-Token": "secret"})
+
+    assert "weights" not in public_submission.json()
+    assert "biases" not in public_submission.json()
+    assert denied_replay.status_code == 401
+    assert replay.status_code == 200
+    assert len(replay.json()["replays"]["easy"]["items"]) == 15
+    assert len(replay.json()["replays"]["easy"]["items"][0]["weights"][0]) == 36
+
+
+def test_maps_are_fixed_and_collision_surfaces_have_a_drivable_spawn(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        maps = client.get("/v2/maps").json()
+        previews = [client.get(f"/v2/maps/{item['competition_id']}/preview") for item in maps]
+
+    assert [item["map_id"] for item in maps] == [
+        "kaggle_easy",
+        "kaggle_hard",
+        "kaggle_final",
+    ]
+    assert all(response.status_code == 200 and response.content.startswith(b"\x89PNG") for response in previews)
+    pygame.init()
+    for competition_id in ("easy", "hard", "final"):
+        competition_map = get_competition_map(competition_id)
+        spawn = competition_map.spawn
+        collision = competition_map.build_collision_surface()
+        assert collision.get_at((round(spawn["x"]), round(spawn["y"]))).a > 0
+
+
+def test_dual_replay_sessions_keep_collision_surfaces_per_car():
+    from game_engine.backend.assets import load_game_assets
+    from game_engine.frontend.replay_client import load_replay_sessions
+
+    pygame.init()
+    pygame.display.set_mode((1, 1))
+    item = {
+        "rank": 1,
+        "submission_id": "sub_demo",
+        "group_id": "1",
+        "username": "ada",
+        "client_result": make_payload()["client_result"],
         "weights": [[0.0] * 36, [0.0] * 24],
         "biases": [[0.0] * 6, [0.0] * 4],
-        "fitness_score": 1.0,
-        "generation": 1,
-        "track_id": "client",
-        "track_seed": 42,
-        "nickname": "tester",
     }
-    with make_client(tmp_path) as client:
-        old_response = client.post("/api/submissions", json=old_payload)
-        invalid_response = client.post(
-            "/api/submissions",
-            json=make_payload(weights=[[0.0], [0.0] * 24]),
-        )
+    sessions = load_replay_sessions(
+        {
+            "replays": {
+                "easy": {"items": [item], "leaderboard": []},
+                "hard": {"items": [item], "leaderboard": []},
+            }
+        },
+        load_game_assets(),
+    )
 
-    assert old_response.status_code == 422
-    assert invalid_response.status_code == 400
-    assert "weights[0]" in invalid_response.json()["detail"]
+    assert sessions["easy"].track.collision is not sessions["hard"].track.collision
+    assert sessions["easy"].cars[0].car.collision_surface is sessions["easy"].track.collision
+    assert sessions["hard"].cars[0].car.collision_surface is sessions["hard"].track.collision
 
 
-def test_submission_query_requires_admin_token(tmp_path):
-    with make_client(tmp_path) as client:
-        submission_id = client.post(
-            "/api/submissions",
-            json=make_payload(),
-        ).json()["submission_id"]
-        denied_list = client.get("/api/submissions")
-        denied_detail = client.get(f"/api/submissions/{submission_id}")
-        allowed = client.get(
-            f"/api/submissions/{submission_id}",
+def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        submit(client, "easy", username="ada")
+        process_now(client)
+        client.post(
+            "/v2/admin/stage",
             headers={"X-Admin-Token": "secret"},
+            json={"stage": "final"},
         )
+        reset = client.post("/v2/admin/reset-all", headers={"X-Admin-Token": "secret"})
+        state = client.get("/v2/state").json()
+        leaderboard = client.get("/v2/competitions/easy/leaderboard").json()
+        admin_rows = client.get("/v2/admin/submissions", headers={"X-Admin-Token": "secret"}).json()
 
-    assert denied_list.status_code == 401
-    assert denied_detail.status_code == 401
-    assert allowed.status_code == 200
-    assert allowed.json()["username"] == "tester"
-
-
-def test_pending_batch_evaluates_and_updates_personal_leaderboard(tmp_path):
-    with make_client(tmp_path) as client:
-        submission_id = client.post(
-            "/api/submissions",
-            json=make_payload(username="ada", score_hint=2.0),
-        ).json()["submission_id"]
-        processed = process_pending(client)
-        leaderboard = client.get("/api/leaderboard").json()
-
-    assert processed == 1
-    assert leaderboard[0]["username"] == "ada"
-    assert leaderboard[0]["submission_id"] == submission_id
-    assert leaderboard[0]["score_laps"] == 2.01
+    assert reset.json() == {"status": "reset", "scope": "competition"}
+    assert state["stage"] == "final"
+    assert leaderboard == []
+    assert admin_rows == []
 
 
-def test_personal_leaderboard_keeps_highest_score_and_earliest_tie(tmp_path):
-    with make_client(tmp_path) as client:
-        first = client.post(
-            "/api/submissions",
-            json=make_payload(username="ada", score_hint=2.0),
-        ).json()["submission_id"]
-        client.post(
-            "/api/submissions",
-            json=make_payload(username="ada", score_hint=1.0),
-        )
-        process_pending(client)
-        leaderboard = client.get("/api/leaderboard").json()
-
-    assert len(leaderboard) == 1
-    assert leaderboard[0]["submission_id"] == first
-    assert leaderboard[0]["score_laps"] == 2.01
-
-
-def test_group_phase_groups_by_group_id_and_exposes_best_username(tmp_path):
-    with make_client(tmp_path) as client:
-        client.post(
-            "/api/admin/phase",
-            headers={"X-Admin-Token": "secret"},
-            json={"phase": "group"},
-        )
-        client.post(
-            "/api/submissions",
-            json=make_payload(group_id="7", username="alice", score_hint=1.0),
-        )
-        client.post(
-            "/api/submissions",
-            json=make_payload(group_id="7", username="bob", score_hint=3.0),
-        )
-        process_pending(client)
-        leaderboard = client.get("/api/leaderboard").json()
-
-    assert len(leaderboard) == 1
-    assert leaderboard[0]["group_id"] == "7"
-    assert leaderboard[0]["best_username"] == "bob"
-    assert leaderboard[0]["score_laps"] == 3.01
-
-
-def test_phase_switch_preserves_separate_results_and_reset_clears_active_phase(tmp_path):
-    with make_client(tmp_path) as client:
-        client.post(
-            "/api/submissions",
-            json=make_payload(username="solo", score_hint=2.0),
-        )
-        process_pending(client)
-        personal_rows = client.get("/api/leaderboard").json()
-
-        client.post(
-            "/api/admin/phase",
-            headers={"X-Admin-Token": "secret"},
-            json={"phase": "group"},
-        )
-        group_rows_before = client.get("/api/leaderboard").json()
-        client.post(
-            "/api/submissions",
-            json=make_payload(group_id="2", username="member", score_hint=4.0),
-        )
-        process_pending(client)
-        group_rows_after = client.get("/api/leaderboard").json()
-        reset = client.post(
-            "/api/admin/reset",
-            headers={"X-Admin-Token": "secret"},
-        )
-        group_rows_reset = client.get("/api/leaderboard").json()
-        client.post(
-            "/api/admin/phase",
-            headers={"X-Admin-Token": "secret"},
-            json={"phase": "personal"},
-        )
-        personal_rows_again = client.get("/api/leaderboard").json()
-
-    assert personal_rows[0]["username"] == "solo"
-    assert group_rows_before == []
-    assert group_rows_after[0]["group_id"] == "2"
-    assert reset.json()["phase"] == "group"
-    assert group_rows_reset == []
-    assert personal_rows_again[0]["username"] == "solo"
-
-
-def test_map_change_reruns_best_submission_for_phase(tmp_path):
-    with make_client(tmp_path) as client:
-        client.post(
-            "/api/submissions",
-            json=make_payload(username="ada", score_hint=2.0),
-        )
-        process_pending(client)
-        before = client.get("/api/leaderboard").json()[0]
-        maps = client.get("/api/maps").json()
-        new_map_id = maps[1]["map_id"]
-        client.post(
-            "/api/admin/map",
-            headers={"X-Admin-Token": "secret"},
-            json={"phase": "personal", "map_id": new_map_id},
-        )
-        after = client.get("/api/leaderboard").json()[0]
-
-    assert before["map_id"] != new_map_id
-    assert after["map_id"] == new_map_id
-    assert after["score_laps"] == 2.02
-
-
-def test_replay_top_is_public_and_contains_payload(tmp_path):
-    with make_client(tmp_path) as client:
-        client.post(
-            "/api/submissions",
-            json=make_payload(username="ada", score_hint=2.0),
-        )
-        process_pending(client)
-        replay = client.get("/api/replay/top?n=10").json()
-
-    assert replay["phase"] == "personal"
-    assert replay["map"]["map_id"] == "official_001"
-    assert replay["items"][0]["username"] == "ada"
-    assert len(replay["items"][0]["weights"][0]) == 36
-
-
-def test_map_preview_serves_official_track_image(tmp_path):
-    with make_client(tmp_path) as client:
-        map_id = client.get("/api/maps").json()[0]["map_id"]
-        preview = client.get(f"/api/maps/{map_id}/preview")
-        missing = client.get("/api/maps/not-a-map/preview")
-
-    assert preview.status_code == 200
-    assert preview.headers["content-type"] == "image/png"
-    assert preview.content.startswith(b"\x89PNG")
-    assert missing.status_code == 404
-
-
-def test_websocket_sends_complete_update_after_batch(tmp_path):
-    with make_client(tmp_path) as client:
-        client.post(
-            "/api/submissions",
-            json=make_payload(username="ada", score_hint=2.0),
-        )
-        process_pending(client)
+def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        page = client.get("/leaderboard")
+        admin = client.get("/admin")
+        submit(client, "easy", username="ada")
+        process_now(client)
         with client.websocket_connect("/ws/events") as websocket:
             event = websocket.receive_json()
 
-    assert event["type"] == "competition_updated"
-    assert event["leaderboard"][0]["username"] == "ada"
-    assert event["replay_top"][0]["username"] == "ada"
+    assert page.status_code == 200
+    assert "data-competition=\"easy\"" in page.text
+    assert admin.status_code == 200
+    assert "Create Demo Snapshot" in admin.text
+    assert event["type"] == "competition_snapshot_updated"
+    assert event["leaderboards"]["easy"][0]["username"] == "ada"
 
 
-def test_mock_data_creates_pending_and_evaluated_submissions(tmp_path):
-    storage = CompetitionStorage(tmp_path / "competition.db")
-    pending = create_mock_submissions(
-        storage=storage,
-        evaluator=FakeEvaluator(),
-        count=10,
-        state="pending",
-        reset=True,
+def test_replay_marks_a_stationary_car_as_stalled_after_stagnation_limit():
+    from game_engine.frontend.replay_client import ReplayCar, update_replay_cars
+
+    class StationaryCar:
+        x = 143.0
+        y = 450.0
+        collided = False
+
+        def update(self) -> None:
+            return None
+
+        def collision(self) -> bool:
+            return False
+
+        def feedforward(self) -> None:
+            return None
+
+        def takeAction(self) -> None:
+            return None
+
+    replay_car = ReplayCar(
+        item={"rank": 1, "username": "spinner"},
+        car=StationaryCar(),  # type: ignore[arg-type]
+        color=(255, 255, 255),
     )
-    evaluated = create_mock_submissions(
-        storage=storage,
-        evaluator=FakeEvaluator(),
-        count=3,
-        state="evaluated",
-    )
+    for _ in range(STAGNATION_TICKS):
+        update_replay_cars([replay_car])
 
-    assert len(pending) == 10
-    assert len(evaluated) == 3
-    assert len(storage.leaderboard(limit=30)) == 3
-    assert len(storage.replay_top(limit=10)) == 3
+    assert replay_car.stalled is True
 
 
-class FakeReplayCar:
-    def __init__(self, collisions: list[bool]) -> None:
-        self.collisions = collisions
-        self.collided = False
-        self.update_count = 0
-        self.feedforward_count = 0
-        self.action_count = 0
-        self.x = 120
-        self.y = 480
+def test_admin_can_restart_replay_generation(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        before = client.get("/v2/state").json()["replay_generation"]
+        restart = client.post(
+            "/v2/admin/replay/restart",
+            headers={"X-Admin-Token": "secret"},
+        )
+        after = client.get("/v2/state").json()["replay_generation"]
 
-    def update(self) -> None:
-        self.update_count += 1
-
-    def collision(self) -> bool:
-        if self.collisions:
-            return self.collisions.pop(0)
-        return False
-
-    def feedforward(self) -> None:
-        self.feedforward_count += 1
-
-    def takeAction(self) -> None:
-        self.action_count += 1
-
-
-def test_replay_session_stops_crashed_car_but_keeps_others_running():
-    crashed_car = FakeReplayCar([True])
-    running_car = FakeReplayCar([False, False])
-    session = ReplaySession(
-        cars=[
-            ReplayCar({"group_id": "1", "username": "crash"}, crashed_car, (255, 0, 0)),
-            ReplayCar({"group_id": "2", "username": "run"}, running_car, (0, 255, 0)),
-        ],
-        frame_limit=2,
-        crash_hold_frames=1,
-    )
-
-    assert session.tick() is False
-    assert session.cars[0].crashed is True
-    assert crashed_car.update_count == 1
-    assert running_car.update_count == 1
-    assert running_car.action_count == 1
-
-    assert session.tick() is True
-    assert crashed_car.update_count == 1
-    assert running_car.update_count == 2
-    assert running_car.action_count == 2
-
-
-def test_replay_session_restarts_after_all_cars_crash_and_hold_expires():
-    first_car = FakeReplayCar([True])
-    second_car = FakeReplayCar([True])
-    session = ReplaySession(
-        cars=[
-            ReplayCar({"group_id": "1", "username": "one"}, first_car, (255, 0, 0)),
-            ReplayCar({"group_id": "2", "username": "two"}, second_car, (0, 255, 0)),
-        ],
-        frame_limit=60,
-        crash_hold_frames=2,
-    )
-
-    assert session.tick() is False
-    assert session.all_crashed_at_frame == 1
-    assert session.tick() is False
-    assert session.tick() is True
-    assert first_car.update_count == 1
-    assert second_car.update_count == 1
-
-
-def test_official_evaluator_is_deterministic(tmp_path):
-    payload = SubmissionPayload.from_dict(make_payload())
-    storage = CompetitionStorage(tmp_path / "competition.db")
-    official_map = storage.active_map()
-    evaluator = OfficialEvaluator(seconds_per_run=1)
-
-    first = evaluator.evaluate(payload, official_map)
-    second = evaluator.evaluate(payload, official_map)
-
-    assert first.to_dict() == second.to_dict()
+    assert restart.status_code == 200
+    assert restart.json()["replay_generation"] == before + 1
+    assert after == before + 1

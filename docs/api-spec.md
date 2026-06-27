@@ -1,125 +1,98 @@
-# Competition API Spec
+# Trusted Client Competition API v2
 
-## Submission
+The server validates payloads, identities, cooldowns, batches, snapshots, and ranking. It
+does not replay submissions to calculate official metrics: the client-provided
+`client_result` is the ranking source.
 
-### `POST /api/submissions`
+## Competition State
 
-建立一筆 submission。Submission 會歸屬到當下 active phase。
+`GET /v2/state` returns the active stage, immutable `competition-2026-v1` settings, next
+UTC batch time, and the fixed Easy, Hard, and Final maps.
 
-Request:
+- Phase 1 accepts `easy` and `hard` submissions from individual identities
+  `(group_id, username)`.
+- Final accepts one submission per `group_id`.
+- Configuration: 30 FPS, 900-frame limit, 180-tick stagnation limit, Phase 1 five-minute
+  UTC snapshots.
+
+## Eligibility And Submission
+
+Before local evaluation, clients call one of these endpoints with `group_id` and `username`:
+
+```text
+POST /v2/competitions/easy/eligibility
+POST /v2/competitions/hard/eligibility
+POST /v2/finals/eligibility
+```
+
+The response includes `eligible`, a rejection `reason` when blocked, `next_submission_at`,
+current `stage`, and `competition_config_version`. Eligibility is advisory; the matching
+submission endpoint repeats the check atomically.
+
+```text
+POST /v2/competitions/{easy|hard}/submissions
+POST /v2/finals/submissions
+```
+
+Request body:
 
 ```json
 {
   "group_id": "1",
   "username": "player1",
-  "weights": [[0.0], [0.0]],
-  "biases": [[0.0], [0.0]]
+  "weights": [[36 floats], [24 floats]],
+  "biases": [[6 floats], [4 floats]],
+  "client_result": {
+    "completed": false,
+    "lap_ticks": null,
+    "max_progress": 1250.5,
+    "ticks_to_max_progress": 840
+  }
 }
 ```
 
-Shape:
+All genes and progress values must be finite. Incomplete runs require `lap_ticks: null`;
+completed runs require a positive `lap_ticks`. Tick values cannot exceed 900.
 
-- `weights[0]`: 36 floats
-- `weights[1]`: 24 floats
-- `biases[0]`: 6 floats
-- `biases[1]`: 4 floats
+Easy and Hard have separate five-minute cooldowns. Cooldown failures return `429` with
+`error: submission_cooldown`; closed competitions and a locked Final group return `409`.
+Successful Phase 1 submissions are `queued` until the next snapshot; Final submissions become
+`completed` immediately.
 
-Response:
-
-```json
-{
-  "submission_id": "sub_xxxxxxxx",
-  "status": "pending",
-  "phase": "personal"
-}
-```
-
-舊欄位如 `model_version`、`layer_sizes`、`fitness_score`、`nickname` 不再接受。
-
-## Public Read APIs
-
-### `GET /api/state`
-
-回傳目前 active phase 與各 phase 使用的 map。
-
-### `GET /api/maps`
-
-回傳可選官方地圖 metadata。
-
-### `GET /api/maps/{map_id}/preview`
-
-回傳指定官方地圖的 front image PNG，供 admin 頁或其他控制台預覽地圖。
-
-### `GET /api/leaderboard`
-
-回傳 active phase top30。只包含 evaluated submissions。
-
-### `GET /api/replay/top?n=10`
-
-回傳 active phase topN replay payload。此 endpoint 公開，包含 weights/biases。
-
-## Admin APIs
-
-Admin endpoints 需要 header：
+## Public Data
 
 ```text
-X-Admin-Token: admin
+GET /v2/competitions/{easy|hard|final}/leaderboard
+GET /v2/competitions/{competition_id}/submissions/{submission_id}
+GET /v2/maps
+GET /v2/maps/{competition_id}/preview
+GET /ws/events
 ```
 
-### `GET /api/submissions`
+Leaderboards keep each individual's historical best for Easy/Hard and each group's locked
+Final result. Ranking is completed runs, fastest lap ticks, maximum progress, earliest tick to
+that progress, earliest accepted submission, then submission ID.
 
-列出 submissions，包含 debug 欄位與模型 payload。
+Public responses never contain weights or biases. WebSocket events use
+`competition_snapshot_updated` and contain stage, config, and public leaderboards.
 
-### `GET /api/submissions/{submission_id}`
+## Protected Admin And Replay APIs
 
-查詢單筆 submission。
+All protected endpoints require `X-Admin-Token`.
 
-### `POST /api/admin/phase`
-
-Request:
-
-```json
-{ "phase": "personal" }
+```text
+GET  /v2/admin/submissions
+GET  /v2/admin/replay
+POST /v2/admin/stage              { "stage": "phase_one" | "final" }
+POST /v2/admin/batches/run-now
+POST /v2/admin/replay/restart
+POST /v2/admin/reset-all
 ```
 
-切換 active phase，不刪除另一 phase 資料，也不重新評分。
+`/v2/admin/replay` is the only HTTP endpoint that returns top-15 model parameters for the
+Pygame big-screen replay. Reset clears submissions, cooldown history, and snapshots while
+preserving the selected stage and immutable configuration.
 
-### `POST /api/admin/map`
-
-Request:
-
-```json
-{
-  "phase": "personal",
-  "map_id": "official_001"
-}
-```
-
-設定該 phase 使用的官方地圖，並立即重跑該 phase 每個 identity 的目前最佳 submission。
-
-### `POST /api/admin/reset`
-
-清除目前 active phase 的 submissions/results。
-
-### `POST /api/admin/process-pending`
-
-立即處理目前所有 pending submissions，方便現場測試。
-
-## WebSocket
-
-### `GET /ws/events`
-
-Server 會在批次評分完成、phase 切換、地圖切換、reset 後推送：
-
-```json
-{
-  "type": "competition_updated",
-  "phase": "personal",
-  "map": {},
-  "updated_at": "2026-06-20T00:00:00+00:00",
-  "leaderboard": [],
-  "replay_top": []
-}
-```
-
-`leaderboard` 固定為 top30，`replay_top` 固定為 top10。
+`POST /v2/admin/replay/restart` increments the replay generation without changing any
+submission or leaderboard data. Active replay clients poll this generation and restart from
+spawn within one second.

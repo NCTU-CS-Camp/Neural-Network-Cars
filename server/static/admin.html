@@ -5,285 +5,42 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Neural Cars Admin</title>
   <style>
-    :root {
-      color-scheme: dark;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #11161c;
-      color: #f5f7fa;
-    }
-    body { margin: 0; min-height: 100vh; background: #11161c; }
-    main { max-width: 760px; margin: 0 auto; padding: 32px 24px 48px; }
-    h1 { margin: 0 0 24px; font-size: 36px; }
-    section { border-top: 1px solid #28323d; padding: 24px 0; }
-    label { display: block; color: #aeb9c5; margin-bottom: 8px; font-size: 14px; }
-    input, select {
-      box-sizing: border-box;
-      width: 100%;
-      border: 1px solid #35414d;
-      border-radius: 8px;
-      background: #18212b;
-      color: #f5f7fa;
-      padding: 12px 14px;
-      font-size: 16px;
-      margin-bottom: 12px;
-    }
-    button {
-      border: 0;
-      border-radius: 8px;
-      background: #3d8bfd;
-      color: #ffffff;
-      padding: 11px 16px;
-      font-size: 15px;
-      font-weight: 700;
-      cursor: pointer;
-      margin-right: 8px;
-    }
-    button.danger { background: #d94848; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .map-preview {
-      border: 1px solid #28323d;
-      border-radius: 8px;
-      background: #0d1218;
-      overflow: hidden;
-      margin: 4px 0 16px;
-    }
-    .preview-head {
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 12px 14px;
-      color: #cbd5df;
-      border-bottom: 1px solid #202a34;
-      font-size: 14px;
-    }
-    .preview-meta { color: #8ea0b3; white-space: nowrap; }
-    canvas {
-      display: block;
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      background: #0a0f14;
-    }
-    pre {
-      min-height: 72px;
-      white-space: pre-wrap;
-      border: 1px solid #28323d;
-      border-radius: 8px;
-      background: #0d1218;
-      color: #cbd5df;
-      padding: 14px;
-    }
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #0b1118; color: #f4f7fb; }
+    * { box-sizing: border-box; } body { margin: 0; background: #0b1118; } main { max-width: 1120px; margin: 0 auto; padding: 32px 24px 48px; }
+    h1 { margin: 0; font-size: 36px; } h2 { margin: 0 0 14px; font-size: 18px; } section { border-top: 1px solid #273542; padding: 24px 0; }
+    label { display:block; color:#9cadbf; font-size:14px; margin-bottom:8px; } input, select { width:100%; padding:12px; border:1px solid #354656; border-radius:6px; background:#131d27; color:#f4f7fb; font:inherit; }
+    button { border:0; border-radius:6px; padding:11px 15px; background:#3f98e7; color:#fff; font:inherit; font-weight:800; cursor:pointer; } button.secondary { background:#243340; color:#dce7f0; } button.danger { background:#c84c55; }
+    .row { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:end; gap:14px; } .actions { display:flex; flex-wrap:wrap; gap:10px; }
+    .state { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; } .metric { border-left:3px solid #4a6277; padding:10px 12px; background:#101821; } .metric strong, .metric span { display:block; } .metric span { color:#9cadbf; font-size:13px; margin-top:4px; }
+    .maps { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; } .map { border:1px solid #263542; background:#101821; } .map header { padding:11px 12px; color:#c6d2dd; font-weight:800; } .map img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; background:#060a0e; }
+    pre { margin:0; min-height:90px; padding:14px; border:1px solid #263542; background:#080e14; color:#c2d1dc; white-space:pre-wrap; overflow:auto; }
+    @media(max-width:760px) { .state, .maps { grid-template-columns:1fr; } .row { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
   <main>
     <h1>Competition Admin</h1>
+    <section><label for="token">Admin token</label><input id="token" type="password" autocomplete="off" placeholder="admin token"></section>
+    <section><h2>Competition State</h2><div class="state" id="state"><div class="metric">Loading</div></div></section>
     <section>
-      <label for="token">Admin token</label>
-      <input id="token" type="password" autocomplete="off" placeholder="admin token">
+      <h2>Stage Control</h2>
+      <div class="row"><div><label for="stage">Active stage</label><select id="stage"><option value="phase_one">Phase 1: Easy + Hard</option><option value="final">Final: Group</option></select></div><button id="set-stage">Set Stage</button></div>
     </section>
-    <section>
-      <div class="row">
-        <div>
-          <label for="phase">Active phase</label>
-          <select id="phase">
-            <option value="personal">personal</option>
-            <option value="group">group</option>
-          </select>
-        </div>
-        <div>
-          <label>&nbsp;</label>
-          <button id="set-phase">Set Active Phase</button>
-        </div>
-      </div>
-    </section>
-    <section>
-      <label for="personal-map">Personal phase map</label>
-      <select id="personal-map"></select>
-      <div class="map-preview">
-        <div class="preview-head">
-          <strong id="personal-preview-title">Map preview</strong>
-          <span class="preview-meta" id="personal-preview-meta"></span>
-        </div>
-        <canvas id="personal-preview" width="1600" height="900"></canvas>
-      </div>
-      <button data-map-phase="personal">Set Personal Map</button>
-    </section>
-    <section>
-      <label for="group-map">Group phase map</label>
-      <select id="group-map"></select>
-      <div class="map-preview">
-        <div class="preview-head">
-          <strong id="group-preview-title">Map preview</strong>
-          <span class="preview-meta" id="group-preview-meta"></span>
-        </div>
-        <canvas id="group-preview" width="1600" height="900"></canvas>
-      </div>
-      <button data-map-phase="group">Set Group Map</button>
-    </section>
-    <section>
-      <button class="danger" id="reset">Reset Active Phase</button>
-      <button id="process">Process Pending Now</button>
-    </section>
-    <pre id="output">Ready</pre>
+    <section><h2>Competition Maps</h2><div class="maps" id="maps"></div></section>
+    <section><h2>Operations</h2><div class="actions"><button id="run-batch">Create Demo Snapshot</button><button class="secondary" id="restart-replay">Restart Replay</button><button class="danger" id="reset">Reset Competition Data</button></div></section>
+    <section><pre id="output">Ready</pre></section>
   </main>
   <script>
-    const token = document.getElementById("token");
-    const phase = document.getElementById("phase");
-    const personalMap = document.getElementById("personal-map");
-    const groupMap = document.getElementById("group-map");
-    const output = document.getElementById("output");
-    let mapsById = new Map();
-
-    function headers() {
-      return {
-        "Content-Type": "application/json",
-        "X-Admin-Token": token.value
-      };
-    }
-
-    async function call(url, options) {
-      const response = await fetch(url, options);
-      const text = await response.text();
-      output.textContent = `${response.status} ${response.statusText}\n${text}`;
-      await loadState();
-    }
-
-    async function loadState() {
-      const [stateResponse, mapsResponse] = await Promise.all([
-        fetch("/api/state", { cache: "no-store" }),
-        fetch("/api/maps", { cache: "no-store" })
-      ]);
-      const state = await stateResponse.json();
-      const maps = await mapsResponse.json();
-      mapsById = new Map(maps.map((map) => [map.map_id, map]));
-      phase.value = state.active_phase;
-      for (const select of [personalMap, groupMap]) {
-        select.innerHTML = maps.map((map) => `
-          <option value="${map.map_id}">${map.map_id} - ${map.name}</option>
-        `).join("");
-      }
-      personalMap.value = state.personal_map_id;
-      groupMap.value = state.group_map_id;
-      updateMapPreview("personal");
-      updateMapPreview("group");
-    }
-
-    function updateMapPreview(mapPhase) {
-      const select = mapPhase === "personal" ? personalMap : groupMap;
-      const map = mapsById.get(select.value);
-      const canvas = document.getElementById(`${mapPhase}-preview`);
-      const title = document.getElementById(`${mapPhase}-preview-title`);
-      const meta = document.getElementById(`${mapPhase}-preview-meta`);
-      const ctx = canvas.getContext("2d");
-
-      if (!map) {
-        title.textContent = "No map selected";
-        meta.textContent = "";
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        return;
-      }
-
-      title.textContent = `${map.map_id} - ${map.name}`;
-      meta.textContent = `${map.checkpoints.length} checkpoints`;
-
-      const image = new Image();
-      image.onload = () => {
-        canvas.width = image.naturalWidth || 1600;
-        canvas.height = image.naturalHeight || 900;
-        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-        drawCheckpointOverlay(ctx, map);
-      };
-      image.onerror = () => {
-        canvas.width = 1600;
-        canvas.height = 900;
-        ctx.fillStyle = "#0a0f14";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "#cbd5df";
-        ctx.font = "28px ui-sans-serif, system-ui";
-        ctx.fillText("Preview unavailable", 48, 72);
-      };
-      image.src = `/api/maps/${encodeURIComponent(map.map_id)}/preview`;
-    }
-
-    function drawCheckpointOverlay(ctx, map) {
-      ctx.save();
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.font = "bold 22px ui-sans-serif, system-ui";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      for (const checkpoint of map.checkpoints) {
-        const [ax, ay] = checkpoint.a;
-        const [bx, by] = checkpoint.b;
-        const [cx, cy] = checkpoint.center;
-
-        ctx.strokeStyle = "rgba(66, 202, 255, 0.88)";
-        ctx.lineWidth = 6;
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(bx, by);
-        ctx.stroke();
-
-        ctx.fillStyle = "rgba(66, 202, 255, 0.95)";
-        ctx.beginPath();
-        ctx.arc(cx, cy, 12, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = "#071018";
-        ctx.fillText(String(checkpoint.index + 1), cx, cy);
-      }
-
-      const spawn = map.spawn;
-      ctx.fillStyle = "rgba(99, 255, 158, 0.95)";
-      ctx.strokeStyle = "#071018";
-      ctx.lineWidth = 5;
-      ctx.beginPath();
-      ctx.arc(spawn.x, spawn.y, 18, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = "#071018";
-      ctx.font = "bold 18px ui-sans-serif, system-ui";
-      ctx.fillText("S", spawn.x, spawn.y + 1);
-      ctx.restore();
-    }
-
-    document.getElementById("set-phase").addEventListener("click", () => {
-      call("/api/admin/phase", {
-        method: "POST",
-        headers: headers(),
-        body: JSON.stringify({ phase: phase.value })
-      });
-    });
-
-    document.querySelectorAll("[data-map-phase]").forEach((button) => {
-      button.addEventListener("click", () => {
-        const mapPhase = button.dataset.mapPhase;
-        const mapId = mapPhase === "personal" ? personalMap.value : groupMap.value;
-        call("/api/admin/map", {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({ phase: mapPhase, map_id: mapId })
-        });
-      });
-    });
-
-    personalMap.addEventListener("change", () => updateMapPreview("personal"));
-    groupMap.addEventListener("change", () => updateMapPreview("group"));
-
-    document.getElementById("reset").addEventListener("click", () => {
-      if (!confirm("Reset submissions for the active phase?")) return;
-      call("/api/admin/reset", { method: "POST", headers: headers() });
-    });
-
-    document.getElementById("process").addEventListener("click", () => {
-      call("/api/admin/process-pending", { method: "POST", headers: headers() });
-    });
-
-    loadState().catch((error) => {
-      output.textContent = `Failed to load state: ${error}`;
-    });
+    const token = document.getElementById("token"), stage = document.getElementById("stage"), output = document.getElementById("output"), stateEl = document.getElementById("state"), mapsEl = document.getElementById("maps");
+    function headers() { return {"Content-Type":"application/json", "X-Admin-Token":token.value}; }
+    async function call(url, options) { const response = await fetch(url, options); const text = await response.text(); output.textContent = `${response.status} ${response.statusText}\n${text}`; await load(); }
+    function renderState(data) { stage.value = data.stage; stateEl.innerHTML = `<div class="metric"><strong>${data.stage.replace("_", " ")}</strong><span>active stage</span></div><div class="metric"><strong>${data.config.version}</strong><span>configuration</span></div><div class="metric"><strong>${new Date(data.config.next_phase_one_batch_at).toLocaleTimeString()}</strong><span>next phase 1 snapshot</span></div>`; mapsEl.innerHTML = data.competitions.map((map) => `<article class="map"><header>${map.competition_id.toUpperCase()} · ${map.map_id}</header><img alt="${map.name}" src="/v2/maps/${map.competition_id}/preview"></article>`).join(""); }
+    async function load() { const response = await fetch("/v2/state", {cache:"no-store"}); renderState(await response.json()); }
+    document.getElementById("set-stage").addEventListener("click", () => call("/v2/admin/stage", {method:"POST", headers:headers(), body:JSON.stringify({stage:stage.value})}));
+    document.getElementById("run-batch").addEventListener("click", () => call("/v2/admin/batches/run-now", {method:"POST", headers:headers()}));
+    document.getElementById("restart-replay").addEventListener("click", () => call("/v2/admin/replay/restart", {method:"POST", headers:headers()}));
+    document.getElementById("reset").addEventListener("click", () => { if (confirm("Delete all submissions, cooldowns, and snapshots?")) call("/v2/admin/reset-all", {method:"POST", headers:headers()}); });
+    load().catch((error) => { output.textContent = `Failed to load: ${error}`; });
   </script>
 </body>
 </html>

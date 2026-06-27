@@ -8,19 +8,15 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from server.evaluation_worker import EvaluationWorker, Evaluator
-from server.evaluator import OfficialEvaluator
+from server.competition_maps import get_competition_map, list_competition_maps
+from server.evaluation_worker import BatchWorker
 from server.events import EventBroadcaster
-from server.schemas import (
-    AdminMapRequest,
-    AdminPhaseRequest,
-    SubmissionCreateResponse,
-    SubmissionIn,
-)
-from server.storage import CompetitionStorage
+from server.models import CompetitionId
+from server.schemas import AdminStageRequest, IdentityIn, SubmissionIn
+from server.storage import CompetitionStorage, SubmissionRejected
 
 
 DEFAULT_ADMIN_TOKEN = "admin"
@@ -29,17 +25,14 @@ DEFAULT_ADMIN_TOKEN = "admin"
 def create_app(
     *,
     storage: CompetitionStorage | None = None,
-    evaluator: Evaluator | None = None,
     start_worker: bool = True,
     admin_token: str | None = None,
-    worker_poll_interval: float = 60.0,
+    worker_poll_interval: float = 5.0,
 ) -> FastAPI:
     app_storage = storage or CompetitionStorage()
-    app_evaluator = evaluator or OfficialEvaluator()
     broadcaster = EventBroadcaster()
-    worker = EvaluationWorker(
+    worker = BatchWorker(
         app_storage,
-        app_evaluator,
         poll_interval=worker_poll_interval,
         publish_update=broadcaster.publish,
     )
@@ -54,12 +47,13 @@ def create_app(
         app.state.broadcaster = broadcaster
         if start_worker:
             worker.start()
+        broadcaster.publish(app_storage.competition_update_payload())
         try:
             yield
         finally:
             worker.stop()
 
-    app = FastAPI(title="Neural Network Cars Competition", lifespan=lifespan)
+    app = FastAPI(title="Neural Network Cars Trusted Competition", lifespan=lifespan)
 
     def require_admin(x_admin_token: str | None) -> None:
         if x_admin_token != token:
@@ -68,129 +62,170 @@ def create_app(
                 detail="invalid admin token",
             )
 
-    def publish_current_update() -> None:
-        broadcaster.publish(app_storage.competition_update_payload())
+    def competition_identifier(value: str) -> CompetitionId:
+        try:
+            return CompetitionId(value)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="competition not found",
+            ) from exc
+
+    def phase_one_identifier(value: str) -> CompetitionId:
+        identifier = competition_identifier(value)
+        if identifier is CompetitionId.FINAL:
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND,
+                detail="use the finals endpoint",
+            )
+        return identifier
+
+    def rejected_response(error: SubmissionRejected) -> JSONResponse:
+        body: dict[str, Any] = {"error": error.code}
+        if error.next_submission_at is not None:
+            body["next_submission_at"] = error.next_submission_at
+        return JSONResponse(status_code=error.status_code, content=body)
 
     @app.get("/health")
     @app.get("/api/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/api/state")
+    @app.get("/v2/state")
     def competition_state() -> dict[str, Any]:
-        return app_storage.competition_state()
+        return app_storage.state()
 
-    @app.get("/api/maps")
+    @app.get("/v2/maps")
     def maps() -> list[dict[str, Any]]:
-        return app_storage.list_official_maps()
+        return [item.to_public_dict() for item in list_competition_maps()]
 
-    @app.get("/api/maps/{map_id}/preview")
-    def map_preview(map_id: str) -> FileResponse:
-        try:
-            official_map = app_storage.get_official_map(map_id)
-        except KeyError as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND,
-                detail="map not found",
-            ) from exc
-
-        preview_path = _project_path(official_map.front_path)
-        if not preview_path.exists():
+    @app.get("/v2/maps/{competition_id}/preview")
+    def map_preview(competition_id: str) -> FileResponse:
+        identifier = competition_identifier(competition_id)
+        competition_map = get_competition_map(identifier)
+        if not competition_map.front_path.exists():
             raise HTTPException(
                 status_code=HTTPStatus.NOT_FOUND,
                 detail="map preview not found",
             )
-        return FileResponse(preview_path, media_type="image/png")
+        return FileResponse(competition_map.front_path, media_type="image/png")
+
+    @app.post("/v2/competitions/{competition_id}/eligibility")
+    def phase_one_eligibility(competition_id: str, identity: IdentityIn) -> dict[str, Any]:
+        identifier = phase_one_identifier(competition_id)
+        try:
+            group_id, username = identity.clean_identity()
+        except ValueError as exc:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+        return app_storage.eligibility(identifier, group_id=group_id, username=username)
 
     @app.post(
-        "/api/submissions",
-        response_model=SubmissionCreateResponse,
+        "/v2/competitions/{competition_id}/submissions",
         status_code=HTTPStatus.CREATED,
     )
-    def create_submission(payload: SubmissionIn) -> SubmissionCreateResponse:
+    def create_phase_one_submission(competition_id: str, body: SubmissionIn) -> Any:
+        identifier = phase_one_identifier(competition_id)
         try:
-            submission_payload = payload.to_submission_payload()
+            payload, client_result = body.to_submission()
+            submission = app_storage.create_submission(identifier, payload, client_result)
         except ValueError as exc:
-            raise HTTPException(
-                status_code=HTTPStatus.BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+        except SubmissionRejected as exc:
+            return rejected_response(exc)
+        submission["next_submission_at"] = app_storage.eligibility(
+            identifier,
+            group_id=payload.group_id,
+            username=payload.username,
+        )["next_submission_at"]
+        return submission
 
-        submission = app_storage.create_submission(submission_payload)
-        return SubmissionCreateResponse(
-            submission_id=submission["submission_id"],
-            status=submission["status"],
-            phase=submission["phase"],
+    @app.post("/v2/finals/eligibility")
+    def final_eligibility(identity: IdentityIn) -> dict[str, Any]:
+        try:
+            group_id, username = identity.clean_identity()
+        except ValueError as exc:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+        return app_storage.eligibility(
+            CompetitionId.FINAL,
+            group_id=group_id,
+            username=username,
         )
 
-    @app.get("/api/submissions")
-    def list_submissions(
+    @app.post("/v2/finals/submissions", status_code=HTTPStatus.CREATED)
+    def create_final_submission(body: SubmissionIn) -> Any:
+        try:
+            payload, client_result = body.to_submission()
+            submission = app_storage.create_submission(
+                CompetitionId.FINAL,
+                payload,
+                client_result,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+        except SubmissionRejected as exc:
+            return rejected_response(exc)
+        broadcaster.publish(app_storage.competition_update_payload())
+        return submission
+
+    @app.get("/v2/competitions/{competition_id}/leaderboard")
+    def leaderboard(competition_id: str) -> list[dict[str, Any]]:
+        return app_storage.leaderboard(competition_identifier(competition_id))
+
+    @app.get("/v2/competitions/{competition_id}/submissions/{submission_id}")
+    def submission_status(competition_id: str, submission_id: str) -> dict[str, Any]:
+        submission = app_storage.get_submission(competition_identifier(competition_id), submission_id)
+        if submission is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="submission not found")
+        return submission
+
+    @app.get("/v2/admin/submissions")
+    def admin_submissions(
         x_admin_token: str | None = Header(default=None),
     ) -> list[dict[str, Any]]:
         require_admin(x_admin_token)
         return app_storage.list_submissions()
 
-    @app.get("/api/submissions/{submission_id}")
-    def get_submission(
-        submission_id: str,
+    @app.get("/v2/admin/replay")
+    def admin_replay(
         x_admin_token: str | None = Header(default=None),
     ) -> dict[str, Any]:
         require_admin(x_admin_token)
-        submission = app_storage.get_submission(submission_id)
-        if submission is None:
-            raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND,
-                detail="submission not found",
-            )
-        return submission
+        return app_storage.replay_payload()
 
-    @app.get("/api/leaderboard")
-    def leaderboard() -> list[dict[str, Any]]:
-        return app_storage.leaderboard(limit=30)
-
-    @app.get("/api/replay/top")
-    def replay_top(n: int = Query(default=10, ge=1, le=30)) -> dict[str, Any]:
-        active_map = app_storage.active_map()
-        return {
-            "phase": app_storage.active_phase().value,
-            "map": active_map.to_dict(),
-            "items": app_storage.replay_top(n),
-        }
-
-    @app.post("/api/admin/phase")
-    def admin_set_phase(
-        payload: AdminPhaseRequest,
+    @app.post("/v2/admin/stage")
+    def admin_stage(
+        request: AdminStageRequest,
         x_admin_token: str | None = Header(default=None),
     ) -> dict[str, Any]:
         require_admin(x_admin_token)
-        state = app_storage.set_active_phase(payload.phase)
-        publish_current_update()
+        state = app_storage.set_stage(request.stage)
+        broadcaster.publish(app_storage.competition_update_payload())
         return state
 
-    @app.post("/api/admin/map")
-    def admin_set_map(
-        payload: AdminMapRequest,
-        x_admin_token: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        require_admin(x_admin_token)
-        state = app_storage.set_phase_map(payload.phase, payload.map_id)
-        worker.rerun_best_for_phase(payload.phase.value)
-        return state
-
-    @app.post("/api/admin/reset")
-    def admin_reset(x_admin_token: str | None = Header(default=None)) -> dict[str, str]:
-        require_admin(x_admin_token)
-        phase = app_storage.active_phase()
-        app_storage.reset_phase(phase)
-        publish_current_update()
-        return {"status": "reset", "phase": phase.value}
-
-    @app.post("/api/admin/process-pending")
-    def admin_process_pending(
+    @app.post("/v2/admin/batches/run-now")
+    def admin_run_batch(
         x_admin_token: str | None = Header(default=None),
     ) -> dict[str, int]:
         require_admin(x_admin_token)
-        return {"processed": worker.process_pending_batch()}
+        return {"processed": worker.process_now()}
+
+    @app.post("/v2/admin/replay/restart")
+    def admin_restart_replay(
+        x_admin_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(x_admin_token)
+        state = app_storage.restart_replay()
+        broadcaster.publish(app_storage.competition_update_payload())
+        return state
+
+    @app.post("/v2/admin/reset-all")
+    def admin_reset_all(
+        x_admin_token: str | None = Header(default=None),
+    ) -> dict[str, str]:
+        require_admin(x_admin_token)
+        app_storage.reset()
+        broadcaster.publish(app_storage.competition_update_payload())
+        return {"status": "reset", "scope": "competition"}
 
     @app.websocket("/ws/events")
     async def websocket_events(websocket: WebSocket) -> None:
@@ -215,13 +250,6 @@ def create_app(
 def _load_html(filename: str) -> str:
     path = Path(__file__).resolve().parent / "static" / filename
     return path.read_text(encoding="utf-8")
-
-
-def _project_path(path: str) -> Path:
-    candidate = Path(path)
-    if candidate.is_absolute():
-        return candidate
-    return Path(__file__).resolve().parents[1] / candidate
 
 
 app = create_app()

@@ -1,156 +1,145 @@
 from __future__ import annotations
 
-import base64
 import json
+import math
 import os
-import socket
-import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
-from urllib.error import URLError
-from urllib.parse import urlparse
-from urllib.request import urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 import pygame
 
-from game_engine.backend.assets import load_game_assets
-from game_engine.backend.car import Car, configure_car
+from game_engine.backend.assets import GameAssets, load_game_assets
+from game_engine.backend.car import Car
 from game_engine.backend.serialization import apply_weight_payload
-from game_engine.backend.settings import FPS, MAX_SPEED, PROJECT_ROOT, SCREEN_SIZE, WHITE
+from game_engine.backend.settings import FPS, SCREEN_SIZE
+from server.competition_config import (
+    FRAME_LIMIT,
+    PHASE_ONE_REPLAY_LIMIT,
+    STAGNATION_TICKS,
+)
+from server.competition_maps import CompetitionMap, get_competition_map
+from server.models import CompetitionId
 from shared.contracts import EXPECTED_LAYER_SIZES, SubmissionPayload
 
 
 Color = tuple[int, int, int]
+BACKGROUND: Color = (11, 17, 24)
+PANEL: Color = (16, 25, 33)
+BORDER: Color = (39, 54, 67)
+TEXT: Color = (244, 247, 251)
+MUTED: Color = (157, 174, 191)
+EASY_ACCENT: Color = (87, 211, 207)
+HARD_ACCENT: Color = (244, 177, 111)
+FINAL_ACCENT: Color = (217, 168, 255)
+DIM_COLOR: Color = (92, 105, 116)
+REPLAY_PROGRESS_DISTANCE_PX = 24.0
+REPLAY_COLORS: list[Color] = [
+    (76, 169, 255),
+    (255, 105, 124),
+    (250, 205, 86),
+    (114, 224, 152),
+    (188, 132, 255),
+    (100, 221, 225),
+    (255, 148, 93),
+    (198, 227, 108),
+    (244, 137, 199),
+    (185, 196, 210),
+    (121, 166, 255),
+    (240, 173, 108),
+    (112, 213, 191),
+    (222, 143, 166),
+    (173, 150, 240),
+]
 
 
 @dataclass(frozen=True, slots=True)
 class ReplayTrack:
-    map_id: str
-    front_path: Path
-    back_path: Path
-    spawn_x: float
-    spawn_y: float
-    spawn_angle: float
+    competition_map: CompetitionMap
+    front: pygame.Surface
+    collision: pygame.Surface
+
+    @property
+    def spawn(self) -> dict[str, float]:
+        return self.competition_map.spawn
 
 
 @dataclass(slots=True)
 class ReplayCar:
     item: dict[str, Any]
-    car: Any
+    car: Car
     color: Color
     crashed: bool = False
+    stalled: bool = False
+    stagnation_ticks: int = 0
+    last_progress_position: tuple[float, float] | None = None
+
+    def __post_init__(self) -> None:
+        self.last_progress_position = (float(self.car.x), float(self.car.y))
 
     @property
     def label(self) -> str:
-        group_id = str(self.item.get("group_id", "?"))
-        username = str(self.item.get("username", "unknown"))
-        return f"G{group_id} {username}"
+        state = " STALLED" if self.stalled else ""
+        return f"#{self.item.get('rank', '?')} {self.item.get('username', 'unknown')}{state}"
 
-    @property
-    def score_laps(self) -> float:
-        return float(self.item.get("score_laps") or 0.0)
+    def observe_position(self) -> None:
+        current = (float(self.car.x), float(self.car.y))
+        previous = self.last_progress_position
+        if previous is None:
+            self.last_progress_position = current
+            return
+        if math.dist(previous, current) >= REPLAY_PROGRESS_DISTANCE_PX:
+            self.last_progress_position = current
+            self.stagnation_ticks = 0
+            return
+        self.stagnation_ticks += 1
+        if self.stagnation_ticks >= STAGNATION_TICKS:
+            self.stalled = True
 
 
 @dataclass(slots=True)
 class ReplaySession:
+    competition_id: str
+    track: ReplayTrack
     cars: list[ReplayCar]
-    frame_limit: int
-    crash_hold_frames: int = FPS * 2
+    leaderboard: list[dict[str, Any]]
+    frame_limit: int = FRAME_LIMIT
     frames: int = 0
     all_crashed_at_frame: int | None = None
 
     def tick(self) -> bool:
         update_replay_cars(self.cars)
         self.frames += 1
-        if self.cars and all(replay_car.crashed for replay_car in self.cars):
+        if self.cars and all(replay_car.crashed or replay_car.stalled for replay_car in self.cars):
             if self.all_crashed_at_frame is None:
                 self.all_crashed_at_frame = self.frames
-            held_frames = self.frames - self.all_crashed_at_frame
-            return held_frames >= self.crash_hold_frames
+            return self.frames - self.all_crashed_at_frame >= FPS * 2
         return self.frames >= self.frame_limit
 
 
-class ReplayFeed:
-    def __init__(self, server_url: str, top_n: int) -> None:
-        self.server_url = server_url
-        self.top_n = top_n
-        self.pending_state: dict[str, Any] | None = None
-        self.status = "Waiting for replay data"
-        self._lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        self._thread = threading.Thread(target=self._listen_ws, daemon=True)
-        self._thread.start()
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread:
-            self._thread.join(timeout=1.0)
-
-    def set_pending_state(self, state: dict[str, Any] | None, status: str) -> None:
-        with self._lock:
-            self.pending_state = state
-            self.status = status
-
-    def pop_pending_state(self) -> tuple[dict[str, Any] | None, str]:
-        with self._lock:
-            state = self.pending_state
-            self.pending_state = None
-            return state, self.status
-
-    def _listen_ws(self) -> None:
-        while not self._stop_event.is_set():
-            try:
-                for event in _websocket_events(self.server_url, self._stop_event):
-                    replay_top = event.get("replay_top", [])
-                    if replay_top:
-                        self.set_pending_state(
-                            {
-                                "phase": event.get("phase", "unknown"),
-                                "map": event.get("map"),
-                                "items": replay_top[: self.top_n],
-                            },
-                            f"Live update: {len(replay_top[: self.top_n])} cars",
-                        )
-            except OSError as exc:
-                self.set_pending_state(None, f"WS disconnected: {exc}")
-                self._stop_event.wait(5.0)
-
-
-REPLAY_COLORS: list[Color] = [
-    (60, 145, 255),
-    (255, 196, 70),
-    (85, 220, 145),
-    (255, 95, 115),
-    (190, 130, 255),
-    (120, 225, 230),
-    (235, 135, 85),
-    (210, 230, 95),
-    (245, 135, 210),
-    (170, 180, 190),
-]
-DIM_COLOR: Color = (95, 105, 115)
-
-
-def run(server_url: str = "http://127.0.0.1:8000", top_n: int = 10) -> None:
+def run(
+    server_url: str | None = None,
+    token: str | None = None,
+) -> None:
     pygame.init()
     screen = pygame.display.set_mode(SCREEN_SIZE)
-    pygame.display.set_caption("Neural Cars Replay")
+    pygame.display.set_caption("Neural Cars Competition Replay")
     clock = pygame.time.Clock()
-    font = pygame.font.Font("freesansbold.ttf", 24)
-    small_font = pygame.font.Font("freesansbold.ttf", 18)
+    fonts = _fonts()
     assets = load_game_assets()
+    replay_token = token or os.environ.get("COMPETITION_REPLAY_TOKEN", "admin")
+    replay_url = server_url or os.environ.get(
+        "COMPETITION_SERVER_URL", "http://127.0.0.1:8000"
+    )
 
-    session: ReplaySession | None = None
-    background: pygame.Surface | None = None
-    status = "Waiting for replay data"
-    next_refresh_at = 0.0
-    feed = ReplayFeed(server_url, top_n)
-    feed.start()
+    state: dict[str, Any] | None = None
+    sessions: dict[str, ReplaySession] = {}
+    next_fetch_at = 0.0
+    next_generation_check_at = 0.0
+    replay_generation: int | None = None
+    status = "Connecting to protected replay feed"
 
     try:
         while True:
@@ -159,81 +148,112 @@ def run(server_url: str = "http://127.0.0.1:8000", top_n: int = 10) -> None:
                     return
 
             now = time.monotonic()
-            if session is None and now >= next_refresh_at:
-                state, feed_status = feed.pop_pending_state()
-                if state is None:
-                    try:
-                        state = fetch_replay_state(server_url, top_n)
-                        feed_status = f"Connected: {len(state.get('items', []))} cars"
-                    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
-                        status = f"Disconnected: {exc}"
-                        next_refresh_at = now + 5.0
+            if not sessions and now >= next_fetch_at:
+                try:
+                    state = fetch_replay_state(replay_url, replay_token)
+                    sessions = load_replay_sessions(state, assets)
+                    replay_generation = int(state.get("replay_generation", 0))
+                    status = "LIVE REPLAY"
+                except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
+                    status = f"Replay feed unavailable: {exc}"
+                    next_fetch_at = now + 5.0
+
+            if sessions and now >= next_generation_check_at:
+                try:
+                    current_generation = fetch_replay_generation(replay_url)
+                    if replay_generation is not None and current_generation != replay_generation:
+                        sessions = {}
                         state = None
-                if state and state.get("items"):
-                    session, background = load_replay_scene(state, assets, top_n)
-                    status = feed_status
-                elif state is not None:
-                    status = "Waiting for evaluated submissions"
-                    next_refresh_at = now + 5.0
+                        next_fetch_at = 0.0
+                        status = "Restarting replay"
+                    next_generation_check_at = now + 1.0
+                except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError):
+                    next_generation_check_at = now + 5.0
 
-            screen.fill((0, 0, 0))
-            if session and background:
-                screen.blit(background, (0, 0))
-                round_finished = session.tick()
-                draw_replay_cars(screen, small_font, session.cars)
-                draw_overlay(screen, font, small_font, session, status)
-                if round_finished:
-                    session = None
-                    next_refresh_at = 0.0
+            screen.fill(BACKGROUND)
+            if state is None:
+                _draw_centered(screen, fonts["title"], status, SCREEN_SIZE[1] // 2)
+            elif state.get("stage") == "final":
+                session = sessions.get("final")
+                if session is not None:
+                    finished = _draw_final(screen, session, fonts, status)
+                    if finished:
+                        sessions = {}
+                        next_fetch_at = 0.0
+                else:
+                    _draw_final_waiting(screen, fonts, status)
+                    next_fetch_at = now + 3.0
             else:
-                text = font.render(status, True, WHITE)
-                screen.blit(text, (32, 32))
+                easy = sessions.get("easy")
+                hard = sessions.get("hard")
+                if easy is not None and hard is not None:
+                    finished = _draw_phase_one(screen, easy, hard, fonts, status)
+                    if finished:
+                        sessions = {}
+                        next_fetch_at = 0.0
+                else:
+                    _draw_phase_one_waiting(screen, fonts, status)
+                    next_fetch_at = now + 3.0
 
-            pygame.display.update()
+            pygame.display.flip()
             clock.tick(FPS)
     finally:
-        feed.stop()
         pygame.quit()
 
 
-def fetch_replay_state(server_url: str, top_n: int) -> dict[str, Any]:
-    url = server_url.rstrip("/") + f"/api/replay/top?n={top_n}"
-    with urlopen(url, timeout=5.0) as response:
+def fetch_replay_state(server_url: str, token: str) -> dict[str, Any]:
+    request = Request(
+        server_url.rstrip("/") + "/v2/admin/replay",
+        headers={"X-Admin-Token": token},
+        method="GET",
+    )
+    with urlopen(request, timeout=5.0) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
-def load_replay_scene(
-    state: dict[str, Any],
-    assets: Any,
-    top_n: int = 10,
-) -> tuple[ReplaySession, pygame.Surface]:
-    track = replay_track_from_state(state)
-    collision_map = pygame.image.load(track.back_path)
-    configure_car(collision_map, assets.green_small_car, MAX_SPEED)
+def fetch_replay_generation(server_url: str) -> int:
+    with urlopen(server_url.rstrip("/") + "/v2/state", timeout=5.0) as response:
+        state = json.loads(response.read().decode("utf-8"))
+    return int(state["replay_generation"])
 
-    replay_cars = [
+
+def load_replay_sessions(state: dict[str, Any], assets: GameAssets) -> dict[str, ReplaySession]:
+    sessions = {}
+    for competition_id, replay in state.get("replays", {}).items():
+        sessions[competition_id] = load_replay_session(
+            competition_id,
+            replay,
+            assets,
+        )
+    return sessions
+
+
+def load_replay_session(
+    competition_id: str,
+    replay: dict[str, Any],
+    assets: GameAssets,
+) -> ReplaySession:
+    identifier = CompetitionId(competition_id)
+    competition_map = get_competition_map(identifier)
+    track = ReplayTrack(
+        competition_map=competition_map,
+        front=pygame.image.load(competition_map.front_path),
+        collision=competition_map.build_collision_surface(),
+    )
+    cars = [
         build_replay_car(
             item=item,
             color=REPLAY_COLORS[index % len(REPLAY_COLORS)],
             track=track,
             car_image=assets.green_small_car,
         )
-        for index, item in enumerate(state.get("items", [])[:top_n])
+        for index, item in enumerate(replay.get("items", [])[:PHASE_ONE_REPLAY_LIMIT])
     ]
-    background = pygame.image.load(track.front_path)
-    return ReplaySession(replay_cars, FPS * 30), background
-
-
-def replay_track_from_state(state: dict[str, Any]) -> ReplayTrack:
-    map_data = state["map"]
-    spawn = map_data["spawn"]
-    return ReplayTrack(
-        map_id=str(map_data["map_id"]),
-        front_path=_project_path(str(map_data["front_path"])),
-        back_path=_project_path(str(map_data["back_path"])),
-        spawn_x=float(spawn["x"]),
-        spawn_y=float(spawn["y"]),
-        spawn_angle=float(spawn.get("angle", 180.0)),
+    return ReplaySession(
+        competition_id=competition_id,
+        track=track,
+        cars=cars,
+        leaderboard=list(replay.get("leaderboard", [])),
     )
 
 
@@ -242,7 +262,7 @@ def build_replay_car(
     item: dict[str, Any],
     color: Color,
     track: ReplayTrack,
-    car_image: pygame.Surface | None,
+    car_image: pygame.Surface,
 ) -> ReplayCar:
     car = Car(list(EXPECTED_LAYER_SIZES))
     payload = SubmissionPayload(
@@ -252,10 +272,12 @@ def build_replay_car(
         biases=item["biases"],
     )
     apply_weight_payload(car, payload)
+    car.set_collision_surface(track.collision)
+    spawn = track.spawn
     car.reset_state(
-        track.spawn_x,
-        track.spawn_y,
-        angle=track.spawn_angle,
+        spawn["x"],
+        spawn["y"],
+        angle=spawn["angle"],
         car_image=car_image,
     )
     return ReplayCar(item=item, car=car, color=color)
@@ -267,120 +289,174 @@ def update_replay_cars(replay_cars: list[ReplayCar]) -> None:
 
 
 def step_replay_car(replay_car: ReplayCar) -> None:
-    if replay_car.crashed:
+    if replay_car.crashed or replay_car.stalled:
         return
-
-    car = replay_car.car
     try:
-        car.update()
-        if car.collision():
-            car.collided = True
+        replay_car.car.update()
+        if replay_car.car.collision():
+            replay_car.car.collided = True
             replay_car.crashed = True
             return
-        car.feedforward()
-        car.takeAction()
-    except (IndexError, pygame.error):
-        car.collided = True
+        replay_car.car.feedforward()
+        replay_car.car.takeAction()
+        replay_car.observe_position()
+    except (IndexError, pygame.error, ValueError):
+        replay_car.car.collided = True
         replay_car.crashed = True
 
 
-def draw_replay_cars(
+def _draw_phase_one(
     screen: pygame.Surface,
-    font: pygame.font.Font,
-    replay_cars: list[ReplayCar],
-) -> None:
-    for replay_car in replay_cars:
-        color = DIM_COLOR if replay_car.crashed else replay_car.color
-        replay_car.car.draw(screen)
-        x = int(replay_car.car.x)
-        y = int(replay_car.car.y)
-        pygame.draw.circle(screen, color, (x, y), 7)
-        label = font.render(replay_car.label, True, color)
-        screen.blit(label, (x + 10, y - 28))
+    easy: ReplaySession,
+    hard: ReplaySession,
+    fonts: dict[str, pygame.font.Font],
+    status: str,
+) -> bool:
+    _draw_header(screen, fonts, "PHASE 1", status)
+    easy_rect = pygame.Rect(24, 94, 764, 430)
+    hard_rect = pygame.Rect(812, 94, 764, 430)
+    _draw_map_panel(screen, easy, easy_rect, "EASY", EASY_ACCENT, fonts)
+    _draw_map_panel(screen, hard, hard_rect, "HARD", HARD_ACCENT, fonts)
+    _draw_compact_leaderboard(screen, easy, pygame.Rect(24, 554, 764, 316), EASY_ACCENT, fonts)
+    _draw_compact_leaderboard(screen, hard, pygame.Rect(812, 554, 764, 316), HARD_ACCENT, fonts)
+    return easy.tick() and hard.tick()
 
 
-def draw_overlay(
+def _draw_final(
     screen: pygame.Surface,
-    font: pygame.font.Font,
-    small_font: pygame.font.Font,
     session: ReplaySession,
+    fonts: dict[str, pygame.font.Font],
+    status: str,
+) -> bool:
+    _draw_header(screen, fonts, "FINAL", status)
+    _draw_map_panel(screen, session, pygame.Rect(24, 94, 1032, 581), "FINAL HARD MAP", FINAL_ACCENT, fonts)
+    _draw_compact_leaderboard(screen, session, pygame.Rect(1080, 94, 496, 776), FINAL_ACCENT, fonts, rows=10)
+    return session.tick()
+
+
+def _draw_header(
+    screen: pygame.Surface,
+    fonts: dict[str, pygame.font.Font],
+    stage: str,
     status: str,
 ) -> None:
-    title = font.render("Top 10 Replay", True, WHITE)
-    screen.blit(title, (24, 24))
-    subtitle = small_font.render(
-        f"{status}  |  Frame {session.frames}/{session.frame_limit}",
-        True,
-        (210, 218, 226),
-    )
-    screen.blit(subtitle, (24, 56))
-
-    y = 92
-    for index, replay_car in enumerate(session.cars, start=1):
-        color = DIM_COLOR if replay_car.crashed else replay_car.color
-        state = "crashed" if replay_car.crashed else "running"
-        line = f"#{index} {replay_car.label}  {replay_car.score_laps:.2f} laps  {state}"
-        rendered = small_font.render(line, True, color)
-        screen.blit(rendered, (24, y))
-        y += rendered.get_height() + 8
+    screen.blit(fonts["title"].render(f"NEURAL CARS  /  {stage}", True, TEXT), (24, 20))
+    text = fonts["meta"].render(status, True, MUTED)
+    screen.blit(text, (SCREEN_SIZE[0] - text.get_width() - 24, 31))
+    pygame.draw.line(screen, BORDER, (24, 72), (SCREEN_SIZE[0] - 24, 72), 1)
 
 
-def _project_path(path: str) -> Path:
-    candidate = Path(path)
-    if candidate.is_absolute():
-        return candidate
-    return PROJECT_ROOT / candidate
+def _draw_map_panel(
+    screen: pygame.Surface,
+    session: ReplaySession,
+    rect: pygame.Rect,
+    title: str,
+    accent: Color,
+    fonts: dict[str, pygame.font.Font],
+) -> None:
+    pygame.draw.rect(screen, PANEL, rect.inflate(0, 0))
+    pygame.draw.rect(screen, BORDER, rect, 1)
+    native = session.track.front.copy()
+    for replay_car in session.cars:
+        color = DIM_COLOR if replay_car.crashed or replay_car.stalled else replay_car.color
+        replay_car.car.draw(native)
+        pygame.draw.circle(native, color, (int(replay_car.car.x), int(replay_car.car.y)), 7)
+    scaled = pygame.transform.smoothscale(native, rect.size)
+    screen.blit(scaled, rect.topleft)
+    pygame.draw.rect(screen, BORDER, rect, 1)
+    pygame.draw.rect(screen, BACKGROUND, (rect.x, rect.y, 134, 30))
+    pygame.draw.rect(screen, accent, (rect.x, rect.y, 4, 30))
+    screen.blit(fonts["panel"].render(title, True, TEXT), (rect.x + 12, rect.y + 6))
+    occupied_labels: list[pygame.Rect] = []
+    for replay_car in session.cars:
+        color = DIM_COLOR if replay_car.crashed or replay_car.stalled else replay_car.color
+        x = rect.x + int(replay_car.car.x / SCREEN_SIZE[0] * rect.width)
+        y = rect.y + int(replay_car.car.y / SCREEN_SIZE[1] * rect.height)
+        label = fonts["label"].render(replay_car.label, True, color)
+        label_x, label_y = _place_label(rect, x, y, label, occupied_labels)
+        screen.blit(label, (label_x, label_y))
+        occupied_labels.append(pygame.Rect(label_x, label_y, label.get_width(), label.get_height()))
 
 
-def _websocket_events(server_url: str, stop_event: threading.Event):
-    parsed = urlparse(server_url)
-    host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    key = base64.b64encode(os.urandom(16)).decode("ascii")
-    with socket.create_connection((host, port), timeout=5.0) as sock:
-        sock.settimeout(5.0)
-        request = (
-            "GET /ws/events HTTP/1.1\r\n"
-            f"Host: {host}:{port}\r\n"
-            "Upgrade: websocket\r\n"
-            "Connection: Upgrade\r\n"
-            f"Sec-WebSocket-Key: {key}\r\n"
-            "Sec-WebSocket-Version: 13\r\n\r\n"
-        )
-        sock.sendall(request.encode("ascii"))
-        response = sock.recv(4096)
-        if b"101" not in response.split(b"\r\n", 1)[0]:
-            raise OSError("websocket upgrade failed")
-        while not stop_event.is_set():
-            payload = _read_ws_text_frame(sock)
-            if payload:
-                yield json.loads(payload)
+def _draw_compact_leaderboard(
+    screen: pygame.Surface,
+    session: ReplaySession,
+    rect: pygame.Rect,
+    accent: Color,
+    fonts: dict[str, pygame.font.Font],
+    *,
+    rows: int = 5,
+) -> None:
+    pygame.draw.rect(screen, PANEL, rect)
+    pygame.draw.rect(screen, BORDER, rect, 1)
+    screen.blit(fonts["panel"].render("LEADERBOARD", True, TEXT), (rect.x + 14, rect.y + 13))
+    pygame.draw.line(screen, accent, (rect.x + 14, rect.y + 43), (rect.right - 14, rect.y + 43), 2)
+    if not session.leaderboard:
+        screen.blit(fonts["meta"].render("Waiting for completed submissions", True, MUTED), (rect.x + 14, rect.y + 62))
+        return
+    y = rect.y + 60
+    for entry in session.leaderboard[:rows]:
+        client_result = entry["client_result"]
+        identity = f"Group {entry['group_id']}" if session.competition_id == "final" else entry["username"]
+        detail = entry["username"] if session.competition_id == "final" else f"G{entry['group_id']}"
+        screen.blit(fonts["row"].render(f"#{entry['rank']}", True, accent), (rect.x + 14, y))
+        screen.blit(fonts["row"].render(identity, True, TEXT), (rect.x + 60, y))
+        screen.blit(fonts["meta"].render(detail, True, MUTED), (rect.x + 60, y + 21))
+        result = _result_text(client_result)
+        rendered = fonts["row"].render(result, True, TEXT)
+        screen.blit(rendered, (rect.right - rendered.get_width() - 14, y + 7))
+        y += 48
 
 
-def _read_ws_text_frame(sock: socket.socket) -> str:
-    header = _recv_exact(sock, 2)
-    first, second = header[0], header[1]
-    opcode = first & 0x0F
-    length = second & 0x7F
-    if length == 126:
-        length = int.from_bytes(_recv_exact(sock, 2), "big")
-    elif length == 127:
-        length = int.from_bytes(_recv_exact(sock, 8), "big")
-    payload = _recv_exact(sock, length)
-    if opcode == 8:
-        raise OSError("websocket closed")
-    if opcode != 1:
-        return ""
-    return payload.decode("utf-8")
+def _draw_phase_one_waiting(screen: pygame.Surface, fonts: dict[str, pygame.font.Font], status: str) -> None:
+    _draw_header(screen, fonts, "PHASE 1", status)
+    _draw_centered(screen, fonts["title"], "Waiting for Easy and Hard replay data", 450)
 
 
-def _recv_exact(sock: socket.socket, length: int) -> bytes:
-    chunks = []
-    remaining = length
-    while remaining > 0:
-        chunk = sock.recv(remaining)
-        if not chunk:
-            raise OSError("socket closed")
-        chunks.append(chunk)
-        remaining -= len(chunk)
-    return b"".join(chunks)
+def _draw_final_waiting(screen: pygame.Surface, fonts: dict[str, pygame.font.Font], status: str) -> None:
+    _draw_header(screen, fonts, "FINAL", status)
+    _draw_centered(screen, fonts["title"], "Waiting for Final replay data", 450)
+
+
+def _draw_centered(screen: pygame.Surface, font: pygame.font.Font, text: str, y: int) -> None:
+    rendered = font.render(text, True, MUTED)
+    screen.blit(rendered, ((SCREEN_SIZE[0] - rendered.get_width()) // 2, y))
+
+
+def _place_label(
+    rect: pygame.Rect,
+    x: int,
+    y: int,
+    label: pygame.Surface,
+    occupied: list[pygame.Rect],
+) -> tuple[int, int]:
+    label_x = min(max(rect.x + 4, x + 8), rect.right - label.get_width() - 4)
+    height = label.get_height()
+    candidates = [y - height - 8]
+    candidates.extend(y - height - 8 - (step * (height + 2)) for step in range(1, 16))
+    candidates.extend(y + 10 + (step * (height + 2)) for step in range(16))
+
+    for candidate_y in candidates:
+        candidate = pygame.Rect(label_x, candidate_y, label.get_width(), height)
+        if candidate.top < rect.y + 32 or candidate.bottom > rect.bottom - 4:
+            continue
+        if not any(candidate.colliderect(other) for other in occupied):
+            return candidate.x, candidate.y
+    return label_x, max(rect.y + 32, min(y - height - 8, rect.bottom - height - 4))
+
+
+def _result_text(client_result: dict[str, Any]) -> str:
+    if client_result.get("completed"):
+        ticks = int(client_result["lap_ticks"])
+        return f"{ticks / FPS:.1f}s"
+    return f"{float(client_result['max_progress']):.0f} prog"
+
+
+def _fonts() -> dict[str, pygame.font.Font]:
+    return {
+        "title": pygame.font.SysFont("Arial", 28, bold=True),
+        "panel": pygame.font.SysFont("Arial", 18, bold=True),
+        "row": pygame.font.SysFont("Arial", 17, bold=True),
+        "label": pygame.font.SysFont("Arial", 15, bold=True),
+        "meta": pygame.font.SysFont("Arial", 14),
+    }
