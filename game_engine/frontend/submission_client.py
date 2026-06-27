@@ -30,7 +30,7 @@ def submit_car(
     if client_result is None:
         return SubmissionResult(
             False,
-            "Trusted v2 submission requires a client_result. Use judge_demo or the competition client.",
+            "Trusted v2 submission requires a client_result. Use competition_main.py.",
         )
     payload = export_submission_payload(
         car=car,
