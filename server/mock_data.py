@@ -2,107 +2,87 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Protocol
 
 import numpy as np
 
-from server.evaluator import OfficialEvaluator
-from server.models import CompetitionPhase, EvaluationResult, OfficialMap
+from server.models import CompetitionId
 from server.storage import CompetitionStorage
 from shared.contracts import (
     EXPECTED_BIAS_LENGTHS,
     EXPECTED_WEIGHT_LENGTHS,
+    ClientResult,
     SubmissionPayload,
 )
 
 
-class Evaluator(Protocol):
-    def evaluate(
-        self,
-        payload: SubmissionPayload,
-        official_map: OfficialMap | str,
-    ) -> EvaluationResult:
-        ...
-
-
 def build_mock_payload(index: int, seed: int) -> SubmissionPayload:
     rng = np.random.default_rng(seed + index)
-    weights = [
-        rng.normal(0.0, 0.05, length).astype(float).tolist()
-        for length in EXPECTED_WEIGHT_LENGTHS
-    ]
-    biases = [
-        rng.normal(0.0, 0.05, length).astype(float).tolist()
-        for length in EXPECTED_BIAS_LENGTHS
-    ]
-    steering_biases = [-0.8, -0.35, 0.0, 0.35, 0.8]
-    steering = steering_biases[index % len(steering_biases)]
-    biases[-1] = [2.5, -3.0, steering, -steering]
     return SubmissionPayload(
         group_id=str((index % 5) + 1),
         username=f"player{index + 1}",
-        weights=weights,
-        biases=biases,
+        weights=[rng.normal(0.0, 0.05, length).astype(float).tolist() for length in EXPECTED_WEIGHT_LENGTHS],
+        biases=[rng.normal(0.0, 0.05, length).astype(float).tolist() for length in EXPECTED_BIAS_LENGTHS],
     )
+
+
+def build_mock_result(index: int) -> ClientResult:
+    if index % 4 == 0:
+        return ClientResult(True, 300 + index * 5, 4_000.0, 300 + index * 5)
+    return ClientResult(False, None, 500.0 + index * 150.0, 120 + index * 10)
 
 
 def create_mock_submissions(
     *,
     storage: CompetitionStorage,
-    evaluator: Evaluator,
     count: int = 10,
     seed: int = 42,
-    phase: CompetitionPhase | str | None = None,
-    state: str = "pending",
+    competition_id: CompetitionId | str = CompetitionId.EASY,
+    state: str = "queued",
     reset: bool = False,
 ) -> list[dict]:
-    phase_value = CompetitionPhase(phase or storage.active_phase())
+    identifier = CompetitionId(competition_id)
     if reset:
-        storage.reset_phase(phase_value)
+        storage.reset()
 
     submissions = []
-    official_map = storage.active_map(phase_value)
     for index in range(count):
-        payload = build_mock_payload(index, seed)
-        submission = storage.create_submission(payload, phase=phase_value)
-        if state == "evaluated":
-            result = evaluator.evaluate(payload, official_map)
-            storage.mark_evaluated(submission["submission_id"], result)
-            stored_submission = storage.get_submission(submission["submission_id"])
-            if stored_submission is not None:
-                submission = stored_submission
+        submission = storage.create_submission(
+            identifier,
+            build_mock_payload(index, seed),
+            build_mock_result(index),
+        )
         submissions.append(submission)
+    if state == "completed" and identifier is not CompetitionId.FINAL:
+        storage.seal_phase_one_batches(now=storage.now(), force=True)
+        submissions = [
+            storage.get_submission(identifier, submission["submission_id"]) or submission
+            for submission in submissions
+        ]
     return submissions
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Create mock competition submissions for backend testing."
-    )
+    parser = argparse.ArgumentParser(description="Create trusted client-result demo submissions.")
     parser.add_argument("--count", type=int, default=10)
     parser.add_argument("--db", type=Path, default=None)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--phase", choices=["personal", "group"], default=None)
-    parser.add_argument("--state", choices=["pending", "evaluated"], default="pending")
+    parser.add_argument("--competition", choices=[item.value for item in CompetitionId], default="easy")
+    parser.add_argument("--state", choices=["queued", "completed"], default="queued")
     parser.add_argument("--reset", action="store_true")
     args = parser.parse_args()
 
     storage = CompetitionStorage(args.db)
     submissions = create_mock_submissions(
         storage=storage,
-        evaluator=OfficialEvaluator(),
         count=args.count,
         seed=args.seed,
-        phase=args.phase,
+        competition_id=args.competition,
         state=args.state,
         reset=args.reset,
     )
-    print(f"Created {len(submissions)} {args.state} mock submissions")
-    for row in storage.leaderboard(limit=30):
-        print(
-            f"#{row['rank']} {row['username']} group={row['group_id']} "
-            f"laps={row['score_laps']:.3f}"
-        )
+    print(f"Created {len(submissions)} {args.state} {args.competition} submissions")
+    for row in storage.leaderboard(args.competition):
+        print(f"#{row['rank']} {row['username']} group={row['group_id']} {row['client_result']}")
 
 
 if __name__ == "__main__":
