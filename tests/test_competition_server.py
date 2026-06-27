@@ -279,6 +279,20 @@ def test_maps_are_fixed_and_collision_surfaces_have_a_drivable_spawn(tmp_path):
         assert collision.get_at((round(spawn["x"]), round(spawn["y"]))).a > 0
 
 
+def test_competition_collision_surfaces_use_authored_back_png_alpha():
+    pygame.init()
+    for competition_id in ("easy", "hard", "final"):
+        competition_map = get_competition_map(competition_id)
+        collision = competition_map.build_collision_surface()
+        authored_back = pygame.image.load(competition_map.back_path)
+        collision_mask = pygame.mask.from_surface(collision, threshold=1)
+        authored_mask = pygame.mask.from_surface(authored_back, threshold=1)
+
+        assert collision.get_size() == authored_back.get_size()
+        assert collision_mask.count() == authored_mask.count()
+        assert collision_mask.overlap_area(authored_mask, (0, 0)) == authored_mask.count()
+
+
 def test_dual_replay_sessions_keep_collision_surfaces_per_car():
     from game_engine.backend.assets import load_game_assets
     from game_engine.frontend.replay_client import load_replay_sessions
@@ -307,6 +321,29 @@ def test_dual_replay_sessions_keep_collision_surfaces_per_car():
     assert sessions["easy"].track.collision is not sessions["hard"].track.collision
     assert sessions["easy"].cars[0].car.collision_surface is sessions["easy"].track.collision
     assert sessions["hard"].cars[0].car.collision_surface is sessions["hard"].track.collision
+
+
+def test_replay_scaled_rect_preserves_virtual_canvas_aspect_ratio():
+    from game_engine.frontend.replay_client import scaled_rect_for_window
+
+    assert scaled_rect_for_window((1600, 900)) == pygame.Rect(0, 0, 1600, 900)
+    assert scaled_rect_for_window((800, 600)) == pygame.Rect(0, 75, 800, 450)
+    assert scaled_rect_for_window((1920, 1080)) == pygame.Rect(0, 0, 1920, 1080)
+    assert scaled_rect_for_window((1200, 900)) == pygame.Rect(0, 112, 1200, 675)
+
+
+def test_replay_scale_virtual_screen_letterboxes_dummy_surface():
+    from game_engine.frontend.replay_client import BACKGROUND, scale_virtual_screen
+
+    virtual_screen = pygame.Surface((1600, 900))
+    virtual_screen.fill((255, 0, 0))
+    display = pygame.Surface((800, 600))
+
+    rect = scale_virtual_screen(virtual_screen, display, (800, 600))
+
+    assert rect == pygame.Rect(0, 75, 800, 450)
+    assert display.get_at((400, 300))[:3] == (255, 0, 0)
+    assert display.get_at((400, 10))[:3] == BACKGROUND
 
 
 def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):

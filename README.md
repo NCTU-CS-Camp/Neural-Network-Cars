@@ -197,3 +197,5 @@ uv run mypy game_engine GA server shared
 - `BE Team`：建議從 `server/app.py`、`server/models.py`、`server/storage.py`、`shared/contracts.py` 開始。
 
 若要看較完整的規劃，請參考 [docs/design-doc.md](docs/design-doc.md)。
+若要在學校電腦教室部署 competition server，請參考
+[docs/classroom-deployment.md](docs/classroom-deployment.md)。
