@@ -14,6 +14,7 @@ from shapely.geometry.polygon import Polygon  # type: ignore[import-untyped]
 from GA.fitness import get_fitness_strategy
 from game_engine.backend.assets import GameAssets, load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
+from game_engine.backend.competition_track import CompetitionRunTracker
 from game_engine.backend.settings import (
     HIDDEN_LAYER,
     INPUT_LAYER,
@@ -536,6 +537,7 @@ def run(server_url: str | None = None) -> None:
 
 def evaluate_car_result(car: Car, competition_id: CompetitionName) -> ClientResult:
     competition_map = get_competition_map(competition_id)
+    tracker = CompetitionRunTracker.from_metadata_path(competition_map.metadata_path)
     test_car = Car(LAYER_SIZES)
     test_car.weights = [layer.copy() for layer in car.weights]
     test_car.biases = [layer.copy() for layer in car.biases]
@@ -547,18 +549,28 @@ def evaluate_car_result(car: Car, competition_id: CompetitionName) -> ClientResu
     max_progress = 0.0
     ticks_to_max_progress = 0
     for tick in range(FRAME_LIMIT):
+        previous = (float(test_car.x), float(test_car.y))
         try:
             test_car.update()
             if test_car.collision():
                 break
+            current = (float(test_car.x), float(test_car.y))
+            tracker.advance(previous, current, tick=tick + 1)
+            if tracker.completed:
+                return ClientResult(
+                    completed=True,
+                    lap_ticks=tracker.lap_ticks,
+                    max_progress=tracker.max_progress,
+                    ticks_to_max_progress=tracker.ticks_to_max_progress,
+                )
             test_car.feedforward()
             test_car.takeAction()
         except (IndexError, pygame.error):
             break
-        progress = float(test_car.score)
+        progress = tracker.max_progress
         if progress >= max_progress:
             max_progress = progress
-            ticks_to_max_progress = tick + 1
+            ticks_to_max_progress = tracker.ticks_to_max_progress
     return ClientResult(
         completed=False,
         lap_ticks=None,

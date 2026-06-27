@@ -20,6 +20,8 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 - Pygame big-screen replay is launched with `uv run python replay.py`.
 - Manual training/submission test client is launched with `uv run python competition_main.py`.
 - `judge_demo.py` has been removed; do not document or revive it unless explicitly requested.
+- Competition maps under `maps/*_maps` carry ordered `route_cells` and boundary `checkpoints`.
+- Shared lap/progress tracking lives in `game_engine/backend/competition_track.py` and is used by local scoring plus replay visualization.
 
 ## Public Contract
 
@@ -116,6 +118,15 @@ Known batching gaps:
 - No explicit notification for submissions that missed the current batch.
 - The `running` state is currently transitional inside one transaction, not a long-lived replay-processing state.
 
+## Replay And Lap Detection
+
+- Local scoring and Pygame replay use sequential boundary checkpoint crossing to detect first-lap completion.
+- A replay car stops updating after first lap completion, collision, or stagnation.
+- Finished replay cars stay visible, dimmed, and labeled `FINISHED` with finish time.
+- Once all replay cars are finished/crashed/stalled, the replay holds for 3 seconds and then restarts the same payload until a new replay generation or snapshot is fetched.
+- Browser leaderboard displays a live countdown to the next Phase 1 snapshot and last update time.
+- The server still trusts submitted `client_result`; replay completion never overwrites ranking metrics.
+
 ## Server Ownership Rules
 
 - Validate payload shape, identity, finite values, payload size, cooldown, stage gates, and Final locks.
@@ -176,6 +187,7 @@ Default local admin/replay token is `admin`, overridden by `COMPETITION_ADMIN_TO
    - Store deferred submission IDs, map/config versions, simulation version, replay status, termination reason, and audit references.
    - Add optional deterministic tick/state logs or compact replay traces for later verification.
    - Make `running` meaningful if replay processing becomes asynchronous instead of immediately completed.
+   - Consider persisting replay-loop status now shown client-side only.
 
 2. API Spec Alignment
    - Decide whether eligibility should remain `POST` or move to spec-mentioned `GET`.

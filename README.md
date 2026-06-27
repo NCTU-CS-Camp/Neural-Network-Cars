@@ -179,7 +179,7 @@ COMPETITION_REPLAY_TOKEN=admin \
 uv run python replay.py
 ```
 
-Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛。Phase 1 同時呈現 Easy 與 Hard 各自的排行榜 Top 15；Final 會自動改為單一賽道與 group leaderboard。每一輪動畫結束才重新抓取資料，因此 snapshot 更新不會中斷正在播放的車輛。車輛連續 180 ticks 未離開最後有效位置 24px 時會標為 `STALLED` 並停止；所有車輛撞毀或停滯後，replay 會提早結束。
+Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛。Phase 1 同時呈現 Easy 與 Hard 各自的排行榜 Top 15；Final 會自動改為單一賽道與 group leaderboard。每一輪動畫結束才重新抓取資料，因此 snapshot 更新不會中斷正在播放的車輛。車輛完成第一圈會標為 `FINISHED` 並停止，連續 180 ticks 未離開最後有效位置 24px 時會標為 `STALLED` 並停止；所有車輛完成、撞毀或停滯後，replay 會暫停 3 秒並用同一批資料重播。Replay header 會顯示目前狀態、本輪 elapsed time、下一輪 replay 倒數與下一次 snapshot 倒數。
 
 ## 開發指令
 
