@@ -43,9 +43,9 @@ def test_weights_compatibility_property_is_a_snapshot() -> None:
     assert config.speed == 25
 
 
-def test_preset_instances_can_be_adjusted_independently() -> None:
-    first = FitnessConfig.from_preset("balanced_v1")
-    second = FitnessConfig.from_preset("balanced_v1")
+def test_config_copies_can_be_adjusted_independently() -> None:
+    first = FitnessConfig(progress=10, crash=50)
+    second = first.copy()
 
     first.progress = 99
     first.set_weight("crash", 80)
@@ -56,19 +56,8 @@ def test_preset_instances_can_be_adjusted_independently() -> None:
     assert first.crash == 80
 
 
-def test_apply_preset_updates_existing_object() -> None:
-    config = FitnessConfig(speed=100, progress=100)
-
-    config.apply_preset("safe_finish_v1")
-
-    assert config.speed == 15
-    assert config.progress == 10
-    assert config.centered == 60
-    assert config.crash == 90
-
-
 def test_config_serialization_preserves_resolved_weights() -> None:
-    config = FitnessConfig.from_preset("progress_first_v1")
+    config = FitnessConfig(speed=30, progress=20, crash=35)
     config.progress = 33
 
     restored = FitnessConfig.from_dict(config.to_dict())
@@ -77,9 +66,6 @@ def test_config_serialization_preserves_resolved_weights() -> None:
     assert restored.progress == 33
 
 
-def test_unknown_preset_and_weight_are_rejected() -> None:
-    with pytest.raises(ValueError, match="Unknown fitness preset"):
-        FitnessConfig.from_preset("missing")
-
+def test_unknown_weight_is_rejected() -> None:
     with pytest.raises(ValueError, match="unknown"):
         FitnessConfig(weights={"unknown": 1})

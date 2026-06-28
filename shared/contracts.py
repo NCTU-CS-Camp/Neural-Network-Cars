@@ -15,7 +15,7 @@ class RuntimeSettings:
     show_debug_overlay: bool = True
     map_mode: str = "default"
     track_seed: int = 42
-    fitness_strategy: str = "baseline_distance"
+    evolution_seed: int = 3057
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
@@ -31,8 +31,8 @@ class RuntimeSettings:
             ),
             map_mode=str(data.get("map_mode", defaults.map_mode)),
             track_seed=int(data.get("track_seed", defaults.track_seed)),
-            fitness_strategy=str(
-                data.get("fitness_strategy", defaults.fitness_strategy)
+            evolution_seed=int(
+                data.get("evolution_seed", defaults.evolution_seed)
             ),
         )
 
@@ -169,32 +169,8 @@ class FitnessConfig:
     def weight_names(cls) -> tuple[str, ...]:
         return cls.WEIGHT_NAMES
 
-    @classmethod
-    def preset_names(cls) -> tuple[str, ...]:
-        return tuple(_FITNESS_PRESET_VALUES)
-
-    @classmethod
-    def from_preset(cls, name: str) -> "FitnessConfig":
-        try:
-            preset = _FITNESS_PRESET_VALUES[name]
-        except KeyError as error:
-            raise ValueError(f"Unknown fitness preset: {name}") from error
-        return cls(weights=preset)
-
-    @classmethod
-    def presets(cls) -> dict[str, "FitnessConfig"]:
-        """Return independent config objects suitable for UI selection."""
-        return {
-            name: cls(weights=weights)
-            for name, weights in _FITNESS_PRESET_VALUES.items()
-        }
-
     def copy(self) -> "FitnessConfig":
         return type(self)(weights=self.weights)
-
-    def apply_preset(self, name: str) -> None:
-        preset = type(self).from_preset(name)
-        self.update_weights(preset.weights)
 
     def get_weight(self, name: str) -> FitnessWeight:
         if name not in self.WEIGHT_NAMES:
@@ -234,47 +210,6 @@ def _coerce_fitness_weight(name: str, value: Any) -> FitnessWeight:
         raise TypeError(f"Fitness weight {name!r} must be numeric")
     numeric = float(value)
     return int(numeric) if numeric.is_integer() else numeric
-
-
-_FITNESS_PRESET_VALUES: dict[str, dict[str, FitnessWeight]] = {
-    "balanced_v1": {
-        "speed": 25,
-        "progress": 10,
-        "centered": 35,
-        "alignment": 40,
-        "safety": 25,
-        "stall": 20,
-        "spin": 15,
-        "wrong_way": 40,
-        "time": 5,
-        "crash": 50,
-    },
-    "progress_first_v1": {
-        "speed": 30,
-        "progress": 20,
-        "centered": 10,
-        "alignment": 25,
-        "safety": 10,
-        "stall": 15,
-        "spin": 10,
-        "wrong_way": 35,
-        "time": 3,
-        "crash": 35,
-    },
-    "safe_finish_v1": {
-        "speed": 15,
-        "progress": 10,
-        "centered": 60,
-        "alignment": 60,
-        "safety": 50,
-        "stall": 20,
-        "spin": 25,
-        "wrong_way": 70,
-        "time": 5,
-        "crash": 90,
-    },
-    "equal_50_debug": {name: 50 for name in FitnessConfig.WEIGHT_NAMES},
-}
 
 
 @dataclass(slots=True)
