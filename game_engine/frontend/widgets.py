@@ -42,6 +42,110 @@ class Button:
 
 
 @dataclass(slots=True)
+class Dropdown:
+    rect: pygame.Rect
+    options: tuple[str, ...]
+    placeholder: str = "Select"
+    selected: str | None = None
+    is_open: bool = False
+    fill_color: tuple[int, int, int] = (30, 30, 30)
+    hover_color: tuple[int, int, int] = (55, 55, 55)
+    text_color: tuple[int, int, int] = (255, 255, 255)
+    border_color: tuple[int, int, int] = (90, 90, 90)
+
+    def _option_rect(self, index: int) -> pygame.Rect:
+        return pygame.Rect(
+            self.rect.x,
+            self.rect.bottom + index * self.rect.height,
+            self.rect.width,
+            self.rect.height,
+        )
+
+    def contains(
+        self, position: tuple[int, int], *, include_options: bool = False
+    ) -> bool:
+        if self.rect.collidepoint(position):
+            return True
+        return include_options and any(
+            self._option_rect(index).collidepoint(position)
+            for index in range(len(self.options))
+        )
+
+    def handle_event(self, event: pygame.event.Event) -> str | None:
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.is_open = False
+            return None
+
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return None
+
+        if self.rect.collidepoint(event.pos):
+            self.is_open = not self.is_open
+            return None
+
+        if self.is_open:
+            for index, option in enumerate(self.options):
+                if self._option_rect(index).collidepoint(event.pos):
+                    self.selected = option
+                    self.is_open = False
+                    return option
+            self.is_open = False
+
+        return None
+
+    def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+        mouse_pos = pygame.mouse.get_pos()
+        fill = (
+            self.hover_color if self.rect.collidepoint(mouse_pos) else self.fill_color
+        )
+        pygame.draw.rect(surface, fill, self.rect)
+        pygame.draw.rect(surface, self.border_color, self.rect, 2)
+
+        text = self.selected or self.placeholder
+        rendered = font.render(text, True, self.text_color)
+        surface.blit(
+            rendered, rendered.get_rect(midleft=(self.rect.x + 10, self.rect.centery))
+        )
+
+        arrow_x = self.rect.right - 16
+        arrow_y = self.rect.centery
+        arrow_points = (
+            (
+                (arrow_x - 5, arrow_y - 3),
+                (arrow_x + 5, arrow_y - 3),
+                (arrow_x, arrow_y + 4),
+            )
+            if not self.is_open
+            else (
+                (arrow_x - 5, arrow_y + 3),
+                (arrow_x + 5, arrow_y + 3),
+                (arrow_x, arrow_y - 4),
+            )
+        )
+        pygame.draw.polygon(surface, self.text_color, arrow_points)
+
+        if not self.is_open:
+            return
+
+        for index, option in enumerate(self.options):
+            option_rect = self._option_rect(index)
+            option_fill = (
+                self.hover_color
+                if option_rect.collidepoint(mouse_pos)
+                else self.fill_color
+            )
+            pygame.draw.rect(surface, option_fill, option_rect)
+            pygame.draw.rect(surface, self.border_color, option_rect, 1)
+            option_surface = font.render(option, True, self.text_color)
+            surface.blit(
+                option_surface,
+                option_surface.get_rect(
+                    midleft=(option_rect.x + 10, option_rect.centery)
+                ),
+            )
+
+
+@dataclass(slots=True)
 class TextInput:
     rect: pygame.Rect
     text: str = ""
@@ -148,4 +252,3 @@ class Slider:
         )
         rendered = font.render(str(self.value), True, (255, 255, 255))
         surface.blit(rendered, (self.rect.right + 12, self.rect.y))
-
