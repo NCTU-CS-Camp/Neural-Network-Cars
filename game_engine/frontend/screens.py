@@ -17,7 +17,7 @@ from game_engine.backend.settings import (
     WHITE,
 )
 from game_engine.frontend.profile_store import save_login_profile
-from game_engine.frontend.widgets import Button, Slider, TextInput
+from game_engine.frontend.widgets import Button, Dropdown, Slider, TextInput
 from shared.contracts import FitnessConfig, LoginProfile, TrainingRecord, WeightPayload
 
 
@@ -193,24 +193,45 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     ]
     selected_difficulty: int = 1
 
-    # Fitness sliders (right 1/3, full height, 10 items uniformly)
+    # Fitness preset and sliders (right 1/3, full height)
     slider_label_x = right_x + M
     slider_x = right_x + M + max(140, right_w // 4)
     slider_w = right_w - M * 2 - max(140, right_w // 4) - M
     fitness_top = back_button.rect.bottom + M
     fitness_bottom = H - M
-    fitness_step = (fitness_bottom - fitness_top) // 10
+    dropdown_h = max(34, H // 26)
+    preset_dropdown = Dropdown(
+        pygame.Rect(right_x + M, fitness_top, right_w - M * 2, dropdown_h),
+        FitnessConfig.preset_names(),
+        placeholder="載入 Fitness preset",
+    )
+    sliders_top = preset_dropdown.rect.bottom + M // 2
+    fitness_step = (fitness_bottom - sliders_top) // 10
     bonus_sliders = {
         name: Slider(
-            pygame.Rect(slider_x, fitness_top + i * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
-            0, 100, 50,
+            pygame.Rect(
+                slider_x,
+                sliders_top + i * fitness_step + fitness_step // 2,
+                slider_w,
+                max(8, H // 100),
+            ),
+            0,
+            100,
+            50,
         )
         for i, name in enumerate(BONUS_FITNESS_PLACEHOLDERS)
     }
     penalty_sliders = {
         name: Slider(
-            pygame.Rect(slider_x, fitness_top + (5 + i) * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
-            0, 100, 50,
+            pygame.Rect(
+                slider_x,
+                sliders_top + (5 + i) * fitness_step + fitness_step // 2,
+                slider_w,
+                max(8, H // 100),
+            ),
+            0,
+            100,
+            50,
         )
         for i, name in enumerate(PENALTY_FITNESS_PLACEHOLDERS)
     }
@@ -253,8 +274,25 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     while True:
         for event in pygame.event.get():
             _check_quit(event)
-            for slider in all_sliders.values():
-                slider.handle_event(event)
+
+            dropdown_was_open = preset_dropdown.is_open
+            dropdown_captured_click = (
+                event.type == pygame.MOUSEBUTTONDOWN
+                and event.button == 1
+                and preset_dropdown.contains(
+                    event.pos,
+                    include_options=dropdown_was_open,
+                )
+            )
+            selected_preset = preset_dropdown.handle_event(event)
+            if selected_preset is not None:
+                preset = FitnessConfig.from_preset(selected_preset)
+                for name, slider in all_sliders.items():
+                    slider.value = int(preset.get_weight(name))
+
+            if not dropdown_captured_click:
+                for slider in all_sliders.values():
+                    slider.handle_event(event)
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 pos = event.pos
@@ -341,6 +379,7 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
             slider.draw(screen, font)
 
         go_button.draw(screen, font)
+        preset_dropdown.draw(screen, font)
         pygame.display.update()
         clock.tick(30)
 
