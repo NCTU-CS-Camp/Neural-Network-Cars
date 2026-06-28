@@ -108,7 +108,7 @@ def _fitness_summary(fitness_config: FitnessConfig) -> str:
     return "  ".join(f"{name}:{value}" for name, value in fitness_config.weights.items())
 
 
-def run_login_screen(screen: pygame.Surface) -> LoginProfile:
+def run_login_screen(screen: pygame.Surface, default_server_url: str) -> LoginProfile:
     clock = pygame.time.Clock()
     font = _font()
     title_font = _font(36)
@@ -119,7 +119,9 @@ def run_login_screen(screen: pygame.Surface) -> LoginProfile:
     ]
     selected_group: str | None = None
     name_input = TextInput(pygame.Rect(60, 340, 360, 48))
-    server_url_input = TextInput(pygame.Rect(60, 460, 360, 48), text="http://127.0.0.1:8000", max_length=120)
+    server_url_input = TextInput(
+        pygame.Rect(60, 460, 360, 48), text=default_server_url, max_length=120
+    )
     register_button = Button("註冊", pygame.Rect(60, 540, 160, 52))
     error_message = ""
 

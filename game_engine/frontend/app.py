@@ -62,9 +62,17 @@ def run():
     screen = pygame.display.set_mode((win_w, win_h))
 
     try:
-        profile = load_login_profile() or run_login_screen(screen)
         settings = load_runtime_settings()
+        profile = load_login_profile()
+        should_save_settings = profile is None
+        if profile is None:
+            profile = run_login_screen(screen, settings.server_url)
+            settings.server_url = profile.server_url
+        else:
+            profile.server_url = settings.server_url
         settings.nickname = profile.username
+        if should_save_settings:
+            save_runtime_settings(settings)
 
         while True:
             choice = run_main_menu_screen(screen, profile)

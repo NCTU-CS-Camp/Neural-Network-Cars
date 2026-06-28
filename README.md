@@ -81,6 +81,16 @@ uv run python main.py
 
 此指令會從 `game_engine/frontend/app.py` 啟動 Pygame simulator。
 
+Client 使用的 API 位址由 `settings.json` 的 `server_url` 設定，例如：
+
+```json
+{
+  "server_url": "http://127.0.0.1:8000"
+}
+```
+
+登入畫面會以此值預填 Server URL；已有 `profile.json` 時，也會優先使用此設定。
+
 ### 啟動 server stub
 
 ```bash

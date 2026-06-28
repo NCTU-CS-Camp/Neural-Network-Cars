@@ -12,6 +12,7 @@ EXPECTED_WEIGHT_SHAPES = [(6, 6), (4, 6)]
 EXPECTED_BIAS_SHAPES = [(6, 1), (4, 1)]
 EXPECTED_WEIGHT_LENGTHS = [rows * cols for rows, cols in EXPECTED_WEIGHT_SHAPES]
 EXPECTED_BIAS_LENGTHS = [rows * cols for rows, cols in EXPECTED_BIAS_SHAPES]
+DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 
 
 def _float_layers(raw_layers: Any, expected_lengths: list[int], field_name: str) -> list[list[float]]:
@@ -37,6 +38,7 @@ def _float_layers(raw_layers: Any, expected_lengths: list[int], field_name: str)
 @dataclass(slots=True)
 class RuntimeSettings:
     nickname: str = "player1"
+    server_url: str = DEFAULT_SERVER_URL
     fps: int = 30
     population_size: int = 50
     mutation_rate: int = 90
@@ -51,6 +53,7 @@ class RuntimeSettings:
         defaults = cls()
         return cls(
             nickname=str(data.get("nickname", defaults.nickname)),
+            server_url=str(data.get("server_url", defaults.server_url)),
             fps=int(data.get("fps", defaults.fps)),
             population_size=int(data.get("population_size", defaults.population_size)),
             mutation_rate=int(data.get("mutation_rate", defaults.mutation_rate)),
@@ -109,14 +112,14 @@ class WeightPayload:
 class LoginProfile:
     group_id: str
     username: str
-    server_url: str = "http://127.0.0.1:8000"
+    server_url: str = DEFAULT_SERVER_URL
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LoginProfile":
         return cls(
             group_id=str(data["group_id"]),
             username=str(data["username"]),
-            server_url=str(data.get("server_url", "http://127.0.0.1:8000")),
+            server_url=str(data.get("server_url", DEFAULT_SERVER_URL)),
         )
 
     def to_dict(self) -> dict[str, Any]:
