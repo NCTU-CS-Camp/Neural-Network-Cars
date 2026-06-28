@@ -97,9 +97,9 @@ Current implementation uses `POST` eligibility endpoints and expects both `group
 
 ## Batching Process
 
-Phase 1 Easy/Hard submissions enter storage as `queued`. Final submissions skip the five-minute batch path and become completed immediately after acceptance.
+Phase 1 Easy/Hard submissions enter storage as `queued`. Final submissions skip the Phase 1 batch path and become completed immediately after acceptance.
 
-`BatchWorker` in `server/evaluation_worker.py` polls periodically and calls `CompetitionStorage.seal_phase_one_batches()`. Normal sealing uses the previous UTC five-minute boundary as the cutoff. Admin demo sealing uses `POST /v2/admin/batches/run-now`, which force-seals currently queued Easy/Hard submissions.
+`BatchWorker` in `server/evaluation_worker.py` polls periodically and calls `CompetitionStorage.seal_phase_one_batches()`. Normal sealing uses the previous UTC boundary for the persisted `phase_one_batch_minutes` interval as the cutoff. Admin demo sealing uses `POST /v2/admin/batches/run-now`, which force-seals currently queued Easy/Hard submissions. Admin can set the interval to 1, 2, or 5 minutes through `POST /v2/admin/config`; the selected interval also controls Easy/Hard cooldown.
 
 Current batch behavior:
 

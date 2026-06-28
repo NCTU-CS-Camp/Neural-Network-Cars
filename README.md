@@ -146,9 +146,10 @@ export COMPETITION_SERVER_URL=http://127.0.0.1:8010
 
 1. 將 stage 設為 `phase_one`，開放個人 Easy 與 Hard submission。
 2. 將 stage 設為 `final`，關閉 Easy/Hard，開放每個 `group_id` 一筆 Final submission。
-3. `Create Demo Snapshot` 會立即封存目前 queued 的 Easy/Hard submissions，方便測試；正式比賽則由 UTC 每五分鐘邊界自動封存。
-4. `Restart Replay` 會通知大螢幕 Pygame client 立即從 spawn 重新播放目前 Top 15，不改變排行榜或 snapshot。
-5. `Reset Competition Data` 會刪除所有 submissions、cooldown 與 snapshots，但保留目前 stage 與固定 competition configuration。
+3. `Phase 1 interval` 可設定 Easy/Hard batch 與 cooldown 間隔，目前支援 1、2、5 分鐘，預設 1 分鐘。
+4. `Create Demo Snapshot` 會立即封存目前 queued 的 Easy/Hard submissions，方便測試；正式比賽則由目前 interval 的 UTC 邊界自動封存。
+5. `Restart Replay` 會通知大螢幕 Pygame client 立即從 spawn 重新播放目前 Top 15，不改變排行榜或 snapshot。
+6. `Reset Competition Data` 會刪除所有 submissions、cooldown 與 snapshots，但保留目前 stage 與 competition interval。
 
 Admin 頁也會固定顯示 Easy、Hard、Final 三張 competition map 預覽。這三張 map 不能在 admin 頁任意替換。
 
@@ -168,7 +169,7 @@ Competition test main 的操作：
 - `U`：先呼叫 eligibility API；可提交時才送出目前 best car weights 與 `client_result`。
 - `P`：用 admin token 呼叫 `Create Demo Snapshot`，讓 queued Easy/Hard submissions 立即進 leaderboard/replay。
 
-Easy/Hard 對同一 `(group_id, username)` 各自有五分鐘 cooldown。Final 必須先由 admin 切到 `final` stage，且每個 group 只能成功提交一次。
+Easy/Hard 對同一 `(group_id, username)` 各自有一段 cooldown，長度由 Admin 的 `Phase 1 interval` 決定。Final 必須先由 admin 切到 `final` stage，且每個 group 只能成功提交一次。
 
 ### 3. Leaderboard：公開查看排名
 
@@ -189,7 +190,7 @@ COMPETITION_REPLAY_TOKEN=admin \
 uv run python replay.py
 ```
 
-Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛。Phase 1 同時呈現 Easy 與 Hard 各自的排行榜 Top 15；Final 會自動改為單一賽道與 group leaderboard。每一輪動畫結束才重新抓取資料，因此 snapshot 更新不會中斷正在播放的車輛。車輛完成第一圈會標為 `FINISHED` 並停止，連續 180 ticks 未離開最後有效位置 24px 時會標為 `STALLED` 並停止；所有車輛完成、撞毀或停滯後，replay 會暫停 3 秒並用同一批資料重播。Replay header 會顯示目前狀態、本輪 elapsed time、下一輪 replay 倒數與下一次 snapshot 倒數。
+Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛。Phase 1 同時呈現 Easy 與 Hard 各自的排行榜 Top 15；Final 會自動改為單一賽道與 group leaderboard。每一輪動畫結束才重新抓取資料，因此 snapshot 更新不會中斷正在播放的車輛。車輛完成第一圈會標為 `FINISHED` 並停止，連續 180 ticks 未離開最後有效位置 24px 時會標為 `STALLED` 並停止；所有車輛完成、撞毀或停滯後，replay 會暫停 3 秒再抓取目前 replay payload，若沒有新 snapshot 則重播同一批資料。Replay header 會顯示目前狀態、本輪 elapsed time、下一輪 replay 倒數與下一次 snapshot 倒數。
 
 ## 開發指令
 
