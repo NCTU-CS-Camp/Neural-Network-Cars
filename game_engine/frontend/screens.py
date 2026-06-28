@@ -472,8 +472,8 @@ def _run_record_submission_screen(
     payload = WeightPayload(
         model_version="v1",
         layer_sizes=record.layer_sizes,
-        weights=record.weights,
-        biases=record.biases,
+        weights=record.parent_a_weights,
+        biases=record.parent_a_biases,
         fitness_score=0.0,
         generation=0,
         track_id="upload",
