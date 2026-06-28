@@ -1,6 +1,6 @@
 import pygame
 
-from game_engine.frontend.widgets import Dropdown
+from game_engine.frontend.widgets import Dropdown, Slider, TextInput
 
 
 def _left_click(position: tuple[int, int]) -> pygame.event.Event:
@@ -41,3 +41,47 @@ def test_dropdown_reports_expanded_hit_area_only_when_requested() -> None:
 
     assert not dropdown.contains(option_position)
     assert dropdown.contains(option_position, include_options=True)
+
+
+def test_numeric_text_input_filters_non_digits_and_limits_length() -> None:
+    input_value = TextInput(
+        pygame.Rect(10, 20, 80, 30),
+        active=True,
+        max_length=3,
+        allowed_characters="0123456789",
+    )
+
+    input_value.handle_event(
+        pygame.event.Event(pygame.TEXTINPUT, {"text": "12a34"})
+    )
+
+    assert input_value.text == "123"
+
+
+def test_text_input_can_replace_existing_numeric_value_on_focus() -> None:
+    input_value = TextInput(
+        pygame.Rect(10, 20, 80, 30),
+        text="50",
+        clear_on_focus=True,
+    )
+
+    input_value.handle_event(_left_click(input_value.rect.center))
+
+    assert input_value.active
+    assert input_value.text == ""
+
+
+def test_slider_large_handle_area_is_draggable() -> None:
+    slider = Slider(
+        pygame.Rect(20, 40, 200, 12),
+        handle_radius=18,
+        show_value=False,
+    )
+    click_above_track = pygame.event.Event(
+        pygame.MOUSEBUTTONDOWN,
+        {"button": 1, "pos": (120, 28)},
+    )
+
+    assert slider.handle_event(click_above_track)
+    assert slider.dragging
+    assert slider.value == 50

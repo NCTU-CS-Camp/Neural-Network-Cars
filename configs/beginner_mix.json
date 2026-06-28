@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "mode": "beginner_mix",
+  "algorithm_version": "beginner-mix-v1",
+  "rewards": {
+    "speed": 50,
+    "progress": 50,
+    "centered": 50,
+    "alignment": 50,
+    "safety": 50
+  },
+  "penalties": {
+    "stall": 50,
+    "spin": 50,
+    "wrong_way": 50,
+    "time": 50,
+    "crash": 50
+  }
+}

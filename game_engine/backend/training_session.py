@@ -50,7 +50,7 @@ class TrainingSession:
     alive_count: int = 0
     selected_cars: list[Any] = field(default_factory=list)
     track_index: int = 1
-    show_sensor_lines: bool = True
+    show_sensor_lines: bool = False
     show_player: bool = True
     show_debug_overlay: bool = True
     mlp_init_rng: np.random.Generator = field(init=False, repr=False)

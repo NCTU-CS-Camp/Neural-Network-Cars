@@ -13,8 +13,16 @@ PROFILE_PATH = PROJECT_ROOT / "profile.json"
 def load_login_profile(path: Path = PROFILE_PATH) -> LoginProfile | None:
     if not path.exists():
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return LoginProfile.from_dict(data)
+
+    content = path.read_text(encoding="utf-8")
+    if not content.strip():
+        return None
+
+    try:
+        data = json.loads(content)
+        return LoginProfile.from_dict(data)
+    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+        return None
 
 
 def save_login_profile(profile: LoginProfile, path: Path = PROFILE_PATH) -> None:

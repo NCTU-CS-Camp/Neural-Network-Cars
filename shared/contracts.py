@@ -49,6 +49,7 @@ class RuntimeSettings:
     map_mode: str = "default"
     track_seed: int = 42
     evolution_seed: int = DEFAULT_EVOLUTION_SEED
+    max_speed: int = 10
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
@@ -68,6 +69,7 @@ class RuntimeSettings:
             evolution_seed=int(
                 data.get("evolution_seed", defaults.evolution_seed)
             ),
+            max_speed=max(5, min(30, int(data.get("max_speed", defaults.max_speed)))),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -323,6 +325,7 @@ class TrainingRecord:
     parent_b_biases: list[list[float]]
     fitness_config: FitnessConfig
     map_difficulty: int
+    max_speed: int = 10
     mlp_init_seed: int = DEFAULT_EVOLUTION_SEED
     mlp_init_rng_state: dict[str, Any] | None = None
     mutation_rng_state: tuple[Any, ...] | list[Any] | None = None
@@ -345,6 +348,7 @@ class TrainingRecord:
             parent_b_biases=[[float(b) for b in layer] for layer in data["parent_b_biases"]] if "parent_b_biases" in data else legacy_biases,
             fitness_config=FitnessConfig.from_dict(data["fitness_config"]),
             map_difficulty=int(data["map_difficulty"]),
+            max_speed=max(5, min(30, int(data.get("max_speed", 10)))),
             mlp_init_seed=int(
                 data.get("mlp_init_seed", DEFAULT_EVOLUTION_SEED)
             ),
@@ -366,6 +370,7 @@ class TrainingRecord:
             "parent_b_biases": self.parent_b_biases,
             "fitness_config": self.fitness_config.to_dict(),
             "map_difficulty": self.map_difficulty,
+            "max_speed": self.max_speed,
             "mlp_init_seed": self.mlp_init_seed,
             "mlp_init_rng_state": self.mlp_init_rng_state,
             "mutation_rng_state": self.mutation_rng_state,

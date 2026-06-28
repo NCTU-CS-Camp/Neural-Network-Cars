@@ -157,12 +157,16 @@ class TextInput:
     border_color: tuple[int, int, int] = (90, 90, 90)
     active_border_color: tuple[int, int, int] = (120, 170, 255)
     composing_color: tuple[int, int, int] = (255, 220, 0)
+    allowed_characters: str | None = None
+    clear_on_focus: bool = False
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN:
             was_active = self.active
             self.active = self.rect.collidepoint(event.pos)
             if self.active and not was_active:
+                if self.clear_on_focus:
+                    self.text = ""
                 pygame.key.start_text_input()
             elif not self.active and was_active:
                 pygame.key.stop_text_input()
@@ -178,8 +182,16 @@ class TextInput:
 
         if event.type == pygame.TEXTINPUT:
             self.composing = ""
-            if len(self.text) < self.max_length:
-                self.text += event.text
+            entered_text = event.text
+            if self.allowed_characters is not None:
+                entered_text = "".join(
+                    character
+                    for character in entered_text
+                    if character in self.allowed_characters
+                )
+            available = self.max_length - len(self.text)
+            if available > 0:
+                self.text += entered_text[:available]
             return True
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_BACKSPACE:
@@ -219,6 +231,15 @@ class Slider:
     dragging: bool = False
     track_color: tuple[int, int, int] = (90, 90, 90)
     handle_color: tuple[int, int, int] = (200, 200, 200)
+    handle_radius: int | None = None
+    show_value: bool = True
+
+    def _handle_radius(self) -> int:
+        return self.handle_radius or self.rect.height
+
+    def _hit_rect(self) -> pygame.Rect:
+        radius = self._handle_radius()
+        return self.rect.inflate(radius * 2, radius * 2)
 
     def _value_to_x(self) -> int:
         span = self.max_value - self.min_value
@@ -231,11 +252,15 @@ class Slider:
         return int(round(self.min_value + ratio * span))
 
     def handle_event(self, event: pygame.event.Event) -> bool:
-        if event.type == pygame.MOUSEBUTTONDOWN and self.rect.collidepoint(event.pos):
+        if (
+            event.type == pygame.MOUSEBUTTONDOWN
+            and event.button == 1
+            and self._hit_rect().collidepoint(event.pos)
+        ):
             self.dragging = True
             self.value = self._x_to_value(event.pos[0])
             return True
-        if event.type == pygame.MOUSEBUTTONUP:
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             was_dragging = self.dragging
             self.dragging = False
             return was_dragging
@@ -248,7 +273,11 @@ class Slider:
         pygame.draw.rect(surface, self.track_color, self.rect, border_radius=4)
         handle_x = self._value_to_x()
         pygame.draw.circle(
-            surface, self.handle_color, (handle_x, self.rect.centery), self.rect.height
+            surface,
+            self.handle_color,
+            (handle_x, self.rect.centery),
+            self._handle_radius(),
         )
-        rendered = font.render(str(self.value), True, (255, 255, 255))
-        surface.blit(rendered, (self.rect.right + 12, self.rect.y))
+        if self.show_value:
+            rendered = font.render(str(self.value), True, (255, 255, 255))
+            surface.blit(rendered, (self.rect.right + 12, self.rect.y))

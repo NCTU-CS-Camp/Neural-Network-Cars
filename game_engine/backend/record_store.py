@@ -18,7 +18,10 @@ class RecordStore:
             self._write([])
 
     def _read(self) -> list[dict]:
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        content = self.path.read_text(encoding="utf-8")
+        if not content.strip():
+            return []
+        return json.loads(content)
 
     def _write(self, records: list[dict]) -> None:
         self.path.write_text(json.dumps(records, indent=2), encoding="utf-8")

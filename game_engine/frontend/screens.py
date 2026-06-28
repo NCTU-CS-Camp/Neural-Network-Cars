@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 import pygame
@@ -19,20 +20,31 @@ from GA.genetic import (
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import DEFAULT_MLP_INIT_SEED, Car, configure_car
 from game_engine.backend.competition_maps import load_competition_map, load_validation_map
+from game_engine.backend.competition_track import (
+    CompetitionRunTracker,
+    reconstruct_route_cells,
+)
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import apply_weight_payload, export_weight_payload
 from game_engine.backend.settings import (
     BLACK,
     FONT_PATH,
+    FPS,
     MAX_SPEED,
     TRACK_BACK_PATH,
     TRACK_FRONT_PATH,
+    TRACK_METADATA_PATH,
     TRAINING_DIFFICULTY_MAPS,
     VALIDATION_DIFFICULTY_MAPS,
     VALIDATION_FRAME_LIMIT,
     WHITE,
 )
 from game_engine.backend.track_generator import generate_random_map
+from game_engine.backend.track_layout import (
+    BLOCK_SIZE,
+    TrackLayout,
+    build_boundary_checkpoints,
+)
 from game_engine.backend.training_session import create_evolution_rngs
 from game_engine.frontend.competition_client import (
     EligibilityResult,
@@ -73,6 +85,8 @@ SUBMISSION_POPULATION_SIZE = 100
 # generalization, so it mutates more aggressively than the upload resubmit path.
 VALIDATION_MUTATION_RATE = 15
 VALIDATION_POPULATION_SIZE = 100
+VALID_FITNESS_INPUT_COLOR = (90, 90, 90)
+INVALID_FITNESS_INPUT_COLOR = (255, 90, 90)
 
 
 class AppQuit(Exception):
@@ -81,7 +95,7 @@ class AppQuit(Exception):
 
 GROUP_COUNT = 10
 MenuChoice = Literal["training", "validation"]
-TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None]
+TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None, int]
 
 BONUS_FITNESS_PLACEHOLDERS = [
     "speed",
@@ -111,6 +125,21 @@ def _check_quit(event: pygame.event.Event) -> None:
 
 def _fitness_summary(fitness_config: FitnessConfig) -> str:
     return "  ".join(f"{name}:{value}" for name, value in fitness_config.weights.items())
+
+
+def _ellipsize(font: pygame.font.Font, text: str, max_width: int) -> str:
+    if font.size(text)[0] <= max_width:
+        return text
+    suffix = "…"
+    while text and font.size(text + suffix)[0] > max_width:
+        text = text[:-1]
+    return text + suffix
+
+
+def format_ticks_as_seconds(ticks: int | None, fps: int = FPS) -> str:
+    if ticks is None:
+        return "--"
+    return f"{ticks / fps:.1f} 秒"
 
 
 def run_login_screen(screen: pygame.Surface, default_server_url: str) -> LoginProfile:
@@ -212,7 +241,10 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
         clock.tick(30)
 
 
-def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult | None:
+def run_training_config_screen(
+    screen: pygame.Surface,
+    default_max_speed: int = MAX_SPEED,
+) -> TrainingConfigResult | None:
     clock = pygame.time.Clock()
     W, H = screen.get_size()
 
@@ -228,6 +260,13 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     record_y = map_bottom           # bottom 3/5 → record section
 
     back_button = Button("← 返回", pygame.Rect(M, M, max(100, W // 14), max(36, H // 24)))
+    max_speed_input = TextInput(
+        pygame.Rect(left_w - M - max(64, W // 24), M, max(64, W // 24), back_button.rect.height),
+        text=str(max(5, min(30, default_max_speed))),
+        max_length=2,
+        allowed_characters="0123456789",
+        clear_on_focus=True,
+    )
 
     # Map cards (left 2/3, top 2/5)
     card_area_top = back_button.rect.bottom + M
@@ -256,10 +295,14 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     ]
     selected_difficulty: int = 1
 
-    # Fitness preset and sliders (right 1/3, full height)
+    # Fitness preset, sliders, and numeric inputs (right 1/3, full height)
     slider_label_x = right_x + M
-    slider_x = right_x + M + max(140, right_w // 4)
-    slider_w = right_w - M * 2 - max(140, right_w // 4) - M
+    slider_label_w = max(100, right_w // 5)
+    value_input_w = max(56, right_w // 10)
+    control_gap = max(10, M // 2)
+    slider_x = slider_label_x + slider_label_w
+    slider_right = W - M - value_input_w - control_gap
+    slider_w = max(80, slider_right - slider_x)
     fitness_top = back_button.rect.bottom + M
     fitness_bottom = H - M
     dropdown_h = max(34, H // 26)
@@ -272,42 +315,66 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     )
     sliders_top = preset_dropdown.rect.bottom + M // 2
     fitness_step = (fitness_bottom - sliders_top) // 10
-    bonus_sliders = {
-        name: Slider(
+    slider_track_height = max(12, min(18, fitness_step // 4))
+    slider_handle_radius = max(16, min(20, fitness_step // 3))
+    value_input_h = max(30, min(38, fitness_step - 8))
+
+    def slider_for_row(row: int, value: int) -> Slider:
+        center_y = sliders_top + row * fitness_step + fitness_step // 2
+        return Slider(
             pygame.Rect(
                 slider_x,
-                sliders_top + i * fitness_step + fitness_step // 2,
+                center_y - slider_track_height // 2,
                 slider_w,
-                max(8, H // 100),
+                slider_track_height,
             ),
             0,
             100,
-            int(selected_strategy.config.get_weight(name)),
+            value,
+            handle_radius=slider_handle_radius,
+            show_value=False,
         )
+
+    bonus_sliders = {
+        name: slider_for_row(i, int(selected_strategy.config.get_weight(name)))
         for i, name in enumerate(BONUS_FITNESS_PLACEHOLDERS)
     }
     penalty_sliders = {
-        name: Slider(
-            pygame.Rect(
-                slider_x,
-                sliders_top + (5 + i) * fitness_step + fitness_step // 2,
-                slider_w,
-                max(8, H // 100),
-            ),
-            0,
-            100,
+        name: slider_for_row(
+            5 + i,
             int(selected_strategy.config.get_weight(name)),
         )
         for i, name in enumerate(PENALTY_FITNESS_PLACEHOLDERS)
     }
     all_sliders = {**bonus_sliders, **penalty_sliders}
+    value_inputs = {
+        name: TextInput(
+            pygame.Rect(
+                slider.rect.right + control_gap,
+                slider.rect.centery - value_input_h // 2,
+                value_input_w,
+                value_input_h,
+            ),
+            text=str(slider.value),
+            max_length=3,
+            allowed_characters="0123456789",
+            clear_on_focus=True,
+        )
+        for name, slider in all_sliders.items()
+    }
 
     # Record section (left 2/3, bottom 3/5)
     records = RecordStore().list_records()
     record_title_y = record_y + M
     rec_btn_y = record_title_y + title_font.size("A")[1] + M // 2
-    max_records = min(len(records), max(2, (H - rec_btn_y - M * 8) // max(32, H // 26)))
     rec_row_h = max(30, H // 28)
+    btn_h = max(36, H // 24)
+    action_y = H - M - btn_h
+    available_record_h = max(0, action_y - M - rec_btn_y)
+    max_records = min(
+        len(records),
+        available_record_h // (rec_row_h + 4),
+    )
     record_buttons: list[tuple[TrainingRecord, Button]] = [
         (record, Button(
             f"{record.record_name}  |  {record.saved_at[:10]}",
@@ -315,12 +382,17 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
         ))
         for i, record in enumerate(records[:max_records])
     ]
-    action_y = rec_btn_y + max_records * (rec_row_h + 4) + M
-    btn_h = max(36, H // 24)
-    btn_w = max(140, left_w // 5)
+    action_gap = M
+    btn_w = (left_w - M * 2 - action_gap * 2) // 3
     fresh_button = Button("重新開始", pygame.Rect(M, action_y, btn_w, btn_h))
-    from_record_button = Button("使用舊有紀錄", pygame.Rect(M * 2 + btn_w, action_y, btn_w + 20, btn_h))
-    go_button = Button("GO", pygame.Rect(W - M - max(100, W // 14), H - M - btn_h, max(100, W // 14), btn_h))
+    from_record_button = Button(
+        "使用舊有紀錄",
+        pygame.Rect(M + btn_w + action_gap, action_y, btn_w, btn_h),
+    )
+    go_button = Button(
+        "GO",
+        pygame.Rect(M + (btn_w + action_gap) * 2, action_y, btn_w, btn_h),
+    )
 
     start_mode: str | None = None
     selected_record: TrainingRecord | None = None
@@ -330,7 +402,16 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
             return False
         if start_mode == "record" and selected_record is None:
             return False
-        return True
+        fitness_values_are_valid = all(
+            input_value.text.isdigit()
+            and 0 <= int(input_value.text) <= 100
+            for input_value in value_inputs.values()
+        )
+        max_speed_is_valid = (
+            max_speed_input.text.isdigit()
+            and 5 <= int(max_speed_input.text) <= 30
+        )
+        return fitness_values_are_valid and max_speed_is_valid
 
     BLUE = (60, 120, 200)
     DARK = (30, 30, 30)
@@ -354,10 +435,27 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
                 selected_strategy = get_fitness_strategy(selected_strategy_name)
                 for name, slider in all_sliders.items():
                     slider.value = int(selected_strategy.config.get_weight(name))
+                    value_inputs[name].text = str(slider.value)
 
-            if not dropdown_captured_click:
-                for slider in all_sliders.values():
-                    slider.handle_event(event)
+            input_captured_click = (
+                event.type == pygame.MOUSEBUTTONDOWN
+                and event.button == 1
+                and any(
+                    input_value.rect.collidepoint(event.pos)
+                    for input_value in value_inputs.values()
+                )
+            )
+            for name, input_value in value_inputs.items():
+                if input_value.handle_event(event):
+                    text = input_value.text
+                    if text.isdigit() and 0 <= int(text) <= 100:
+                        all_sliders[name].value = int(text)
+            max_speed_input.handle_event(event)
+
+            if not dropdown_captured_click and not input_captured_click:
+                for name, slider in all_sliders.items():
+                    if slider.handle_event(event):
+                        value_inputs[name].text = str(slider.value)
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 pos = event.pos
@@ -383,7 +481,12 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
                 if go_button.contains(pos) and go_enabled():
                     weights = {name: s.value for name, s in all_sliders.items()}
                     selected_strategy.config.update_weights(weights)
-                    return selected_strategy, selected_difficulty, selected_record
+                    return (
+                        selected_strategy,
+                        selected_difficulty,
+                        selected_record,
+                        int(max_speed_input.text),
+                    )
 
         mouse_pos = pygame.mouse.get_pos()
         back_button.update_hover(mouse_pos)
@@ -392,6 +495,34 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
         from_record_button.update_hover(mouse_pos)
         for _, btn in record_buttons:
             btn.update_hover(mouse_pos)
+        for input_value in value_inputs.values():
+            is_valid = (
+                input_value.text.isdigit()
+                and 0 <= int(input_value.text) <= 100
+            )
+            border_color = (
+                VALID_FITNESS_INPUT_COLOR
+                if is_valid
+                else INVALID_FITNESS_INPUT_COLOR
+            )
+            input_value.border_color = border_color
+            input_value.active_border_color = (
+                (120, 170, 255) if is_valid else INVALID_FITNESS_INPUT_COLOR
+            )
+        max_speed_is_valid = (
+            max_speed_input.text.isdigit()
+            and 5 <= int(max_speed_input.text) <= 30
+        )
+        max_speed_input.border_color = (
+            VALID_FITNESS_INPUT_COLOR
+            if max_speed_is_valid
+            else INVALID_FITNESS_INPUT_COLOR
+        )
+        max_speed_input.active_border_color = (
+            (120, 170, 255)
+            if max_speed_is_valid
+            else INVALID_FITNESS_INPUT_COLOR
+        )
 
         fresh_button.fill_color = BLUE if start_mode == "fresh" else DARK
         from_record_button.fill_color = BLUE if start_mode == "record" else DARK
@@ -401,7 +532,21 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
         back_button.draw(screen, font)
 
         # Left-top: map cards
-        screen.blit(title_font.render("選擇地圖", True, WHITE), (M, back_button.rect.bottom - title_font.size("A")[1] - M // 2))
+        map_title = title_font.render("選擇地圖", True, WHITE)
+        screen.blit(
+            map_title,
+            map_title.get_rect(
+                midleft=(back_button.rect.right + M, back_button.rect.centery)
+            ),
+        )
+        speed_label = font.render("Max Speed (5–30)", True, WHITE)
+        screen.blit(
+            speed_label,
+            speed_label.get_rect(
+                midright=(max_speed_input.rect.left - M // 2, max_speed_input.rect.centery)
+            ),
+        )
+        max_speed_input.draw(screen, font)
         for diff_id, label, thumb, card_rect in map_cards:
             selected = diff_id == selected_difficulty
             hovered = card_rect.collidepoint(mouse_pos)
@@ -437,12 +582,13 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
         # Right: fitness sliders
         screen.blit(title_font.render("Fitness 函數設定", True, WHITE),
                     (right_x + M, back_button.rect.bottom - title_font.size("A")[1] - M // 2))
-        for i, (name, slider) in enumerate(all_sliders.items()):
+        for name, slider in all_sliders.items():
             is_bonus = name in BONUS_FITNESS_PLACEHOLDERS
             label_color = (100, 220, 100) if is_bonus else (220, 100, 100)
             label_y = slider.rect.centery - font.size(name)[1] // 2
             screen.blit(font.render(name, True, label_color), (slider_label_x, label_y))
             slider.draw(screen, font)
+            value_inputs[name].draw(screen, font)
 
         go_button.draw(screen, font)
         preset_dropdown.draw(screen, font)
@@ -586,13 +732,16 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
     width, height = screen.get_size()
     store = RecordStore()
 
-    back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
+    margin = 40
+    back_button = Button("返回", pygame.Rect(margin, margin, 120, 48))
     row_height = 64
-    list_top = 140
+    list_top = back_button.rect.bottom + margin
+    max_visible_records = max(1, (height - list_top - 80) // row_height)
     message = ""
+    pending_delete_record_id: str | None = None
 
     while True:
-        records = store.list_records()
+        records = store.list_records()[:max_visible_records]
 
         mouse_pos = pygame.mouse.get_pos()
         back_button.update_hover(mouse_pos)
@@ -610,28 +759,55 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
 
         for event in pygame.event.get():
             _check_quit(event)
-            if event.type != pygame.MOUSEBUTTONDOWN:
-                continue
-            if back_button.contains(event.pos):
-                return
-            for record, validate_button, upload_button, delete_button in rows:
-                if validate_button.contains(event.pos):
-                    _run_record_validation_screen(screen, record)
-                elif upload_button.contains(event.pos):
-                    _run_record_submission_screen(screen, server_url, record)
-                elif delete_button.contains(event.pos):
-                    store.delete_record(record.record_id)
-                    message = f"已刪除 {record.record_name}"
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                pending_delete_record_id = None
+                if back_button.contains(event.pos):
+                    return
+                for record, validate_button, upload_button, delete_button in rows:
+                    if validate_button.contains(event.pos):
+                        _run_record_validation_screen(screen, record)
+                        break
+                    if upload_button.contains(event.pos):
+                        _run_record_submission_screen(screen, server_url, record)
+                        break
+                    if delete_button.contains(event.pos):
+                        pending_delete_record_id = record.record_id
+                        break
+
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                for record, _, _, delete_button in rows:
+                    if (
+                        pending_delete_record_id == record.record_id
+                        and delete_button.contains(event.pos)
+                    ):
+                        store.delete_record(record.record_id)
+                        message = f"已刪除 {record.record_name}"
+                        break
+                pending_delete_record_id = None
 
         screen.fill(BLACK)
-        screen.blit(title_font.render("Validation", True, WHITE), (60, 60))
+        title = title_font.render("Validation", True, WHITE)
+        screen.blit(
+            title,
+            title.get_rect(
+                midleft=(back_button.rect.right + margin, back_button.rect.centery)
+            ),
+        )
         back_button.draw(screen, font)
         for record, validate_button, upload_button, delete_button in rows:
             info = (
                 f"{record.record_name}  |  {record.saved_at}  |  "
                 f"{_fitness_summary(record.fitness_config)}"
             )
-            screen.blit(font.render(info, True, WHITE), (60, validate_button.rect.y + 12))
+            info = _ellipsize(
+                font,
+                info,
+                validate_button.rect.left - margin * 2,
+            )
+            screen.blit(
+                font.render(info, True, WHITE),
+                (margin, validate_button.rect.y + 12),
+            )
             validate_button.draw(screen, font)
             upload_button.draw(screen, font)
             delete_button.draw(screen, font)
@@ -733,7 +909,12 @@ def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord
     )
 
     outcome = _run_validation_tournament_screen(
-        screen, map_id, parent_a, parent_b, record.layer_sizes
+        screen,
+        map_id,
+        parent_a,
+        parent_b,
+        record.layer_sizes,
+        record.max_speed,
     )
     if outcome is None:
         return
@@ -902,14 +1083,18 @@ def _simulate_candidates(
     frame_limit: int,
     trackers: list[Any] | None,
     title: str,
+    stop_on_first_completion: bool = False,
+    max_speed: int = MAX_SPEED,
 ) -> list[int] | None:
     """Race every candidate on one track until all are eliminated/finished or
-    the frame limit hits. Advances `trackers` in place when provided. Returns
-    each candidate's survival tick count (or None if the user pressed ESC)."""
+    the frame limit hits. A completion requires ordered checkpoint traversal
+    without colliding on the finish frame. Advances `trackers` in place when
+    provided. Returns each candidate's survival tick count (or None if the user
+    pressed ESC)."""
     clock = pygame.time.Clock()
     font = _font(20)
 
-    configure_car(track_back, car_image, MAX_SPEED)
+    configure_car(track_back, car_image, max_speed)
     for car in candidates:
         car.reset_state(spawn["x"], spawn["y"], spawn["angle"], car_image=car_image)
 
@@ -932,34 +1117,46 @@ def _simulate_candidates(
                 return None
 
         tick += 1
+        completed_this_tick = False
         for index, car in enumerate(candidates):
             if not active[index]:
                 continue
             previous = previous_positions[index]
             car.update()
-            if car.collision():
+            collided = car.collision()
+            if collided:
                 active[index] = False
                 survival[index] = tick
             else:
                 car.feedforward()
                 car.takeAction()
-            if trackers is not None:
-                trackers[index].advance(previous, car.center, tick=tick)
-                if trackers[index].completed:
-                    active[index] = False
+                if trackers is not None:
+                    trackers[index].advance(previous, car.center, tick=tick)
+                    if trackers[index].completed:
+                        active[index] = False
+                        survival[index] = tick
+                        completed_this_tick = True
             previous_positions[index] = car.center
 
         canvas.blit(track_front, (0, 0))
         for car in candidates:
             car.draw(canvas)
         canvas.blit(
-            font.render(f"{title}  Tick {tick}/{frame_limit}  Active: {sum(active)}", True, WHITE),
+            font.render(
+                f"{title}  時間 {format_ticks_as_seconds(tick)}"
+                f" / {format_ticks_as_seconds(frame_limit)}"
+                f"  Active: {sum(active)}",
+                True,
+                WHITE,
+            ),
             (20, 20),
         )
         screen.fill(BLACK)
         screen.blit(pygame.transform.scale(canvas, (dst_w, dst_h)), (dst_x, dst_y))
         pygame.display.update()
         clock.tick(30)
+        if stop_on_first_completion and completed_this_tick:
+            break
 
     return survival
 
@@ -1020,20 +1217,18 @@ def _run_candidate_tournament_screen(
     return candidates[winner_index], client_results[winner_index]
 
 
-# Maze random maps share the training spawn for the generated track (number_track==2).
-_RANDOM_MAP_SPAWN = {"x": 140.0, "y": 610.0, "angle": 180.0}
-
-
 def _run_validation_tournament_screen(
     screen: pygame.Surface,
     map_id: str,
     parent_a: Any,
     parent_b: Any,
     layer_sizes: list[int],
+    max_speed: int = MAX_SPEED,
 ) -> tuple[ClientResult | None, int] | None:
-    """Breed 20 green candidates from the two parents and race them on the
-    chosen validation map. easy/hard have checkpoints -> full ClientResult and
-    ranking; random (maze) has none yet -> rank by survival ticks."""
+    """Breed candidates and race them through ordered map checkpoints.
+
+    The first non-colliding candidate to complete the route ends validation.
+    """
     assets = load_game_assets()
     candidates = _build_candidates(
         parent_a,
@@ -1047,8 +1242,20 @@ def _run_validation_tournament_screen(
         generate_random_map(screen)
         track_front = pygame.image.load(TRACK_FRONT_PATH)
         track_back = pygame.image.load(TRACK_BACK_PATH)
-        spawn = _RANDOM_MAP_SPAWN
-        trackers: list[Any] | None = None
+        metadata = json.loads(TRACK_METADATA_PATH.read_text(encoding="utf-8"))
+        route = reconstruct_route_cells(metadata)
+        layout = TrackLayout(seed=0, route_cells=tuple(route))
+        spawn = layout.spawn
+        checkpoints = tuple(
+            build_boundary_checkpoints(layout, TRACK_BACK_PATH)
+        )
+        trackers: list[Any] = [
+            CompetitionRunTracker(
+                checkpoints=checkpoints,
+                total_length_px=len(route) * BLOCK_SIZE,
+            )
+            for _ in candidates
+        ]
     else:
         validation_map = load_validation_map(map_id)
         track_front = pygame.image.load(validation_map.front_path)
@@ -1066,17 +1273,18 @@ def _run_validation_tournament_screen(
         VALIDATION_FRAME_LIMIT,
         trackers,
         title=f"Validation：{map_id}",
+        stop_on_first_completion=True,
+        max_speed=max_speed,
     )
     if survival is None:
         return None
 
-    if trackers is not None:
-        client_results = _client_results_from_trackers(trackers)
-        winner = min(range(len(client_results)), key=lambda i: client_results[i].ranking_key())
-        return client_results[winner], survival[winner]
-
-    winner = max(range(len(survival)), key=lambda i: survival[i])
-    return None, survival[winner]
+    client_results = _client_results_from_trackers(trackers)
+    winner = min(
+        range(len(client_results)),
+        key=lambda index: client_results[index].ranking_key(),
+    )
+    return client_results[winner], survival[winner]
 
 
 def _validation_result_screen(
@@ -1095,13 +1303,14 @@ def _validation_result_screen(
     if client_result is not None:
         lines = [
             f"completed: {client_result.completed}",
-            f"lap_ticks: {client_result.lap_ticks}",
+            f"完賽時間: {format_ticks_as_seconds(client_result.lap_ticks)}",
             f"max_progress: {client_result.max_progress:.1f} px",
-            f"ticks_to_max_progress: {client_result.ticks_to_max_progress}",
+            "到達最遠進度時間: "
+            f"{format_ticks_as_seconds(client_result.ticks_to_max_progress)}",
         ]
         note = ""
     else:
-        lines = [f"存活 ticks: {survival_ticks}"]
+        lines = [f"存活時間: {format_ticks_as_seconds(survival_ticks)}"]
         note = "此地圖尚無 checkpoint，progress／完賽指標暫不適用"
 
     while True:
@@ -1147,9 +1356,15 @@ def _submit_result_screen(
     response: SubmissionAccepted | SubmissionRejected | NetworkError | None = None
 
     if client_result.completed:
-        summary = f"完賽！耗時 {client_result.lap_ticks} ticks"
+        summary = (
+            "完賽！耗時 "
+            f"{format_ticks_as_seconds(client_result.lap_ticks)}"
+        )
     else:
-        summary = f"未完賽，最遠進度 {client_result.max_progress:.1f}px（第 {client_result.ticks_to_max_progress} tick 達到）"
+        summary = (
+            f"未完賽，最遠進度 {client_result.max_progress:.1f}px"
+            f"（{format_ticks_as_seconds(client_result.ticks_to_max_progress)} 達到）"
+        )
 
     while True:
         for event in pygame.event.get():

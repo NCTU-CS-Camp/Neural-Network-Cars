@@ -17,6 +17,10 @@ def _session(*, alive_count: int = 2) -> TrainingSession:
     )
 
 
+def test_sensor_lines_are_hidden_when_training_starts() -> None:
+    assert not _session().show_sensor_lines
+
+
 def test_generation_ends_at_time_limit() -> None:
     session = _session()
 
