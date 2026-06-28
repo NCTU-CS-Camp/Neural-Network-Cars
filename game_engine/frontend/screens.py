@@ -4,6 +4,12 @@ from typing import Any, Literal
 
 import pygame
 
+from GA.fitness import (
+    BeginnerMix,
+    FitnessStrategy,
+    fitness_strategy_names,
+    get_fitness_strategy,
+)
 from GA.genetic import (
     mutateOneBiasesGene,
     mutateOneWeightGene,
@@ -11,12 +17,8 @@ from GA.genetic import (
     uniformCrossOverWeights,
 )
 from game_engine.backend.assets import load_game_assets
-from game_engine.backend.car import Car, configure_car
-from game_engine.backend.competition_maps import (
-    CompetitionMap,
-    load_competition_map,
-    load_validation_map,
-)
+from game_engine.backend.car import DEFAULT_MLP_INIT_SEED, Car, configure_car
+from game_engine.backend.competition_maps import load_competition_map, load_validation_map
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import apply_weight_payload, export_weight_payload
 from game_engine.backend.settings import (
@@ -31,6 +33,7 @@ from game_engine.backend.settings import (
     WHITE,
 )
 from game_engine.backend.track_generator import generate_random_map
+from game_engine.backend.training_session import create_evolution_rngs
 from game_engine.frontend.competition_client import (
     EligibilityResult,
     NetworkError,
@@ -40,7 +43,7 @@ from game_engine.frontend.competition_client import (
 )
 from game_engine.frontend.competition_client import submit as submit_to_competition_server
 from game_engine.frontend.profile_store import save_login_profile
-from game_engine.frontend.widgets import Button, Slider, TextInput
+from game_engine.frontend.widgets import Button, Dropdown, Slider, TextInput
 from shared.contracts import (
     ClientResult,
     FitnessConfig,
@@ -64,10 +67,12 @@ _REASON_MESSAGES = {
 # Deliberately low: uploading an already-trained record should mostly resubmit
 # that record's car, not breed something new from it.
 UPLOAD_MUTATION_RATE = 5
+SUBMISSION_POPULATION_SIZE = 100
 
 # Validation breeds a fresh generation from the record's two parents to probe
 # generalization, so it mutates more aggressively than the upload resubmit path.
 VALIDATION_MUTATION_RATE = 15
+VALIDATION_POPULATION_SIZE = 100
 
 
 class AppQuit(Exception):
@@ -76,22 +81,22 @@ class AppQuit(Exception):
 
 GROUP_COUNT = 10
 MenuChoice = Literal["training", "validation"]
-TrainingConfigResult = tuple[FitnessConfig, int, TrainingRecord | None]
+TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None]
 
 BONUS_FITNESS_PLACEHOLDERS = [
-    "progress_score",
-    "speed_score",
-    "completion_bonus",
-    "smooth_control",
-    "checkpoint_reward",
+    "speed",
+    "progress",
+    "centered",
+    "alignment",
+    "safety",
 ]
 
 PENALTY_FITNESS_PLACEHOLDERS = [
-    "collision_penalty",
-    "spin_penalty",
-    "stagnation_penalty",
-    "reverse_penalty",
-    "time_penalty",
+    "stall",
+    "spin",
+    "wrong_way",
+    "time",
+    "crash",
 ]
 
 
@@ -251,25 +256,47 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     ]
     selected_difficulty: int = 1
 
-    # Fitness sliders (right 1/3, full height, 10 items uniformly)
+    # Fitness preset and sliders (right 1/3, full height)
     slider_label_x = right_x + M
     slider_x = right_x + M + max(140, right_w // 4)
     slider_w = right_w - M * 2 - max(140, right_w // 4) - M
     fitness_top = back_button.rect.bottom + M
     fitness_bottom = H - M
-    fitness_step = (fitness_bottom - fitness_top) // 10
-    all_fitness = BONUS_FITNESS_PLACEHOLDERS + PENALTY_FITNESS_PLACEHOLDERS
+    dropdown_h = max(34, H // 26)
+    selected_strategy = BeginnerMix.copy()
+    preset_dropdown = Dropdown(
+        pygame.Rect(right_x + M, fitness_top, right_w - M * 2, dropdown_h),
+        fitness_strategy_names(),
+        placeholder="載入 Fitness preset",
+        selected=selected_strategy.name,
+    )
+    sliders_top = preset_dropdown.rect.bottom + M // 2
+    fitness_step = (fitness_bottom - sliders_top) // 10
     bonus_sliders = {
         name: Slider(
-            pygame.Rect(slider_x, fitness_top + i * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
-            0, 100, 50,
+            pygame.Rect(
+                slider_x,
+                sliders_top + i * fitness_step + fitness_step // 2,
+                slider_w,
+                max(8, H // 100),
+            ),
+            0,
+            100,
+            int(selected_strategy.config.get_weight(name)),
         )
         for i, name in enumerate(BONUS_FITNESS_PLACEHOLDERS)
     }
     penalty_sliders = {
         name: Slider(
-            pygame.Rect(slider_x, fitness_top + (5 + i) * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
-            0, 100, 50,
+            pygame.Rect(
+                slider_x,
+                sliders_top + (5 + i) * fitness_step + fitness_step // 2,
+                slider_w,
+                max(8, H // 100),
+            ),
+            0,
+            100,
+            int(selected_strategy.config.get_weight(name)),
         )
         for i, name in enumerate(PENALTY_FITNESS_PLACEHOLDERS)
     }
@@ -312,8 +339,25 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     while True:
         for event in pygame.event.get():
             _check_quit(event)
-            for slider in all_sliders.values():
-                slider.handle_event(event)
+
+            dropdown_was_open = preset_dropdown.is_open
+            dropdown_captured_click = (
+                event.type == pygame.MOUSEBUTTONDOWN
+                and event.button == 1
+                and preset_dropdown.contains(
+                    event.pos,
+                    include_options=dropdown_was_open,
+                )
+            )
+            selected_strategy_name = preset_dropdown.handle_event(event)
+            if selected_strategy_name is not None:
+                selected_strategy = get_fitness_strategy(selected_strategy_name)
+                for name, slider in all_sliders.items():
+                    slider.value = int(selected_strategy.config.get_weight(name))
+
+            if not dropdown_captured_click:
+                for slider in all_sliders.values():
+                    slider.handle_event(event)
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 pos = event.pos
@@ -338,7 +382,8 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
 
                 if go_button.contains(pos) and go_enabled():
                     weights = {name: s.value for name, s in all_sliders.items()}
-                    return FitnessConfig(weights=weights), selected_difficulty, selected_record
+                    selected_strategy.config.update_weights(weights)
+                    return selected_strategy, selected_difficulty, selected_record
 
         mouse_pos = pygame.mouse.get_pos()
         back_button.update_hover(mouse_pos)
@@ -400,6 +445,7 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
             slider.draw(screen, font)
 
         go_button.draw(screen, font)
+        preset_dropdown.draw(screen, font)
         pygame.display.update()
         clock.tick(30)
 
@@ -481,9 +527,10 @@ def _rebuild_car(
     weights: list[list[float]],
     biases: list[list[float]],
     nickname: str,
+    mlp_init_seed: int = DEFAULT_MLP_INIT_SEED,
 ) -> Car:
     """Reconstruct a Car from saved flat weight/bias payloads."""
-    car = Car(layer_sizes)
+    car = Car(layer_sizes, mlp_init_seed=mlp_init_seed)
     payload = WeightPayload(
         model_version="v1",
         layer_sizes=layer_sizes,
@@ -505,10 +552,18 @@ def _run_record_submission_screen(
     """Upload entry point: rebuild the record's two parents and run the same
     competition submission flow used during live training."""
     parent_a = _rebuild_car(
-        record.layer_sizes, record.parent_a_weights, record.parent_a_biases, record.username
+        record.layer_sizes,
+        record.parent_a_weights,
+        record.parent_a_biases,
+        record.username,
+        record.mlp_init_seed,
     )
     parent_b = _rebuild_car(
-        record.layer_sizes, record.parent_b_weights, record.parent_b_biases, record.username
+        record.layer_sizes,
+        record.parent_b_weights,
+        record.parent_b_biases,
+        record.username,
+        record.mlp_init_seed,
     )
     run_submission_screen(
         screen,
@@ -519,6 +574,8 @@ def _run_record_submission_screen(
         parent_b,
         record.layer_sizes,
         UPLOAD_MUTATION_RATE,
+        mlp_init_rng_state=record.mlp_init_rng_state,
+        mutation_rng_state=record.mutation_rng_state,
     )
 
 
@@ -661,10 +718,18 @@ def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord
         return
 
     parent_a = _rebuild_car(
-        record.layer_sizes, record.parent_a_weights, record.parent_a_biases, record.username
+        record.layer_sizes,
+        record.parent_a_weights,
+        record.parent_a_biases,
+        record.username,
+        record.mlp_init_seed,
     )
     parent_b = _rebuild_car(
-        record.layer_sizes, record.parent_b_weights, record.parent_b_biases, record.username
+        record.layer_sizes,
+        record.parent_b_weights,
+        record.parent_b_biases,
+        record.username,
+        record.mlp_init_seed,
     )
 
     outcome = _run_validation_tournament_screen(
@@ -676,8 +741,17 @@ def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord
     _validation_result_screen(screen, map_id, client_result, survival_ticks)
 
 
-def _clone_car(source: Any, layer_sizes: list[int]) -> Car:
-    clone = Car(layer_sizes)
+def _clone_car(
+    source: Any,
+    layer_sizes: list[int],
+    mlp_init_seed: int | None = None,
+) -> Car:
+    seed = mlp_init_seed
+    if seed is None:
+        seed = getattr(source, "mlp_init_seed", None)
+    if seed is None:
+        seed = DEFAULT_MLP_INIT_SEED
+    clone = Car(layer_sizes, mlp_init_seed=seed)
     clone.weights = [weight.copy() for weight in source.weights]
     clone.biases = [bias.copy() for bias in source.biases]
     return clone
@@ -688,24 +762,41 @@ def _build_candidates(
     parent_b: Any,
     layer_sizes: list[int],
     mutation_rate: int,
-    total: int = 20,
+    total: int = SUBMISSION_POPULATION_SIZE,
+    mlp_init_rng_state: dict[str, Any] | None = None,
+    mutation_rng_state: tuple[Any, ...] | list[Any] | None = None,
 ) -> list[Car]:
-    aux_car = Car(layer_sizes)
-    candidates = [Car(layer_sizes) for _ in range(total)]
+    seed = getattr(parent_a, "mlp_init_seed", None)
+    if seed is None:
+        seed = getattr(parent_b, "mlp_init_seed", None)
+    if seed is None:
+        seed = DEFAULT_MLP_INIT_SEED
+    mlp_init_rng, mutation_rng = create_evolution_rngs(
+        seed,
+        mlp_init_rng_state=mlp_init_rng_state,
+        mutation_rng_state=mutation_rng_state,
+    )
+    aux_car = Car(
+        layer_sizes, mlp_init_seed=seed, mlp_init_rng=mlp_init_rng
+    )
+    candidates = [
+        Car(layer_sizes, mlp_init_seed=seed, mlp_init_rng=mlp_init_rng)
+        for _ in range(total)
+    ]
 
     for index in range(0, total - 2, 2):
         uniformCrossOverWeights(parent_a, parent_b, candidates[index], candidates[index + 1])
         uniformCrossOverBiases(parent_a, parent_b, candidates[index], candidates[index + 1])
 
-    candidates[total - 2] = _clone_car(parent_a, layer_sizes)
-    candidates[total - 1] = _clone_car(parent_b, layer_sizes)
+    candidates[total - 2] = _clone_car(parent_a, layer_sizes, seed)
+    candidates[total - 1] = _clone_car(parent_b, layer_sizes, seed)
 
     for index in range(total - 2):
         for _ in range(mutation_rate):
-            mutateOneWeightGene(candidates[index], aux_car)
-            mutateOneWeightGene(aux_car, candidates[index])
-            mutateOneBiasesGene(candidates[index], aux_car)
-            mutateOneBiasesGene(aux_car, candidates[index])
+            mutateOneWeightGene(candidates[index], aux_car, mutation_rng)
+            mutateOneWeightGene(aux_car, candidates[index], mutation_rng)
+            mutateOneBiasesGene(candidates[index], aux_car, mutation_rng)
+            mutateOneBiasesGene(aux_car, candidates[index], mutation_rng)
 
     return candidates
 
@@ -892,13 +983,22 @@ def _run_candidate_tournament_screen(
     parent_b: Any,
     layer_sizes: list[int],
     mutation_rate: int,
+    mlp_init_rng_state: dict[str, Any] | None = None,
+    mutation_rng_state: tuple[Any, ...] | list[Any] | None = None,
 ) -> tuple[Car, ClientResult] | None:
     assets = load_game_assets()
     competition_map = load_competition_map(competition_id)
     track_front = pygame.image.load(competition_map.front_path)
     track_back = pygame.image.load(competition_map.back_path)
 
-    candidates = _build_candidates(parent_a, parent_b, layer_sizes, mutation_rate)
+    candidates = _build_candidates(
+        parent_a,
+        parent_b,
+        layer_sizes,
+        mutation_rate,
+        mlp_init_rng_state=mlp_init_rng_state,
+        mutation_rng_state=mutation_rng_state,
+    )
     trackers = [competition_map.new_tracker() for _ in candidates]
 
     survival = _simulate_candidates(
@@ -935,7 +1035,13 @@ def _run_validation_tournament_screen(
     chosen validation map. easy/hard have checkpoints -> full ClientResult and
     ranking; random (maze) has none yet -> rank by survival ticks."""
     assets = load_game_assets()
-    candidates = _build_candidates(parent_a, parent_b, layer_sizes, VALIDATION_MUTATION_RATE)
+    candidates = _build_candidates(
+        parent_a,
+        parent_b,
+        layer_sizes,
+        VALIDATION_MUTATION_RATE,
+        total=VALIDATION_POPULATION_SIZE,
+    )
 
     if map_id == "random":
         generate_random_map(screen)
@@ -1114,6 +1220,8 @@ def run_submission_screen(
     parent_b: Any,
     layer_sizes: list[int],
     mutation_rate: int,
+    mlp_init_rng_state: dict[str, Any] | None = None,
+    mutation_rng_state: tuple[Any, ...] | list[Any] | None = None,
 ) -> None:
     competition_id = _pick_competition_screen(screen)
     if competition_id is None:
@@ -1124,7 +1232,14 @@ def run_submission_screen(
         return
 
     tournament_result = _run_candidate_tournament_screen(
-        screen, competition_id, parent_a, parent_b, layer_sizes, mutation_rate
+        screen,
+        competition_id,
+        parent_a,
+        parent_b,
+        layer_sizes,
+        mutation_rate,
+        mlp_init_rng_state=mlp_init_rng_state,
+        mutation_rng_state=mutation_rng_state,
     )
     if tournament_result is None:
         return

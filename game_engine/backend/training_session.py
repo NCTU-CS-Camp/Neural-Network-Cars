@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,17 +13,39 @@ from GA.genetic import (
     uniformCrossOverBiases,
     uniformCrossOverWeights,
 )
-from shared.contracts import RuntimeSettings
+from shared.contracts import DEFAULT_EVOLUTION_SEED, RuntimeSettings
 
 
 GENERATION_DURATION_SECONDS = 40.0
+
+
+def _nested_tuple(value: Any) -> Any:
+    if isinstance(value, list):
+        return tuple(_nested_tuple(item) for item in value)
+    return value
+
+
+def create_evolution_rngs(
+    seed: int,
+    mlp_init_rng_state: dict[str, Any] | None = None,
+    mutation_rng_state: tuple[Any, ...] | list[Any] | None = None,
+) -> tuple[np.random.Generator, random.Random]:
+    """Create evolution RNGs, optionally continuing from a saved state."""
+    mlp_init_rng = np.random.default_rng(seed)
+    if mlp_init_rng_state is not None:
+        mlp_init_rng.bit_generator.state = deepcopy(mlp_init_rng_state)
+
+    mutation_rng = random.Random(seed)
+    if mutation_rng_state is not None:
+        mutation_rng.setstate(_nested_tuple(mutation_rng_state))
+    return mlp_init_rng, mutation_rng
 
 
 @dataclass
 class TrainingSession:
     population_size: int
     mutation_rate: int
-    evolution_seed: int = 3057
+    evolution_seed: int = DEFAULT_EVOLUTION_SEED
     generation: int = 1
     alive_count: int = 0
     selected_cars: list[Any] = field(default_factory=list)
@@ -64,8 +87,17 @@ class TrainingSession:
         self._reset_evolution_rngs()
 
     def _reset_evolution_rngs(self) -> None:
-        self.mlp_init_rng = np.random.default_rng(self.evolution_seed)
-        self.mutation_rng = random.Random(self.evolution_seed)
+        self.mlp_init_rng, self.mutation_rng = create_evolution_rngs(
+            self.evolution_seed
+        )
+
+    def snapshot_evolution_rngs(
+        self,
+    ) -> tuple[dict[str, Any], tuple[Any, ...]]:
+        return (
+            deepcopy(dict(self.mlp_init_rng.bit_generator.state)),
+            self.mutation_rng.getstate(),
+        )
 
     def begin_next_generation(self) -> None:
         self.generation += 1
@@ -101,7 +133,11 @@ class TrainingSession:
         parent1, parent2 = self.selected_cars
         self.begin_next_generation()
         next_population = [
-            car_factory(layer_sizes, mlp_init_rng=self.mlp_init_rng)
+            car_factory(
+                layer_sizes,
+                mlp_init_seed=self.evolution_seed,
+                mlp_init_rng=self.mlp_init_rng,
+            )
             for _ in range(self.population_size)
         ]
 

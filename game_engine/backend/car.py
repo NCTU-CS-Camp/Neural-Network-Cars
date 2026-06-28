@@ -6,10 +6,12 @@ import pygame
 from game_engine.backend.geometry import calculateDistance, move, rotation, sigmoid
 from game_engine.backend.settings import COLOR_LINE, MAX_SPEED, WHITE
 from game_engine.backend.track import TrackGeometry
+from shared.contracts import DEFAULT_EVOLUTION_SEED
 
 collision_surface = None
 default_car_image = None
 maxspeed = MAX_SPEED
+DEFAULT_MLP_INIT_SEED = DEFAULT_EVOLUTION_SEED
 
 
 def configure_car(collision_map, car_image, max_speed=MAX_SPEED):
@@ -25,10 +27,12 @@ def set_collision_map(collision_map):
 
 
 class Car:
+  """A car whose root MLP seed stays attached when a shared RNG is used."""
+
   def __init__(
     self,
     sizes,
-    mlp_init_seed: int | None = None,
+    mlp_init_seed: int | None = DEFAULT_MLP_INIT_SEED,
     *,
     mlp_init_rng: np.random.Generator | None = None,
   ):
@@ -38,8 +42,7 @@ class Car:
     self.sizes = sizes
     self._mlp_init_seed: int | None = None
     if mlp_init_rng is not None:
-      if mlp_init_seed is not None:
-        raise ValueError("Pass either mlp_init_seed or mlp_init_rng, not both")
+      self._mlp_init_seed = self._validated_mlp_init_seed(mlp_init_seed)
       self._initialize_mlp_parameters(mlp_init_rng)
     else:
       self.mlp_init_seed = mlp_init_seed
@@ -79,15 +82,19 @@ class Car:
 
   @mlp_init_seed.setter
   def mlp_init_seed(self, seed: int | None):
+    seed = self._validated_mlp_init_seed(seed)
+    self._mlp_init_seed = seed
+    self._initialize_mlp_parameters(np.random.default_rng(seed))
+
+  @staticmethod
+  def _validated_mlp_init_seed(seed: int | None) -> int | None:
     if seed is not None:
       if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)):
         raise TypeError("mlp_init_seed must be an integer or None")
       if seed < 0:
         raise ValueError("mlp_init_seed cannot be negative")
       seed = int(seed)
-
-    self._mlp_init_seed = seed
-    self._initialize_mlp_parameters(np.random.default_rng(seed))
+    return seed
 
   def _initialize_mlp_parameters(self, rng: np.random.Generator):
     # Preserve draw order for reproducible evolution: W0, W1, ..., b0, b1, ...

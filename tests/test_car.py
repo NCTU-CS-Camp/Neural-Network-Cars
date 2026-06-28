@@ -26,6 +26,14 @@ def test_same_mlp_init_seed_creates_same_parameters() -> None:
     _assert_same_parameters(first, second)
 
 
+def test_default_mlp_init_seed_is_3057() -> None:
+    default_car = Car(LAYER_SIZES)
+    explicit_car = Car(LAYER_SIZES, mlp_init_seed=3057)
+
+    assert default_car.mlp_init_seed == 3057
+    _assert_same_parameters(default_car, explicit_car)
+
+
 def test_setting_mlp_init_seed_reinitializes_parameters() -> None:
     car = Car(LAYER_SIZES)
 
@@ -68,6 +76,8 @@ def test_population_cars_continue_from_one_shared_rng() -> None:
     expected_first = Car(LAYER_SIZES, mlp_init_rng=reference_rng)
     expected_second = Car(LAYER_SIZES, mlp_init_rng=reference_rng)
 
+    assert first.mlp_init_seed == 3057
+    assert second.mlp_init_seed == 3057
     _assert_same_parameters(first, expected_first)
     _assert_same_parameters(second, expected_second)
     assert any(
@@ -80,13 +90,14 @@ def test_population_cars_continue_from_one_shared_rng() -> None:
     )
 
 
-def test_seed_and_shared_rng_are_mutually_exclusive() -> None:
-    with pytest.raises(ValueError, match="either mlp_init_seed or mlp_init_rng"):
-        Car(
-            LAYER_SIZES,
-            mlp_init_seed=3057,
-            mlp_init_rng=np.random.default_rng(3057),
-        )
+def test_shared_rng_keeps_seed_as_reproducibility_metadata() -> None:
+    car = Car(
+        LAYER_SIZES,
+        mlp_init_seed=123,
+        mlp_init_rng=np.random.default_rng(3057),
+    )
+
+    assert car.mlp_init_seed == 123
 
 
 @pytest.mark.parametrize("seed", [True, 1.5, "123"])

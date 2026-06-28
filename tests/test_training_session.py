@@ -5,6 +5,7 @@ import pytest
 from game_engine.backend.training_session import (
     GENERATION_DURATION_SECONDS,
     TrainingSession,
+    create_evolution_rngs,
 )
 
 
@@ -59,3 +60,34 @@ def test_reset_generation_replays_evolution_random_streams() -> None:
         session.mutation_rng.randint(0, 100),
         session.mutation_rng.uniform(0.8, 1.2),
     ) == pytest.approx(first_mutation_values)
+
+
+def test_saved_rng_states_continue_from_the_same_position() -> None:
+    session = TrainingSession(
+        population_size=2,
+        mutation_rate=1,
+        evolution_seed=3057,
+    )
+    session.mlp_init_rng.standard_normal(70)
+    session.mutation_rng.randint(0, 59)
+    session.mutation_rng.uniform(0.8, 1.2)
+    mlp_state, mutation_state = session.snapshot_evolution_rngs()
+
+    expected_mlp_values = session.mlp_init_rng.standard_normal(4)
+    expected_mutation_values = (
+        session.mutation_rng.randint(0, 59),
+        session.mutation_rng.uniform(0.8, 1.2),
+    )
+    restored_mlp_rng, restored_mutation_rng = create_evolution_rngs(
+        3057,
+        mlp_init_rng_state=mlp_state,
+        mutation_rng_state=mutation_state,
+    )
+
+    assert restored_mlp_rng.standard_normal(4) == pytest.approx(
+        expected_mlp_values
+    )
+    assert (
+        restored_mutation_rng.randint(0, 59),
+        restored_mutation_rng.uniform(0.8, 1.2),
+    ) == pytest.approx(expected_mutation_values)
