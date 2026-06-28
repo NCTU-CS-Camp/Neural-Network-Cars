@@ -537,4 +537,43 @@ def run_dashboard(
                             "validation_summary": message.get("validation_summary", {}),
                             "retry_scheduled": message.get("retry_scheduled", False),
                         },
-                    
+                    ],
+                }
+            elif message["type"] == "result":
+                results.append(message["result"])
+                finished += 1
+                stopped.add(message["result"]["strategy_name"])
+            elif message["type"] == "error":
+                states[message["strategy_name"]] = {
+                    **states[message["strategy_name"]],
+                    "error": message["error"],
+                    "traceback": message.get("traceback", ""),
+                }
+                stopped.add(message["strategy_name"])
+                finished += 1
+
+        if drained:
+            _write_dashboard(dashboard_path, run_name, states, strategies, finished)
+
+        if not any(process.is_alive() for process in processes) and len(stopped) < len(strategies):
+            for strategy in strategies:
+                if strategy in stopped:
+                    continue
+                states[strategy] = {
+                    **states[strategy],
+                    "error": "Process stopped before reporting a result.",
+                }
+                stopped.add(strategy)
+                finished += 1
+            _write_dashboard(dashboard_path, run_name, states, strategies, finished)
+
+        if (
+            (finished >= len(strategies) or not any(process.is_alive() for process in processes))
+            and len(stopped) >= len(strategies)
+        ):
+            break
+        time.sleep(0.25)
+
+    _write_dashboard(dashboard_path, run_name, states, strategies, finished)
+    results.sort(key=lambda item: item["strategy_name"])
+    return results

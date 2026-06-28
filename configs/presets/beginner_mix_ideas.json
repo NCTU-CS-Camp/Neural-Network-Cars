@@ -2,7 +2,7 @@
   "run_name": "beginner_mix_ideas",
   "output_dir": "artifacts/runs",
   "architecture": [6, 6, 4],
-  "population_size": 50,
+  "population_size": 100,
   "generations": 30,
   "mutation_rate": 90,
   "train_seeds": [101],
@@ -42,7 +42,7 @@
         "penalties": {
           "stall": 50,
           "spin": 40,
-          "wrong_way": 0,
+          "wrong_way": 100,
           "time": 30,
           "crash": 70
         }
@@ -54,20 +54,23 @@
       "strategy": "race_metric_proxy"
     },
     {
-      "name": "finish_hunter",
+      "name": "race_metric_proxy",
       "enabled": false,
       "strategy": "beginner_mix",
       "params": {
         "rewards": {
-          "progress": 55,
-          "alignment": 25,
-          "speed": 20
+          "progress": 0,
+          "speed": 100,
+          "alignment": 0,
+          "safety": 0,
+          "centered": 0
         },
         "penalties": {
-          "stall": 70,
-          "spin": 45,
-          "wrong_way": 70,
-          "crash": 80
+          "stall": 0,
+          "spin": 0,
+          "wrong_way": 80,
+          "time": 0,
+          "crash": 0
         }
       }
     },

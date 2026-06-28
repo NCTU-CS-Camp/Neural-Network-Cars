@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pipeline.fitness import BeginnerMix, FINISH_BONUS, B_CRASH
+from pipeline.fitness import WRONG_WAY_PENALTY_MAX_EFFECT
 from pipeline.simulator import StepContext
 
 
@@ -8,6 +9,7 @@ def ctx(**overrides) -> StepContext:
     base = dict(
         velocity=0.0,
         progress_delta=0.0,
+        reverse_progress_delta=0.0,
         progress_ratio=0.0,
         center_offset=0.0,
         normalized_center_offset=0.0,
@@ -94,6 +96,23 @@ def test_time_penalty_100_percent_uses_0_1_scale():
     strat = BeginnerMix()
     strat.configure({"penalties": {"time": 100}})
     assert strat.score_step(ctx(time_elapsed=10.0)) == -1.0
+
+
+def test_wrong_way_penalty_scales_with_how_opposite_the_heading_is():
+    strat = BeginnerMix()
+    strat.configure({"penalties": {"wrong_way": 100}})
+
+    assert strat.score_step(ctx(heading_alignment=1.0)) == 0.0
+    assert strat.score_step(ctx(heading_alignment=-0.5)) == -(WRONG_WAY_PENALTY_MAX_EFFECT * 0.5)
+    assert strat.score_step(ctx(heading_alignment=-1.0)) == -WRONG_WAY_PENALTY_MAX_EFFECT
+
+
+def test_wrong_way_penalty_also_catches_reverse_progress():
+    strat = BeginnerMix()
+    strat.configure({"penalties": {"wrong_way": 100}})
+
+    assert strat.score_step(ctx(heading_alignment=1.0, reverse_progress_delta=5.0)) == -(WRONG_WAY_PENALTY_MAX_EFFECT * 0.5)
+    assert strat.score_step(ctx(heading_alignment=1.0, reverse_progress_delta=10.0)) == -WRONG_WAY_PENALTY_MAX_EFFECT
 
 
 def test_crash_is_one_shot_and_independent_of_dt():

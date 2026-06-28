@@ -47,6 +47,8 @@ class EpisodeMetrics:
     collision_count: int
     stall_time: float
     spin_time: float
+    wrong_way_time: float
+    reverse_progress_distance: float
     reset_count: int
     training_fitness: float
     frames: int
@@ -175,6 +177,8 @@ class Simulator:
         collision_count = 0
         stall_time = 0.0
         spin_time = 0.0
+        wrong_way_time = 0.0
+        reverse_progress_distance = 0.0
         max_progress = 0.0
         ticks_to_max_progress = 0
         cumulative_progress = 0.0
@@ -205,6 +209,8 @@ class Simulator:
             ):
                 raw_progress_delta -= self.track.total_length
             progress_delta = max(0.0, raw_progress_delta)
+            reverse_progress_delta = max(0.0, -raw_progress_delta)
+            reverse_progress_distance += reverse_progress_delta
             cumulative_progress += progress_delta
             if cumulative_progress > max_progress:
                 max_progress = cumulative_progress
@@ -237,15 +243,19 @@ class Simulator:
             )
             is_stalled = car.velocity < 0.5
             is_spinning = abs(car.angle - previous_angle) >= 5 and progress_delta < 0.1
+            is_wrong_way = heading_alignment < 0.0 or reverse_progress_delta > 0.0
             if is_stalled:
                 stall_time += dt
             if is_spinning:
                 spin_time += dt
+            if is_wrong_way:
+                wrong_way_time += dt
 
             training_fitness += strategy.score_step(
                 StepContext(
                     velocity=car.velocity,
                     progress_delta=progress_delta,
+                    reverse_progress_delta=reverse_progress_delta,
                     progress_ratio=progress_ratio,
                     center_offset=center_offset,
                     normalized_center_offset=normalized_center_offset,
@@ -282,6 +292,8 @@ class Simulator:
             collision_count=collision_count,
             stall_time=stall_time,
             spin_time=spin_time,
+            wrong_way_time=wrong_way_time,
+            reverse_progress_distance=reverse_progress_distance,
             reset_count=0,
             training_fitness=training_fitness,
             frames=len(trajectory) - 1,

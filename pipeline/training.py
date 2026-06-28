@@ -89,6 +89,8 @@ def _evaluate_network(
     collisions: list[int] = []
     stalls: list[float] = []
     spins: list[float] = []
+    wrong_ways: list[float] = []
+    reverse_distances: list[float] = []
 
     for track_ref in track_refs:
         resolved_ref = resolve_project_path(track_ref) if not isinstance(track_ref, int) else track_ref
@@ -107,6 +109,8 @@ def _evaluate_network(
         collisions.append(result.metrics.collision_count)
         stalls.append(result.metrics.stall_time)
         spins.append(result.metrics.spin_time)
+        wrong_ways.append(result.metrics.wrong_way_time)
+        reverse_distances.append(result.metrics.reverse_progress_distance)
         if result.metrics.finish_time is not None:
             finish_times.append(result.metrics.finish_time)
 
@@ -117,6 +121,8 @@ def _evaluate_network(
         "avg_collision_count": float(np.mean(collisions)),
         "avg_stall_time": float(np.mean(stalls)),
         "avg_spin_time": float(np.mean(spins)),
+        "avg_wrong_way_time": float(np.mean(wrong_ways)),
+        "avg_reverse_progress_distance": float(np.mean(reverse_distances)),
         "finish_count": int(sum(1 for item in episode_metrics if item["finished_within_30s"])),
     }
     return summary["avg_training_fitness"], summary, episode_metrics

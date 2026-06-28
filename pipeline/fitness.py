@@ -7,6 +7,7 @@ from dataclasses import dataclass
 class StepContext:
     velocity: float
     progress_delta: float
+    reverse_progress_delta: float
     progress_ratio: float
     center_offset: float
     normalized_center_offset: float
@@ -36,6 +37,7 @@ class FitnessStrategy:
 B = 10.0
 B_CRASH = 1000.0
 FINISH_BONUS = 10000.0
+WRONG_WAY_PENALTY_MAX_EFFECT = 30.0
 
 REWARD_BLOCKS = ("speed", "progress", "centered", "alignment", "safety")
 PERSTEP_PENALTY_BLOCKS = ("stall", "spin", "wrong_way", "time")
@@ -94,7 +96,7 @@ class BeginnerMix(FitnessStrategy):
         return {
             "stall": 1.0 if c.is_stalled else 0.0,
             "spin": 1.0 if c.is_spinning else 0.0,
-            "wrong_way": 1.0 if c.heading_alignment < 0.0 else 0.0,
+            "wrong_way": max(max(0.0, -c.heading_alignment), _clamp(c.reverse_progress_delta / 10.0)),
             "time": 1.0,
         }
 
@@ -113,6 +115,8 @@ class BeginnerMix(FitnessStrategy):
                 continue
             if key == "time":
                 penalty += (weight / 100.0) * TIME_PENALTY_MAX_SCALE * context.time_elapsed
+            elif key == "wrong_way":
+                penalty += (weight / 100.0) * WRONG_WAY_PENALTY_MAX_EFFECT * pfactors[key]
             else:
                 penalty += (weight / 100.0) * B * pfactors[key]
 
