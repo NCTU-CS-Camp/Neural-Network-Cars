@@ -42,6 +42,7 @@ class CompetitionRunTracker:
     lap_ticks: int | None = None
     max_progress: float = 0.0
     ticks_to_max_progress: int = 0
+    awaiting_start_gate: bool = False
 
     @classmethod
     def from_metadata_path(cls, metadata_path: Path | str) -> "CompetitionRunTracker":
@@ -61,26 +62,35 @@ class CompetitionRunTracker:
         if self.completed or not self.checkpoints:
             return
 
+        if self.awaiting_start_gate:
+            if _passed_gate(previous, current, self.checkpoints[0]):
+                self.checkpoints_completed += 1
+                self.completed = True
+                self.lap_ticks = tick
+                self.awaiting_start_gate = False
+                self.max_progress = self.total_length_px
+                self.ticks_to_max_progress = tick
+            return
+
         for _ in range(len(self.checkpoints)):
             checkpoint = self.checkpoints[self.next_index]
             if not _passed_gate(previous, current, checkpoint):
                 break
             self.checkpoints_completed += 1
             self.next_index += 1
-            progress = min(
-                self.total_length_px,
-                self.total_length_px
-                * self.checkpoints_completed
-                / len(self.checkpoints),
-            )
+            progress = self._progress_after_checkpoint()
             self._observe_progress(progress, tick=tick)
             if self.next_index >= len(self.checkpoints):
-                self.completed = True
-                self.lap_ticks = tick
+                self.awaiting_start_gate = True
                 self.next_index = 0
-                self.max_progress = self.total_length_px
-                self.ticks_to_max_progress = tick
                 break
+
+    def _progress_after_checkpoint(self) -> float:
+        required_gate_count = len(self.checkpoints) + 1
+        return min(
+            self.total_length_px,
+            self.total_length_px * self.checkpoints_completed / required_gate_count,
+        )
 
     def _observe_progress(self, progress: float, *, tick: int) -> None:
         if progress > self.max_progress:
