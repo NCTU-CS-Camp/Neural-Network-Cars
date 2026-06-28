@@ -1,0 +1,179 @@
+{
+  "run_name": "beginner_mix_ideas",
+  "output_dir": "artifacts/runs",
+  "architecture": [6, 6, 4],
+  "population_size": 50,
+  "generations": 30,
+  "mutation_rate": 90,
+  "train_seeds": [101],
+  "validation_seeds": [202, 203, 204],
+  "train_maps": [
+    "../Neural-Network-Cars/maps/train_maps/train_easy.json",
+    "../Neural-Network-Cars/maps/train_maps/train_hard.json"
+  ],
+  "validation_maps": [
+    "../Neural-Network-Cars/maps/valid_maps/valid_easy.json",
+    "../Neural-Network-Cars/maps/valid_maps/valid_hard.json"
+  ],
+  "map_difficulty": "easy",
+  "time_limit_seconds": 30.0,
+  "fps": 30,
+  "parallel_workers": 2,
+  "population_workers": 8,
+  "master_seed": 1234,
+  "retry_generation": 15,
+  "retry_min_avg_max_track_progress": 0.2,
+  "max_seed_retries": 1,
+  "track_cell_size": 120,
+  "track_half_width": 42.0,
+  "strategies": [
+    {
+      "name": "race_metric_proxy",
+      "enabled": true,
+      "strategy": "beginner_mix",
+      "params": {
+        "rewards": {
+          "progress": 60,
+          "speed": 40,
+          "alignment": 0,
+          "safety": 50,
+          "centered": 20
+        },
+        "penalties": {
+          "stall": 50,
+          "spin": 40,
+          "wrong_way": 0,
+          "time": 30,
+          "crash": 70
+        }
+      }
+    },
+    {
+      "name": "race_metric_proxy2",
+      "enabled": false,
+      "strategy": "race_metric_proxy"
+    },
+    {
+      "name": "finish_hunter",
+      "enabled": false,
+      "strategy": "beginner_mix",
+      "params": {
+        "rewards": {
+          "progress": 55,
+          "alignment": 25,
+          "speed": 20
+        },
+        "penalties": {
+          "stall": 70,
+          "spin": 45,
+          "wrong_way": 70,
+          "crash": 80
+        }
+      }
+    },
+    {
+      "name": "safe_centerline",
+      "enabled": false,
+      "strategy": "beginner_mix",
+      "params": {
+        "rewards": {
+          "progress": 30,
+          "safety": 30,
+          "centered": 25,
+          "alignment": 15
+        },
+        "penalties": {
+          "spin": 45,
+          "wrong_way": 45,
+          "crash": 95
+        }
+      }
+    },
+    {
+      "name": "speed_racer",
+      "enabled": false,
+      "strategy": "beginner_mix",
+      "params": {
+        "rewards": {
+          "speed": 45,
+          "progress": 30,
+          "alignment": 20,
+          "safety": 5
+        },
+        "penalties": {
+          "stall": 50,
+          "spin": 35,
+          "wrong_way": 45,
+          "time": 25,
+          "crash": 75
+        }
+      }
+    },
+    {
+      "name": "anti_spin_progress",
+      "enabled": false,
+      "strategy": "beginner_mix",
+      "params": {
+        "rewards": {
+          "progress": 45,
+          "alignment": 30,
+          "speed": 15,
+          "centered": 10
+        },
+        "penalties": {
+          "stall": 60,
+          "spin": 85,
+          "wrong_way": 65,
+          "crash": 80
+        }
+      }
+    },
+    {
+      "name": "time_attack",
+      "enabled": false,
+      "strategy": "beginner_mix",
+      "params": {
+        "rewards": {
+          "progress": 40,
+          "speed": 35,
+          "alignment": 25
+        },
+        "penalties": {
+          "stall": 70,
+          "spin": 50,
+          "wrong_way": 60,
+          "time": 45,
+          "crash": 80
+        }
+      }
+    },
+    {
+      "name": "wall_avoider",
+      "enabled": false,
+      "strategy": "beginner_mix",
+      "params": {
+        "rewards": {
+          "safety": 40,
+          "progress": 30,
+          "centered": 20,
+          "alignment": 10
+        },
+        "penalties": {
+          "spin": 40,
+          "wrong_way": 45,
+          "crash": 100
+        }
+      }
+    },
+    {
+      "name": "speed_only_baseline",
+      "enabled": false,
+      "strategy": "speed_only_baseline"
+    },
+    {
+      "name": "progress_only",
+      "enabled": false,
+      "strategy": "progress_only"
+    }
+  ]
+}
