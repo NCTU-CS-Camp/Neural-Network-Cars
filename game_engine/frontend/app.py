@@ -10,6 +10,7 @@ from GA.fitness import get_fitness_strategy, select_best_car
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import export_weight_payload
 from game_engine.backend.settings import (
+    CJK_FONT_PATH,
     HIDDEN_LAYER,
     INPUT_LAYER,
     MAX_SPEED,
@@ -58,7 +59,7 @@ def run():
                         generate_random_map(screen)
                     run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             else:
-                run_validation_list_screen(screen)
+                run_validation_list_screen(screen, profile.server_url)
     except AppQuit:
         pass
 
@@ -93,7 +94,7 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
 
     info_x = max(W - 235, 1200)
     info_y = 600
-    font = pygame.font.Font("/System/Library/Fonts/PingFang.ttc", 18)
+    font = pygame.font.Font(CJK_FONT_PATH, 18)
     text1 = font.render("0..9 - Change Mutation", True, WHITE)
     text2 = font.render("LMB - Select/Unselect", True, WHITE)
     text3 = font.render("RMB - Delete", True, WHITE)

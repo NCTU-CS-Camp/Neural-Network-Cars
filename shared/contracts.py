@@ -1,7 +1,37 @@
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass
 from typing import Any
+
+
+# Fixed network shape expected by the trusted competition server (Competition
+# Server team's shared/contracts.py). Submission payloads must match exactly.
+EXPECTED_LAYER_SIZES = [6, 6, 4]
+EXPECTED_WEIGHT_SHAPES = [(6, 6), (4, 6)]
+EXPECTED_BIAS_SHAPES = [(6, 1), (4, 1)]
+EXPECTED_WEIGHT_LENGTHS = [rows * cols for rows, cols in EXPECTED_WEIGHT_SHAPES]
+EXPECTED_BIAS_LENGTHS = [rows * cols for rows, cols in EXPECTED_BIAS_SHAPES]
+
+
+def _float_layers(raw_layers: Any, expected_lengths: list[int], field_name: str) -> list[list[float]]:
+    if not isinstance(raw_layers, list):
+        raise ValueError(f"{field_name} must be a list of layers")
+    if len(raw_layers) != len(expected_lengths):
+        raise ValueError(f"{field_name} must contain exactly {len(expected_lengths)} layers")
+
+    layers: list[list[float]] = []
+    for index, expected_length in enumerate(expected_lengths):
+        raw_layer = raw_layers[index]
+        if not isinstance(raw_layer, list):
+            raise ValueError(f"{field_name}[{index}] must be a list")
+        if len(raw_layer) != expected_length:
+            raise ValueError(f"{field_name}[{index}] must contain {expected_length} values")
+        values = [float(value) for value in raw_layer]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError(f"{field_name}[{index}] must contain only finite values")
+        layers.append(values)
+    return layers
 
 
 @dataclass(slots=True)
@@ -79,16 +109,65 @@ class WeightPayload:
 class LoginProfile:
     group_id: str
     username: str
+    server_url: str = "http://127.0.0.1:8000"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LoginProfile":
         return cls(
             group_id=str(data["group_id"]),
             username=str(data["username"]),
+            server_url=str(data.get("server_url", "http://127.0.0.1:8000")),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(slots=True)
+class SubmissionPayload:
+    """Weights/biases payload accepted by the trusted competition server."""
+
+    group_id: str
+    username: str
+    weights: list[list[float]]
+    biases: list[list[float]]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "SubmissionPayload":
+        group_id = str(data["group_id"]).strip()
+        username = str(data["username"]).strip()
+        if not group_id:
+            raise ValueError("group_id must not be empty")
+        if not username:
+            raise ValueError("username must not be empty")
+        return cls(
+            group_id=group_id,
+            username=username,
+            weights=_float_layers(data.get("weights"), EXPECTED_WEIGHT_LENGTHS, "weights"),
+            biases=_float_layers(data.get("biases"), EXPECTED_BIAS_LENGTHS, "biases"),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ClientResult:
+    """Client-side run metrics reported alongside a competition submission."""
+
+    completed: bool
+    lap_ticks: int | None
+    max_progress: float
+    ticks_to_max_progress: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def ranking_key(self) -> tuple[int, int, float, int]:
+        """Lower keys rank ahead of higher keys."""
+        if self.completed:
+            return (0, self.lap_ticks or 0, 0.0, 0)
+        return (1, 0, -self.max_progress, self.ticks_to_max_progress)
 
 
 @dataclass(slots=True)
