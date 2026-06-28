@@ -1,9 +1,16 @@
+import json
 import random
 
 import pygame
 from PIL import Image
 
-from game_engine.backend.settings import TRACK_ASSETS_DIR, TRACK_BACK_PATH, TRACK_FRONT_PATH
+from game_engine.backend.settings import (
+    TRACK_ASSETS_DIR,
+    TRACK_BACK_PATH,
+    TRACK_FRONT_PATH,
+    TRACK_HALF_WIDTH,
+    TRACK_METADATA_PATH,
+)
 
 
 class Cell:
@@ -45,6 +52,56 @@ class Maze:
                 if neighbour.has_all_walls():
                     neighbours.append((direction, neighbour))
         return neighbours
+
+
+def _tile_name(cell, *, is_start=False):
+    if is_start:
+        return "Initial"
+    if not cell.walls["N"] and not cell.walls["S"]:
+        return "Straight2"
+    if not cell.walls["E"] and not cell.walls["W"]:
+        return "Straight1"
+    if not cell.walls["N"] and not cell.walls["W"]:
+        return "Curve3"
+    if not cell.walls["W"] and not cell.walls["S"]:
+        return "Curve2"
+    if not cell.walls["S"] and not cell.walls["E"]:
+        return "Curve1"
+    if not cell.walls["E"] and not cell.walls["N"]:
+        return "Curve4"
+    return None
+
+
+def _save_track_metadata(maze, *, block_size, offset_x, offset_y, start, finish):
+    tiles = []
+    for y in range(maze.ny):
+        for x in range(maze.nx):
+            tile_name = _tile_name(
+                maze.cell_at(x, y),
+                is_start=(x, y) == start,
+            )
+            if tile_name is not None:
+                tiles.append({"x": x, "y": y, "tile": tile_name})
+
+    metadata = {
+        "schema_version": 1,
+        "name": "random_generated_track",
+        "grid": {
+            "cols": maze.nx,
+            "rows": maze.ny,
+            "cell_size": block_size,
+            "offset_x": offset_x,
+            "offset_y": offset_y,
+        },
+        "start": {"x": start[0], "y": start[1]},
+        "finish": {"x": finish[0], "y": finish[1]},
+        "half_width_px": TRACK_HALF_WIDTH,
+        "tiles": tiles,
+    }
+    TRACK_METADATA_PATH.write_text(
+        json.dumps(metadata, indent=2),
+        encoding="utf-8",
+    )
 
 
 def generate_random_map(screen):
@@ -135,6 +192,15 @@ def generate_random_map(screen):
                 SCREEN.fill((0, 0, 0))
                 currentCell.knock_down_wall(maze.cell_at(0, 3), "N")
 
+                _save_track_metadata(
+                    maze,
+                    block_size=blockSize,
+                    offset_x=movex,
+                    offset_y=movey,
+                    start=(startx, starty),
+                    finish=(0, 4),
+                )
+
                 for x in range(0, WINDOW_WIDTH, blockSize):
                     for y in range(0, WINDOW_HEIGHT, blockSize):
                         currentCell = maze.cell_at(int(x/blockSize), int(y/blockSize))
@@ -144,17 +210,17 @@ def generate_random_map(screen):
                     for y in range(0, WINDOW_HEIGHT, blockSize):
                         currentCell = maze.cell_at(int(x/blockSize), int(y/blockSize))
 
-                        if currentCell.walls["N"] == False and currentCell.walls["S"] == False:
+                        if not currentCell.walls["N"] and not currentCell.walls["S"]:
                             SCREEN.blit(straight2, straight2Rect.move(x+movex, y+movey))
-                        elif currentCell.walls["E"] == False and currentCell.walls["W"] == False:
+                        elif not currentCell.walls["E"] and not currentCell.walls["W"]:
                             SCREEN.blit(straight1, straight1Rect.move(x+movex, y+movey))
-                        elif currentCell.walls["N"] == False and currentCell.walls["W"] == False:
+                        elif not currentCell.walls["N"] and not currentCell.walls["W"]:
                             SCREEN.blit(curve3, curve3Rect.move(x+movex, y+movey))
-                        elif currentCell.walls["W"] == False and currentCell.walls["S"] == False:
+                        elif not currentCell.walls["W"] and not currentCell.walls["S"]:
                             SCREEN.blit(curve2, curve2Rect.move(x+movex, y+movey))
-                        elif currentCell.walls["S"] == False and currentCell.walls["E"] == False:
+                        elif not currentCell.walls["S"] and not currentCell.walls["E"]:
                             SCREEN.blit(curve1, curve1Rect.move(x+movex, y+movey))
-                        elif currentCell.walls["E"] == False and currentCell.walls["N"] == False:
+                        elif not currentCell.walls["E"] and not currentCell.walls["N"]:
                             SCREEN.blit(curve4, curve4Rect.move(x+movex, y+movey))
 
                 pygame.image.save(SCREEN, TRACK_BACK_PATH)
@@ -174,17 +240,17 @@ def generate_random_map(screen):
                             SCREEN.blit(initialTop, initialRectTop.move(x-20+movex, y+movey))
                         else:
                             currentCell = maze.cell_at(int(x/blockSize), int(y/blockSize))
-                            if currentCell.walls["N"] == False and currentCell.walls["S"] == False:
+                            if not currentCell.walls["N"] and not currentCell.walls["S"]:
                                 SCREEN.blit(straight2Top, straight2RectTop.move(x-20+movex, y+movey))
-                            elif currentCell.walls["E"] == False and currentCell.walls["W"] == False:
+                            elif not currentCell.walls["E"] and not currentCell.walls["W"]:
                                 SCREEN.blit(straight1Top, straight1RectTop.move(x+movex, y-20+movey))
-                            elif currentCell.walls["N"] == False and currentCell.walls["W"] == False:
+                            elif not currentCell.walls["N"] and not currentCell.walls["W"]:
                                 SCREEN.blit(curve3Top, curve3RectTop.move(x-15+movex, y-15+movey))
-                            elif currentCell.walls["W"] == False and currentCell.walls["S"] == False:
+                            elif not currentCell.walls["W"] and not currentCell.walls["S"]:
                                 SCREEN.blit(curve2Top, curve2RectTop.move(x-15+movex, y-15+movey))
-                            elif currentCell.walls["E"] == False and currentCell.walls["N"] == False:
+                            elif not currentCell.walls["E"] and not currentCell.walls["N"]:
                                 SCREEN.blit(curve4Top, curve4RectTop.move(x-15+movex, y-15+movey))
-                            elif currentCell.walls["S"] == False and currentCell.walls["E"] == False:
+                            elif not currentCell.walls["S"] and not currentCell.walls["E"]:
                                 SCREEN.blit(curve1Top, curve1RectTop.move(x-15+movex, y-15+movey))
 
                 pygame.image.save(SCREEN, TRACK_FRONT_PATH)

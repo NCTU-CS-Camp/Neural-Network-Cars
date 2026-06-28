@@ -4,7 +4,7 @@ from typing import Literal
 
 import pygame
 
-from GA.fitness import FITNESS_STRATEGIES, score_with_config
+from GA.fitness import score_with_config
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car
 from game_engine.backend.record_store import RecordStore
@@ -31,19 +31,19 @@ MenuChoice = Literal["training", "validation"]
 TrainingConfigResult = tuple[FitnessConfig, int, TrainingRecord | None]
 
 BONUS_FITNESS_PLACEHOLDERS = [
-    "progress_score",
-    "speed_score",
-    "completion_bonus",
-    "smooth_control",
-    "checkpoint_reward",
+    "speed",
+    "progress",
+    "centered",
+    "alignment",
+    "safety",
 ]
 
 PENALTY_FITNESS_PLACEHOLDERS = [
-    "collision_penalty",
-    "spin_penalty",
-    "stagnation_penalty",
-    "reverse_penalty",
-    "time_penalty",
+    "stall",
+    "spin",
+    "wrong_way",
+    "time",
+    "crash",
 ]
 
 
@@ -201,7 +201,6 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     fitness_top = back_button.rect.bottom + M
     fitness_bottom = H - M
     fitness_step = (fitness_bottom - fitness_top) // 10
-    all_fitness = BONUS_FITNESS_PLACEHOLDERS + PENALTY_FITNESS_PLACEHOLDERS
     bonus_sliders = {
         name: Slider(
             pygame.Rect(slider_x, fitness_top + i * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
