@@ -95,6 +95,13 @@ def create_app(
     def competition_state() -> dict[str, Any]:
         return app_storage.state()
 
+    @app.get("/v2/admin/state")
+    def admin_state(
+        x_admin_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(x_admin_token)
+        return app_storage.state()
+
     @app.get("/v2/maps")
     def maps() -> list[dict[str, Any]]:
         return [item.to_public_dict() for item in list_competition_maps()]

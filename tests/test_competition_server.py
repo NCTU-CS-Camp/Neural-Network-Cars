@@ -124,6 +124,35 @@ def test_default_phase_one_interval_is_one_minute_and_admin_can_update(tmp_path)
     assert "phase_one_batch_minutes" in invalid.json()["detail"]
 
 
+def test_admin_state_requires_token_and_public_state_remains_public(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        public_state = client.get("/v2/state")
+        missing_token = client.get("/v2/admin/state")
+        bad_token = client.get("/v2/admin/state", headers={"X-Admin-Token": "wrong"})
+        admin_state = client.get("/v2/admin/state", headers={"X-Admin-Token": "secret"})
+
+    assert public_state.status_code == 200
+    assert missing_token.status_code == 401
+    assert bad_token.status_code == 401
+    assert admin_state.status_code == 200
+    assert admin_state.json() == public_state.json()
+
+
+def test_admin_page_gates_content_behind_session_token(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        response = client.get("/admin")
+
+    html = response.text
+    assert response.status_code == 200
+    assert '/v2/admin/state' in html
+    assert '/v2/state' not in html
+    assert 'sessionStorage' in html
+    assert 'next phase 1 snapshot' not in html
+    assert 'id="admin-content" class="hidden"' in html
+
+
 def test_phase_one_configured_interval_controls_cooldown(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:

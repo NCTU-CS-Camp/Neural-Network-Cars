@@ -11,41 +11,53 @@
     label { display:block; color:#9cadbf; font-size:14px; margin-bottom:8px; } input, select { width:100%; padding:12px; border:1px solid #354656; border-radius:6px; background:#131d27; color:#f4f7fb; font:inherit; }
     button { border:0; border-radius:6px; padding:11px 15px; background:#3f98e7; color:#fff; font:inherit; font-weight:800; cursor:pointer; } button.secondary { background:#243340; color:#dce7f0; } button.danger { background:#c84c55; }
     .row { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:end; gap:14px; } .actions { display:flex; flex-wrap:wrap; gap:10px; }
-    .state { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:16px; } .metric { border-left:3px solid #4a6277; padding:10px 12px; background:#101821; } .metric strong, .metric span { display:block; } .metric span { color:#9cadbf; font-size:13px; margin-top:4px; }
+    .state { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; } .metric { border-left:3px solid #4a6277; padding:10px 12px; background:#101821; } .metric strong, .metric span { display:block; } .metric span { color:#9cadbf; font-size:13px; margin-top:4px; }
     .maps { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; } .map { border:1px solid #263542; background:#101821; } .map header { padding:11px 12px; color:#c6d2dd; font-weight:800; } .map img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; background:#060a0e; }
     pre { margin:0; min-height:90px; padding:14px; border:1px solid #263542; background:#080e14; color:#c2d1dc; white-space:pre-wrap; overflow:auto; }
+    .hidden { display:none; } .status { margin-top:10px; color:#9cadbf; min-height:20px; } .status.error { color:#ff9ca6; }
     @media(max-width:760px) { .state, .maps { grid-template-columns:1fr; } .row { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
   <main>
     <h1>Competition Admin</h1>
-    <section><label for="token">Admin token</label><input id="token" type="password" autocomplete="off" placeholder="admin token"></section>
-    <section><h2>Competition State</h2><div class="state" id="state"><div class="metric">Loading</div></div></section>
-    <section>
-      <h2>Stage Control</h2>
-      <div class="row"><div><label for="stage">Active stage</label><select id="stage"><option value="phase_one">Phase 1: Easy + Hard</option><option value="final">Final: Group</option></select></div><button id="set-stage">Set Stage</button></div>
+    <section id="login">
+      <h2>Admin Login</h2>
+      <div class="row"><div><label for="token">Admin token</label><input id="token" type="password" autocomplete="off" placeholder="admin token"></div><button id="login-button">Unlock Admin</button></div>
+      <div class="status" id="login-status"></div>
     </section>
-    <section>
-      <h2>Phase 1 Timing</h2>
-      <div class="row"><div><label for="interval">Batch and cooldown interval</label><select id="interval"><option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option></select></div><button id="set-config">Set Interval</button></div>
-    </section>
-    <section><h2>Competition Maps</h2><div class="maps" id="maps"></div></section>
-    <section><h2>Operations</h2><div class="actions"><button id="run-batch">Create Demo Snapshot</button><button class="secondary" id="restart-replay">Restart Replay</button><button class="danger" id="reset">Reset Competition Data</button></div></section>
-    <section><pre id="output">Ready</pre></section>
+    <div id="admin-content" class="hidden">
+      <section><h2>Competition State</h2><div class="state" id="state"><div class="metric">Locked</div></div></section>
+      <section>
+        <h2>Stage Control</h2>
+        <div class="row"><div><label for="stage">Active stage</label><select id="stage"><option value="phase_one">Phase 1: Easy + Hard</option><option value="final">Final: Group</option></select></div><button id="set-stage">Set Stage</button></div>
+      </section>
+      <section>
+        <h2>Phase 1 Timing</h2>
+        <div class="row"><div><label for="interval">Batch and cooldown interval</label><select id="interval"><option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option></select></div><button id="set-config">Set Interval</button></div>
+      </section>
+      <section><h2>Competition Maps</h2><div class="maps" id="maps"></div></section>
+      <section><h2>Operations</h2><div class="actions"><button id="run-batch">Create Demo Snapshot</button><button class="secondary" id="restart-replay">Restart Replay</button><button class="danger" id="reset">Reset Competition Data</button></div></section>
+      <section><pre id="output">Ready</pre></section>
+    </div>
   </main>
   <script>
-    const token = document.getElementById("token"), stage = document.getElementById("stage"), interval = document.getElementById("interval"), output = document.getElementById("output"), stateEl = document.getElementById("state"), mapsEl = document.getElementById("maps");
+    const token = document.getElementById("token"), loginStatus = document.getElementById("login-status"), adminContent = document.getElementById("admin-content"), stage = document.getElementById("stage"), interval = document.getElementById("interval"), output = document.getElementById("output"), stateEl = document.getElementById("state"), mapsEl = document.getElementById("maps");
     function headers() { return {"Content-Type":"application/json", "X-Admin-Token":token.value}; }
+    function setLoginStatus(message, isError=false) { loginStatus.textContent = message; loginStatus.classList.toggle("error", isError); }
     async function call(url, options) { const response = await fetch(url, options); const text = await response.text(); output.textContent = `${response.status} ${response.statusText}\n${text}`; await load(); }
-    function renderState(data) { stage.value = data.stage; interval.value = String(data.config.phase_one_batch_minutes); stateEl.innerHTML = `<div class="metric"><strong>${data.stage.replace("_", " ")}</strong><span>active stage</span></div><div class="metric"><strong>${data.config.version}</strong><span>configuration</span></div><div class="metric"><strong>${data.config.phase_one_batch_minutes} min</strong><span>phase 1 interval</span></div><div class="metric"><strong>${new Date(data.config.next_phase_one_batch_at).toLocaleTimeString()}</strong><span>next phase 1 snapshot</span></div>`; mapsEl.innerHTML = data.competitions.map((map) => `<article class="map"><header>${map.competition_id.toUpperCase()} · ${map.map_id}</header><img alt="${map.name}" src="/v2/maps/${map.competition_id}/preview"></article>`).join(""); }
-    async function load() { const response = await fetch("/v2/state", {cache:"no-store"}); renderState(await response.json()); }
+    function renderState(data) { stage.value = data.stage; interval.value = String(data.config.phase_one_batch_minutes); stateEl.innerHTML = `<div class="metric"><strong>${data.stage.replace("_", " ")}</strong><span>active stage</span></div><div class="metric"><strong>${data.config.version}</strong><span>configuration</span></div><div class="metric"><strong>${data.config.phase_one_batch_minutes} min</strong><span>phase 1 interval</span></div>`; mapsEl.innerHTML = data.competitions.map((map) => `<article class="map"><header>${map.competition_id.toUpperCase()} · ${map.map_id}</header><img alt="${map.name}" src="/v2/maps/${map.competition_id}/preview"></article>`).join(""); }
+    async function load() { const response = await fetch("/v2/admin/state", {cache:"no-store", headers:headers()}); if (!response.ok) throw new Error(`${response.status} ${response.statusText}`); renderState(await response.json()); }
+    async function unlockAdmin() { try { await load(); sessionStorage.setItem("competitionAdminToken", token.value); adminContent.classList.remove("hidden"); setLoginStatus("Admin unlocked."); } catch (error) { adminContent.classList.add("hidden"); sessionStorage.removeItem("competitionAdminToken"); setLoginStatus(`Invalid admin token: ${error}`, true); } }
+    token.value = sessionStorage.getItem("competitionAdminToken") || "";
+    document.getElementById("login-button").addEventListener("click", unlockAdmin);
+    token.addEventListener("keydown", (event) => { if (event.key === "Enter") unlockAdmin(); });
     document.getElementById("set-stage").addEventListener("click", () => call("/v2/admin/stage", {method:"POST", headers:headers(), body:JSON.stringify({stage:stage.value})}));
     document.getElementById("set-config").addEventListener("click", () => call("/v2/admin/config", {method:"POST", headers:headers(), body:JSON.stringify({phase_one_batch_minutes:Number(interval.value)})}));
     document.getElementById("run-batch").addEventListener("click", () => call("/v2/admin/batches/run-now", {method:"POST", headers:headers()}));
     document.getElementById("restart-replay").addEventListener("click", () => call("/v2/admin/replay/restart", {method:"POST", headers:headers()}));
     document.getElementById("reset").addEventListener("click", () => { if (confirm("Delete all submissions, cooldowns, and snapshots?")) call("/v2/admin/reset-all", {method:"POST", headers:headers()}); });
-    load().catch((error) => { output.textContent = `Failed to load: ${error}`; });
+    if (token.value) unlockAdmin();
   </script>
 </body>
 </html>
