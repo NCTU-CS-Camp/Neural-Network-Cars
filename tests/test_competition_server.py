@@ -661,7 +661,7 @@ def test_replay_marks_a_route_finisher_as_finished():
             self.x, self.y = centers[0]
 
         def update(self) -> None:
-            self.index = min(self.index + 1, len(centers))
+            self.index += 1
             self.x, self.y = centers[self.index % len(centers)]
 
         def collision(self) -> bool:
@@ -683,8 +683,12 @@ def test_replay_marks_a_route_finisher_as_finished():
     for _ in range(len(centers)):
         update_replay_cars([replay_car])
 
+    assert replay_car.finished is False
+
+    update_replay_cars([replay_car])
+
     assert replay_car.finished is True
-    assert replay_car.finish_ticks == len(centers)
+    assert replay_car.finish_ticks == len(centers) + 1
 
 
 def test_admin_can_restart_replay_generation(tmp_path):
