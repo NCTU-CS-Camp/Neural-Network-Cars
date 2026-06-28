@@ -46,11 +46,13 @@ class TextInput:
     rect: pygame.Rect
     text: str = ""
     active: bool = False
+    composing: str = ""
     max_length: int = 24
     fill_color: tuple[int, int, int] = (30, 30, 30)
     text_color: tuple[int, int, int] = (255, 255, 255)
     border_color: tuple[int, int, int] = (90, 90, 90)
     active_border_color: tuple[int, int, int] = (120, 170, 255)
+    composing_color: tuple[int, int, int] = (255, 220, 0)
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -60,18 +62,27 @@ class TextInput:
                 pygame.key.start_text_input()
             elif not self.active and was_active:
                 pygame.key.stop_text_input()
+                self.composing = ""
             return self.active
 
         if not self.active:
             return False
 
+        if event.type == pygame.TEXTEDITING:
+            self.composing = event.text
+            return True
+
         if event.type == pygame.TEXTINPUT:
+            self.composing = ""
             if len(self.text) < self.max_length:
                 self.text += event.text
             return True
 
         if event.type == pygame.KEYDOWN and event.key == pygame.K_BACKSPACE:
-            self.text = self.text[:-1]
+            if self.composing:
+                self.composing = ""
+            else:
+                self.text = self.text[:-1]
             return True
 
         return False
@@ -80,9 +91,19 @@ class TextInput:
         pygame.draw.rect(surface, self.fill_color, self.rect)
         border = self.active_border_color if self.active else self.border_color
         pygame.draw.rect(surface, border, self.rect, 2)
-        rendered = font.render(self.text, True, self.text_color)
-        text_rect = rendered.get_rect(midleft=(self.rect.x + 8, self.rect.centery))
-        surface.blit(rendered, text_rect)
+
+        committed_surf = font.render(self.text, True, self.text_color)
+        committed_rect = committed_surf.get_rect(midleft=(self.rect.x + 8, self.rect.centery))
+        surface.blit(committed_surf, committed_rect)
+
+        if self.composing:
+            composing_surf = font.render(self.composing, True, self.composing_color)
+            composing_rect = composing_surf.get_rect(midleft=(committed_rect.right, self.rect.centery))
+            surface.blit(composing_surf, composing_rect)
+            underline_y = composing_rect.bottom - 1
+            pygame.draw.line(surface, self.composing_color,
+                             (composing_rect.left, underline_y),
+                             (composing_rect.right, underline_y), 1)
 
 
 @dataclass(slots=True)

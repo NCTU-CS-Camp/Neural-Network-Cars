@@ -11,6 +11,7 @@ from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import apply_weight_payload
 from game_engine.backend.settings import (
     BLACK,
+    FONT_PATH,
     MAX_SPEED,
     TRAINING_DIFFICULTY_MAPS,
     VALIDATION_DIFFICULTY_MAPS,
@@ -47,7 +48,7 @@ PENALTY_FITNESS_PLACEHOLDERS = [
 
 
 def _font(size: int = 22) -> pygame.font.Font:
-    return pygame.font.Font("/System/Library/Fonts/PingFang.ttc", size)
+    return pygame.font.Font(str(FONT_PATH), size)
 
 
 def _check_quit(event: pygame.event.Event) -> None:
@@ -390,6 +391,7 @@ def run_record_name_screen(screen: pygame.Surface) -> str:
 
     name_input = TextInput(pygame.Rect(width // 2 - 200, height // 2, 400, 48))
     name_input.active = True
+    pygame.key.start_text_input()
     confirm_button = Button("確認", pygame.Rect(width // 2 - 80, height // 2 + 80, 160, 56))
 
     while True:
@@ -531,8 +533,8 @@ def run_validate_replay_screen(
     payload = WeightPayload(
         model_version="v1",
         layer_sizes=record.layer_sizes,
-        weights=record.weights,
-        biases=record.biases,
+        weights=record.parent_a_weights,
+        biases=record.parent_a_biases,
         fitness_score=0.0,
         generation=0,
         track_id=f"validation-{difficulty}",

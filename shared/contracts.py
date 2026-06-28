@@ -111,13 +111,18 @@ class TrainingRecord:
     group_id: str
     username: str
     layer_sizes: list[int]
-    weights: list[list[float]]
-    biases: list[list[float]]
+    parent_a_weights: list[list[float]]
+    parent_a_biases: list[list[float]]
+    parent_b_weights: list[list[float]]
+    parent_b_biases: list[list[float]]
     fitness_config: FitnessConfig
     map_difficulty: int
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrainingRecord":
+        # backward compat: old records stored single weights/biases
+        legacy_weights = [[float(w) for w in layer] for layer in data["weights"]] if "weights" in data else []
+        legacy_biases = [[float(b) for b in layer] for layer in data["biases"]] if "biases" in data else []
         return cls(
             record_id=str(data["record_id"]),
             record_name=str(data["record_name"]),
@@ -125,8 +130,10 @@ class TrainingRecord:
             group_id=str(data["group_id"]),
             username=str(data["username"]),
             layer_sizes=[int(size) for size in data["layer_sizes"]],
-            weights=[[float(w) for w in layer] for layer in data["weights"]],
-            biases=[[float(b) for b in layer] for layer in data["biases"]],
+            parent_a_weights=[[float(w) for w in layer] for layer in data["parent_a_weights"]] if "parent_a_weights" in data else legacy_weights,
+            parent_a_biases=[[float(b) for b in layer] for layer in data["parent_a_biases"]] if "parent_a_biases" in data else legacy_biases,
+            parent_b_weights=[[float(w) for w in layer] for layer in data["parent_b_weights"]] if "parent_b_weights" in data else legacy_weights,
+            parent_b_biases=[[float(b) for b in layer] for layer in data["parent_b_biases"]] if "parent_b_biases" in data else legacy_biases,
             fitness_config=FitnessConfig.from_dict(data["fitness_config"]),
             map_difficulty=int(data["map_difficulty"]),
         )
@@ -139,8 +146,10 @@ class TrainingRecord:
             "group_id": self.group_id,
             "username": self.username,
             "layer_sizes": self.layer_sizes,
-            "weights": self.weights,
-            "biases": self.biases,
+            "parent_a_weights": self.parent_a_weights,
+            "parent_a_biases": self.parent_a_biases,
+            "parent_b_weights": self.parent_b_weights,
+            "parent_b_biases": self.parent_b_biases,
             "fitness_config": self.fitness_config.to_dict(),
             "map_difficulty": self.map_difficulty,
         }

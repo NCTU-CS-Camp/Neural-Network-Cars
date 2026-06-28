@@ -56,3 +56,9 @@ def score_with_config(car: object, fitness_config: FitnessConfig) -> float:
 def select_best_car(population: list[object], fitness_config: FitnessConfig) -> object:
     return max(population, key=lambda car: score_with_config(car, fitness_config))
 
+
+def select_top_k_cars(
+    population: list[object], fitness_config: FitnessConfig, k: int = 2
+) -> list[object]:
+    return sorted(population, key=lambda car: score_with_config(car, fitness_config), reverse=True)[:k]
+

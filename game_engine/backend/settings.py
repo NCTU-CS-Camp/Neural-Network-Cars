@@ -8,6 +8,8 @@ SPRITES_DIR = IMAGES_DIR / "Sprites"
 TRACK_ASSETS_DIR = IMAGES_DIR / "TracksMapGen"
 TRACKS_DIR = IMAGES_DIR / "Tracks"
 
+FONT_PATH = PROJECT_ROOT / "fonts" / "GenSenRounded-R.ttc"
+
 MAPS_DIR = PROJECT_ROOT / "maps"
 TRAIN_MAPS_DIR = MAPS_DIR / "train_maps"
 VALID_MAPS_DIR = MAPS_DIR / "valid_maps"

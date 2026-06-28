@@ -6,10 +6,11 @@ from shapely.geometry.polygon import Polygon
 
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
-from GA.fitness import get_fitness_strategy, select_best_car
+from GA.fitness import get_fitness_strategy, select_best_car, select_top_k_cars
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import export_weight_payload
 from game_engine.backend.settings import (
+    FONT_PATH,
     HIDDEN_LAYER,
     INPUT_LAYER,
     MAX_SPEED,
@@ -93,7 +94,7 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
 
     info_x = max(W - 235, 1200)
     info_y = 600
-    font = pygame.font.Font("/System/Library/Fonts/PingFang.ttc", 18)
+    font = pygame.font.Font(str(FONT_PATH), 18)
     text1 = font.render("0..9 - Change Mutation", True, WHITE)
     text2 = font.render("LMB - Select/Unselect", True, WHITE)
     text3 = font.render("RMB - Delete", True, WHITE)
@@ -297,14 +298,17 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         apply_track_spawn(reset_player=True)
 
     def save_training_record():
-        best_car = select_best_car(nn_cars, fitness_config)
-        payload = export_weight_payload(
-            best_car,
+        top2 = select_top_k_cars(nn_cars, fitness_config, k=2)
+        parent_a = top2[0]
+        parent_b = top2[1] if len(top2) >= 2 else top2[0]
+        common = dict(
             generation=session.generation,
             track_id=f"training-{map_difficulty}",
             track_seed=settings.track_seed,
             nickname=profile.username,
         )
+        pa_payload = export_weight_payload(parent_a, **common)
+        pb_payload = export_weight_payload(parent_b, **common)
         record_name = run_record_name_screen(screen)
         record = TrainingRecord(
             record_id="",
@@ -312,9 +316,11 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             saved_at=datetime.now(UTC).isoformat(),
             group_id=profile.group_id,
             username=profile.username,
-            layer_sizes=payload.layer_sizes,
-            weights=payload.weights,
-            biases=payload.biases,
+            layer_sizes=pa_payload.layer_sizes,
+            parent_a_weights=pa_payload.weights,
+            parent_a_biases=pa_payload.biases,
+            parent_b_weights=pb_payload.weights,
+            parent_b_biases=pb_payload.biases,
             fitness_config=fitness_config,
             map_difficulty=map_difficulty,
         )
