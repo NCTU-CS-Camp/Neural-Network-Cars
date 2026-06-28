@@ -4,14 +4,13 @@ from typing import Literal
 
 import pygame
 
-from GA.fitness import FITNESS_STRATEGIES, score_with_config
+from GA.fitness import score_with_config
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import apply_weight_payload
 from game_engine.backend.settings import (
     BLACK,
-    FONT_PATH,
     MAX_SPEED,
     TRAINING_DIFFICULTY_MAPS,
     VALIDATION_DIFFICULTY_MAPS,
@@ -31,24 +30,24 @@ MenuChoice = Literal["training", "validation"]
 TrainingConfigResult = tuple[FitnessConfig, int, TrainingRecord | None]
 
 BONUS_FITNESS_PLACEHOLDERS = [
-    "progress_score",
-    "speed_score",
-    "completion_bonus",
-    "smooth_control",
-    "checkpoint_reward",
+    "speed",
+    "progress",
+    "centered",
+    "alignment",
+    "safety",
 ]
 
 PENALTY_FITNESS_PLACEHOLDERS = [
-    "collision_penalty",
-    "spin_penalty",
-    "stagnation_penalty",
-    "reverse_penalty",
-    "time_penalty",
+    "stall",
+    "spin",
+    "wrong_way",
+    "time",
+    "crash",
 ]
 
 
 def _font(size: int = 22) -> pygame.font.Font:
-    return pygame.font.Font(str(FONT_PATH), size)
+    return pygame.font.SysFont("Noto Sans CJK TC", size)
 
 
 def _check_quit(event: pygame.event.Event) -> None:
@@ -201,7 +200,6 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     fitness_top = back_button.rect.bottom + M
     fitness_bottom = H - M
     fitness_step = (fitness_bottom - fitness_top) // 10
-    all_fitness = BONUS_FITNESS_PLACEHOLDERS + PENALTY_FITNESS_PLACEHOLDERS
     bonus_sliders = {
         name: Slider(
             pygame.Rect(slider_x, fitness_top + i * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
@@ -391,7 +389,6 @@ def run_record_name_screen(screen: pygame.Surface) -> str:
 
     name_input = TextInput(pygame.Rect(width // 2 - 200, height // 2, 400, 48))
     name_input.active = True
-    pygame.key.start_text_input()
     confirm_button = Button("確認", pygame.Rect(width // 2 - 80, height // 2 + 80, 160, 56))
 
     while True:
@@ -533,8 +530,8 @@ def run_validate_replay_screen(
     payload = WeightPayload(
         model_version="v1",
         layer_sizes=record.layer_sizes,
-        weights=record.parent_a_weights,
-        biases=record.parent_a_biases,
+        weights=record.weights,
+        biases=record.biases,
         fitness_score=0.0,
         generation=0,
         track_id=f"validation-{difficulty}",
