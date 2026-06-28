@@ -54,17 +54,27 @@ class TextInput:
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN:
+            was_active = self.active
             self.active = self.rect.collidepoint(event.pos)
+            if self.active and not was_active:
+                pygame.key.start_text_input()
+            elif not self.active and was_active:
+                pygame.key.stop_text_input()
             return self.active
 
-        if not self.active or event.type != pygame.KEYDOWN:
+        if not self.active:
             return False
 
-        if event.key == pygame.K_BACKSPACE:
+        if event.type == pygame.TEXTINPUT:
+            if len(self.text) < self.max_length:
+                self.text += event.text
+            return True
+
+        if event.type == pygame.KEYDOWN and event.key == pygame.K_BACKSPACE:
             self.text = self.text[:-1]
-        elif event.unicode and event.unicode.isprintable() and len(self.text) < self.max_length:
-            self.text += event.unicode
-        return True
+            return True
+
+        return False
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
         pygame.draw.rect(surface, self.fill_color, self.rect)

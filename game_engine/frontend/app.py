@@ -40,7 +40,8 @@ from shared.contracts import TrainingRecord
 
 def run():
     pygame.init()
-    screen = pygame.display.set_mode(SCREEN_SIZE)
+    info = pygame.display.Info()
+    screen = pygame.display.set_mode((info.current_w - 40, info.current_h - 80))
 
     try:
         profile = load_login_profile() or run_login_screen(screen)
@@ -50,8 +51,12 @@ def run():
         while True:
             choice = run_main_menu_screen(screen, profile)
             if choice == "training":
-                fitness_config, map_difficulty = run_training_config_screen(screen)
-                run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
+                result = run_training_config_screen(screen)
+                if result is not None:
+                    fitness_config, map_difficulty, parent_record = result
+                    if map_difficulty == 3:
+                        generate_random_map(screen)
+                    run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             else:
                 run_validation_list_screen(screen)
     except AppQuit:
@@ -82,11 +87,13 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
     aux_car = Car(layer_sizes)
     nn_cars = [Car(layer_sizes) for _ in range(session.population_size)]
 
-    back_button = Button("Back (Esc)", pygame.Rect(SCREEN_SIZE[0] - 200, 16, 180, 44))
+    W, H = screen.get_size()
+    back_button = Button("Back (Esc)", pygame.Rect(W - 200, 16, 180, 44))
+    new_map_button = Button("新地圖 (M)", pygame.Rect(W - 200, 70, 180, 44)) if map_difficulty == 3 else None
 
-    info_x = 1365
+    info_x = max(W - 235, 1200)
     info_y = 600
-    font = pygame.font.Font("freesansbold.ttf", 18)
+    font = pygame.font.Font("/System/Library/Fonts/PingFang.ttc", 18)
     text1 = font.render("0..9 - Change Mutation", True, WHITE)
     text2 = font.render("LMB - Select/Unselect", True, WHITE)
     text3 = font.render("RMB - Delete", True, WHITE)
@@ -97,7 +104,9 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
     text8 = font.render("N - Next Track", True, WHITE)
     text9 = font.render("A - Toggle Player", True, WHITE)
     text10 = font.render("D - Toggle Info", True, WHITE)
-    text11 = font.render("M - Breed and Next Track", True, WHITE)
+    text11 = font.render(
+        "M - 新隨機地圖" if map_difficulty == 3 else "M - Breed and Next Track", True, WHITE
+    )
     text12 = font.render("F1..F4 - Switch Scenes", True, WHITE)
     text1_rect = text1.get_rect().move(info_x, info_y)
     text2_rect = text2.get_rect().move(info_x, info_y + text1_rect.height)
@@ -269,10 +278,23 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         if session.show_debug_overlay:
             display_texts()
 
-        back_button.update_hover(pygame.mouse.get_pos())
+        mouse_pos = pygame.mouse.get_pos()
+        back_button.update_hover(mouse_pos)
         back_button.draw(game_display, font)
+        if new_map_button is not None:
+            new_map_button.update_hover(mouse_pos)
+            new_map_button.draw(game_display, font)
 
         pygame.display.update()
+
+    def do_new_random_map():
+        nonlocal bg, bg4
+        generate_random_map(game_display)
+        bg = pygame.image.load(TRACK_FRONT_PATH)
+        bg4 = pygame.image.load(TRACK_BACK_PATH)
+        set_collision_map(bg4)
+        configure_car(bg4, assets.white_small_car, MAX_SPEED)
+        apply_track_spawn(reset_player=True)
 
     def save_training_record():
         best_car = select_best_car(nn_cars, fitness_config)
@@ -339,7 +361,9 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
                 if event.key == ord("b"):
                     breed_selected()
                 if event.key == ord("m"):
-                    if breed_selected():
+                    if map_difficulty == 3:
+                        do_new_random_map()
+                    elif breed_selected():
                         number_track = 2
                         session.track_index = 2
                         generate_random_map(game_display)
@@ -380,6 +404,8 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
                     pos = pygame.mouse.get_pos()
                     if back_button.contains(pos):
                         leave_requested = True
+                    elif new_map_button is not None and new_map_button.contains(pos):
+                        do_new_random_map()
                     else:
                         point = Point(pos[0], pos[1])
                         for nn_car in nn_cars:

@@ -27,11 +27,27 @@ class AppQuit(Exception):
 
 GROUP_COUNT = 10
 MenuChoice = Literal["training", "validation"]
-TrainingConfigResult = tuple[FitnessConfig, int]
+TrainingConfigResult = tuple[FitnessConfig, int, TrainingRecord | None]
+
+BONUS_FITNESS_PLACEHOLDERS = [
+    "progress_score",
+    "speed_score",
+    "completion_bonus",
+    "smooth_control",
+    "checkpoint_reward",
+]
+
+PENALTY_FITNESS_PLACEHOLDERS = [
+    "collision_penalty",
+    "spin_penalty",
+    "stagnation_penalty",
+    "reverse_penalty",
+    "time_penalty",
+]
 
 
 def _font(size: int = 22) -> pygame.font.Font:
-    return pygame.font.Font("freesansbold.ttf", size)
+    return pygame.font.Font("/System/Library/Fonts/PingFang.ttc", size)
 
 
 def _check_quit(event: pygame.event.Event) -> None:
@@ -133,64 +149,199 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
         clock.tick(30)
 
 
-def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult:
+def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult | None:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(32)
-    width, height = screen.get_size()
+    W, H = screen.get_size()
 
-    strategy_names = list(FITNESS_STRATEGIES.keys())
-    sliders = {
-        name: Slider(pygame.Rect(280, 160 + index * 60, 320, 12), 0, 100, 50)
-        for index, name in enumerate(strategy_names)
-    }
+    font = _font(max(14, H // 50))
+    title_font = _font(max(16, H // 40))
+    subtitle_font = _font(max(15, H // 45))
 
-    difficulty_options = [
-        (
-            difficulty,
-            Button("*" * difficulty, pygame.Rect(60 + (difficulty - 1) * 140, 440, 120, 60)),
-        )
-        for difficulty in TRAINING_DIFFICULTY_MAPS
+    M = max(16, W // 100)          # base margin
+    left_w = W * 2 // 3            # left 2/3
+    right_x = left_w               # right block starts
+    right_w = W - right_x          # right 1/3
+    map_bottom = H * 2 // 5        # top 2/5 → map cards
+    record_y = map_bottom           # bottom 3/5 → record section
+
+    back_button = Button("← 返回", pygame.Rect(M, M, max(100, W // 14), max(36, H // 24)))
+
+    # Map cards (left 2/3, top 2/5)
+    card_area_top = back_button.rect.bottom + M
+    card_area_h = map_bottom - card_area_top - M
+    CARD_W = (left_w - M * 4) // 3
+    CARD_H = card_area_h
+    THUMB_W = CARD_W - M * 2
+    THUMB_H = THUMB_W * 9 // 16
+    easy_thumb = pygame.transform.scale(
+        pygame.image.load(str(TRAINING_DIFFICULTY_MAPS[1][0])), (THUMB_W, THUMB_H)
+    )
+    hard_thumb = pygame.transform.scale(
+        pygame.image.load(str(TRAINING_DIFFICULTY_MAPS[2][0])), (THUMB_W, THUMB_H)
+    )
+    map_cards: list[tuple[int, str, pygame.Surface | None, pygame.Rect]] = [
+        (1, "Easy",   easy_thumb, pygame.Rect(M + i * (CARD_W + M), card_area_top, CARD_W, CARD_H))
+        for i in range(3)
+    ][0:1] + [
+        (2, "Hard",   hard_thumb, pygame.Rect(M + 1 * (CARD_W + M), card_area_top, CARD_W, CARD_H)),
+        (3, "隨機",   None,       pygame.Rect(M + 2 * (CARD_W + M), card_area_top, CARD_W, CARD_H)),
     ]
-    selected_difficulty = difficulty_options[0][0]
+    map_cards = [
+        (1, "Easy",   easy_thumb, pygame.Rect(M,                   card_area_top, CARD_W, CARD_H)),
+        (2, "Hard",   hard_thumb, pygame.Rect(M * 2 + CARD_W,     card_area_top, CARD_W, CARD_H)),
+        (3, "隨機",   None,       pygame.Rect(M * 3 + CARD_W * 2, card_area_top, CARD_W, CARD_H)),
+    ]
+    selected_difficulty: int = 1
 
-    go_button = Button("Go", pygame.Rect(width - 220, height - 100, 160, 60))
+    # Fitness sliders (right 1/3, full height, 10 items uniformly)
+    slider_label_x = right_x + M
+    slider_x = right_x + M + max(140, right_w // 4)
+    slider_w = right_w - M * 2 - max(140, right_w // 4) - M
+    fitness_top = back_button.rect.bottom + M
+    fitness_bottom = H - M
+    fitness_step = (fitness_bottom - fitness_top) // 10
+    all_fitness = BONUS_FITNESS_PLACEHOLDERS + PENALTY_FITNESS_PLACEHOLDERS
+    bonus_sliders = {
+        name: Slider(
+            pygame.Rect(slider_x, fitness_top + i * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
+            0, 100, 50,
+        )
+        for i, name in enumerate(BONUS_FITNESS_PLACEHOLDERS)
+    }
+    penalty_sliders = {
+        name: Slider(
+            pygame.Rect(slider_x, fitness_top + (5 + i) * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
+            0, 100, 50,
+        )
+        for i, name in enumerate(PENALTY_FITNESS_PLACEHOLDERS)
+    }
+    all_sliders = {**bonus_sliders, **penalty_sliders}
+
+    # Record section (left 2/3, bottom 3/5)
+    records = RecordStore().list_records()
+    record_title_y = record_y + M
+    rec_btn_y = record_title_y + title_font.size("A")[1] + M // 2
+    max_records = min(len(records), max(2, (H - rec_btn_y - M * 8) // max(32, H // 26)))
+    rec_row_h = max(30, H // 28)
+    record_buttons: list[tuple[TrainingRecord, Button]] = [
+        (record, Button(
+            f"{record.record_name}  |  {record.saved_at[:10]}",
+            pygame.Rect(M, rec_btn_y + i * (rec_row_h + 4), left_w - M * 2, rec_row_h),
+        ))
+        for i, record in enumerate(records[:max_records])
+    ]
+    action_y = rec_btn_y + max_records * (rec_row_h + 4) + M
+    btn_h = max(36, H // 24)
+    btn_w = max(140, left_w // 5)
+    fresh_button = Button("重新開始", pygame.Rect(M, action_y, btn_w, btn_h))
+    from_record_button = Button("使用舊有紀錄", pygame.Rect(M * 2 + btn_w, action_y, btn_w + 20, btn_h))
+    go_button = Button("GO", pygame.Rect(W - M - max(100, W // 14), H - M - btn_h, max(100, W // 14), btn_h))
+
+    start_mode: str | None = None
+    selected_record: TrainingRecord | None = None
+
+    def go_enabled() -> bool:
+        if start_mode is None:
+            return False
+        if start_mode == "record" and selected_record is None:
+            return False
+        return True
+
+    BLUE = (60, 120, 200)
+    DARK = (30, 30, 30)
+    GRAY = (50, 50, 50)
 
     while True:
         for event in pygame.event.get():
             _check_quit(event)
-            for slider in sliders.values():
+            for slider in all_sliders.values():
                 slider.handle_event(event)
+
             if event.type == pygame.MOUSEBUTTONDOWN:
-                for difficulty, button in difficulty_options:
-                    if button.contains(event.pos):
-                        selected_difficulty = difficulty
-                if go_button.contains(event.pos):
-                    fitness_config = FitnessConfig(
-                        weights={name: slider.value for name, slider in sliders.items()}
-                    )
-                    return fitness_config, selected_difficulty
+                pos = event.pos
+
+                if back_button.contains(pos):
+                    return None
+
+                for diff_id, _, _, card_rect in map_cards:
+                    if card_rect.collidepoint(pos):
+                        selected_difficulty = diff_id
+
+                if fresh_button.contains(pos):
+                    start_mode = "fresh"
+                    selected_record = None
+                elif from_record_button.contains(pos) and records:
+                    start_mode = "record"
+
+                if start_mode == "record":
+                    for record, btn in record_buttons:
+                        if btn.contains(pos):
+                            selected_record = record
+
+                if go_button.contains(pos) and go_enabled():
+                    weights = {name: s.value for name, s in all_sliders.items()}
+                    return FitnessConfig(weights=weights), selected_difficulty, selected_record
 
         mouse_pos = pygame.mouse.get_pos()
-        for difficulty, button in difficulty_options:
-            button.update_hover(mouse_pos)
-            button.fill_color = (60, 120, 200) if difficulty == selected_difficulty else (30, 30, 30)
+        back_button.update_hover(mouse_pos)
         go_button.update_hover(mouse_pos)
+        fresh_button.update_hover(mouse_pos)
+        from_record_button.update_hover(mouse_pos)
+        for _, btn in record_buttons:
+            btn.update_hover(mouse_pos)
+
+        fresh_button.fill_color = BLUE if start_mode == "fresh" else DARK
+        from_record_button.fill_color = BLUE if start_mode == "record" else DARK
+        go_button.fill_color = BLUE if go_enabled() else GRAY
 
         screen.fill(BLACK)
-        screen.blit(title_font.render("Training 設定", True, WHITE), (60, 60))
-        screen.blit(font.render("Fitness 權重（佔位分類，之後會替換成真正類別）", True, WHITE), (60, 120))
-        for name, slider in sliders.items():
-            screen.blit(font.render(name, True, WHITE), (60, slider.rect.y - 4))
-            slider.draw(screen, font)
-        screen.blit(
-            font.render("難度地圖（Training 專用地圖池，與 Validate 地圖池分開）", True, WHITE),
-            (60, 400),
-        )
-        for _, button in difficulty_options:
-            button.draw(screen, font)
-        go_button.draw(screen, font)
+        back_button.draw(screen, font)
 
+        # Left-top: map cards
+        screen.blit(title_font.render("選擇地圖", True, WHITE), (M, back_button.rect.bottom - title_font.size("A")[1] - M // 2))
+        for diff_id, label, thumb, card_rect in map_cards:
+            selected = diff_id == selected_difficulty
+            hovered = card_rect.collidepoint(mouse_pos)
+            border_color = BLUE if selected else ((110, 110, 110) if hovered else (55, 55, 55))
+            fill_color = (25, 35, 60) if selected else ((28, 28, 28) if hovered else (18, 18, 18))
+            border_w = 3 if selected else 1
+            pygame.draw.rect(screen, fill_color, card_rect, border_radius=10)
+            pygame.draw.rect(screen, border_color, card_rect, border_w, border_radius=10)
+            img_rect = pygame.Rect(card_rect.x + M // 2, card_rect.y + M // 2, THUMB_W, THUMB_H)
+            if thumb is not None:
+                screen.blit(thumb, img_rect)
+                pygame.draw.rect(screen, (50, 50, 50), img_rect, 1)
+            else:
+                pygame.draw.rect(screen, (22, 22, 32), img_rect, border_radius=4)
+                rng_surf = subtitle_font.render("隨機生成", True, (140, 140, 200))
+                screen.blit(rng_surf, rng_surf.get_rect(center=img_rect.center))
+            label_color = WHITE if selected else (180, 180, 180)
+            label_surf = font.render(label, True, label_color)
+            screen.blit(label_surf, label_surf.get_rect(centerx=card_rect.centerx, y=img_rect.bottom + M // 2))
+
+        # Left-bottom: record section
+        screen.blit(title_font.render("選擇紀錄", True, WHITE), (M, record_title_y))
+        if not records:
+            screen.blit(font.render("（尚無紀錄）", True, (120, 120, 120)), (M, rec_btn_y))
+        if start_mode == "record":
+            for record, btn in record_buttons:
+                btn.fill_color = BLUE if record is selected_record else DARK
+                btn.draw(screen, font)
+        fresh_button.draw(screen, font)
+        if records:
+            from_record_button.draw(screen, font)
+
+        # Right: fitness sliders
+        screen.blit(title_font.render("Fitness 函數設定", True, WHITE),
+                    (right_x + M, back_button.rect.bottom - title_font.size("A")[1] - M // 2))
+        for i, (name, slider) in enumerate(all_sliders.items()):
+            is_bonus = name in BONUS_FITNESS_PLACEHOLDERS
+            label_color = (100, 220, 100) if is_bonus else (220, 100, 100)
+            label_y = slider.rect.centery - font.size(name)[1] // 2
+            screen.blit(font.render(name, True, label_color), (slider_label_x, label_y))
+            slider.draw(screen, font)
+
+        go_button.draw(screen, font)
         pygame.display.update()
         clock.tick(30)
 
