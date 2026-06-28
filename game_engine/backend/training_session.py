@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import Any
+
+import numpy as np
 
 from GA.genetic import (
     mutateOneBiasesGene,
@@ -12,11 +15,14 @@ from GA.genetic import (
 from shared.contracts import RuntimeSettings
 
 
+GENERATION_DURATION_SECONDS = 40.0
+
+
 @dataclass
 class TrainingSession:
     population_size: int
     mutation_rate: int
-    fitness_strategy: str
+    evolution_seed: int = 3057
     generation: int = 1
     alive_count: int = 0
     selected_cars: list[Any] = field(default_factory=list)
@@ -24,13 +30,18 @@ class TrainingSession:
     show_sensor_lines: bool = True
     show_player: bool = True
     show_debug_overlay: bool = True
+    mlp_init_rng: np.random.Generator = field(init=False, repr=False)
+    mutation_rng: random.Random = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._reset_evolution_rngs()
 
     @classmethod
     def from_settings(cls, settings: RuntimeSettings) -> "TrainingSession":
         return cls(
             population_size=settings.population_size,
             mutation_rate=settings.mutation_rate,
-            fitness_strategy=settings.fitness_strategy,
+            evolution_seed=settings.evolution_seed,
             alive_count=settings.population_size,
             show_player=settings.show_player,
             show_debug_overlay=settings.show_debug_overlay,
@@ -50,11 +61,24 @@ class TrainingSession:
         self.generation = 1
         self.alive_count = self.population_size
         self.clear_selection()
+        self._reset_evolution_rngs()
+
+    def _reset_evolution_rngs(self) -> None:
+        self.mlp_init_rng = np.random.default_rng(self.evolution_seed)
+        self.mutation_rng = random.Random(self.evolution_seed)
 
     def begin_next_generation(self) -> None:
         self.generation += 1
         self.alive_count = self.population_size
         self.clear_selection()
+
+    def should_end_generation(self, elapsed_seconds: float) -> bool:
+        if elapsed_seconds < 0:
+            raise ValueError("elapsed_seconds cannot be negative")
+        return (
+            elapsed_seconds >= GENERATION_DURATION_SECONDS
+            or self.alive_count <= 0
+        )
 
     def mark_collision(self, car: Any) -> bool:
         if getattr(car, "yaReste", False):
@@ -76,7 +100,10 @@ class TrainingSession:
 
         parent1, parent2 = self.selected_cars
         self.begin_next_generation()
-        next_population = [car_factory(layer_sizes) for _ in range(self.population_size)]
+        next_population = [
+            car_factory(layer_sizes, mlp_init_rng=self.mlp_init_rng)
+            for _ in range(self.population_size)
+        ]
 
         for index in range(0, self.population_size - 2, 2):
             uniformCrossOverWeights(
@@ -103,10 +130,18 @@ class TrainingSession:
 
         for index in range(self.population_size - 2):
             for _ in range(self.mutation_rate):
-                mutateOneWeightGene(next_population[index], aux_car)
-                mutateOneWeightGene(aux_car, next_population[index])
-                mutateOneBiasesGene(next_population[index], aux_car)
-                mutateOneBiasesGene(aux_car, next_population[index])
+                mutateOneWeightGene(
+                    next_population[index], aux_car, self.mutation_rng
+                )
+                mutateOneWeightGene(
+                    aux_car, next_population[index], self.mutation_rng
+                )
+                mutateOneBiasesGene(
+                    next_population[index], aux_car, self.mutation_rng
+                )
+                mutateOneBiasesGene(
+                    aux_car, next_population[index], self.mutation_rng
+                )
 
         self.clear_selection()
         return next_population

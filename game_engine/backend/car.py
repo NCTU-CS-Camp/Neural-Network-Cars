@@ -25,13 +25,24 @@ def set_collision_map(collision_map):
 
 
 class Car:
-  def __init__(self, sizes):
+  def __init__(
+    self,
+    sizes,
+    mlp_init_seed: int | None = None,
+    *,
+    mlp_init_rng: np.random.Generator | None = None,
+  ):
     self.score = 0
     self.fitness_score = 0.0
     self.num_layers = len(sizes)
     self.sizes = sizes
-    self.biases = [np.random.randn(y, 1) for y in sizes[1:]]
-    self.weights = [np.random.randn(y, x) for x, y in zip(sizes[:-1], sizes[1:])]
+    self._mlp_init_seed: int | None = None
+    if mlp_init_rng is not None:
+      if mlp_init_seed is not None:
+        raise ValueError("Pass either mlp_init_seed or mlp_init_rng, not both")
+      self._initialize_mlp_parameters(mlp_init_rng)
+    else:
+      self.mlp_init_seed = mlp_init_seed
     self.c1 = 0,0
     self.c2 = 0,0
     self.c3 = 0,0
@@ -55,12 +66,36 @@ class Car:
     self.c = self.x + self.width-(self.width/2), self.y-(self.height/2)
     self.b = self.x + self.width-(self.width/2), self.y + self.height-(self.height/2)
     self.a = self.x-(self.width/2), self.y + self.height-(self.height/2)
-    self.velocity = 0
+    self.velocity = 0.0
     self.acceleration = 0
     self.angle = 180
     self.collided = False
     self.color = WHITE
     self.car_image = default_car_image
+
+  @property
+  def mlp_init_seed(self) -> int | None:
+    return self._mlp_init_seed
+
+  @mlp_init_seed.setter
+  def mlp_init_seed(self, seed: int | None):
+    if seed is not None:
+      if isinstance(seed, bool) or not isinstance(seed, (int, np.integer)):
+        raise TypeError("mlp_init_seed must be an integer or None")
+      if seed < 0:
+        raise ValueError("mlp_init_seed cannot be negative")
+      seed = int(seed)
+
+    self._mlp_init_seed = seed
+    self._initialize_mlp_parameters(np.random.default_rng(seed))
+
+  def _initialize_mlp_parameters(self, rng: np.random.Generator):
+    # Preserve draw order for reproducible evolution: W0, W1, ..., b0, b1, ...
+    self.weights = [
+      rng.standard_normal((y, x))
+      for x, y in zip(self.sizes[:-1], self.sizes[1:])
+    ]
+    self.biases = [rng.standard_normal((y, 1)) for y in self.sizes[1:]]
 
   def set_accel(self, accel):
     self.acceleration = accel
@@ -106,6 +141,14 @@ class Car:
     width, height = collision_surface.get_size()
     return 0 <= x < width and 0 <= y < height and collision_surface.get_at((x, y)).a != 0
 
+  def _containment_check(self, track: TrackGeometry | None):
+    """Prefer the collision bitmap for hot-path sensor and collision checks."""
+    if collision_surface is not None:
+        return self._surface_contains
+    if track is not None:
+        return track.contains
+    return self._surface_contains
+
   def _sensor_endpoint(self, angle, contains, step):
     point = move((self.x, self.y), angle, 10)
     max_steps = 10000
@@ -118,8 +161,8 @@ class Car:
     return move(point, angle, -1)
 
   def _update_sensors(self, track: TrackGeometry | None):
-    contains = track.contains if track is not None else self._surface_contains
-    step = 4 if track is not None else 10
+    contains = self._containment_check(track)
+    step = 10 if collision_surface is not None else 4
     angles = (
         self.angle,
         self.angle + 45,
@@ -167,7 +210,7 @@ class Car:
     return self.outp
 
   def collision(self, track: TrackGeometry | None = None):
-      contains = track.contains if track is not None else self._surface_contains
+      contains = self._containment_check(track)
       return not all(contains(corner) for corner in (self.a, self.b, self.c, self.d))
 
   def resetPosition(self):

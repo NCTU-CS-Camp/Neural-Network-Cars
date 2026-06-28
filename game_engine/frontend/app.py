@@ -6,11 +6,12 @@ from shapely.geometry.polygon import Polygon  # type: ignore[import-untyped]
 
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
-from GA.fitness import beginner_mix, select_best_car, select_best_cars
+from GA.fitness import FitnessStrategy, select_best_cars
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import export_weight_payload
 from game_engine.backend.simulator import Simulator
 from game_engine.backend.settings import (
+    FONT_PATH,
     HIDDEN_LAYER,
     INPUT_LAYER,
     MAX_SPEED,
@@ -24,7 +25,10 @@ from game_engine.backend.settings import (
 )
 from game_engine.backend.track import TrackGeometry
 from game_engine.backend.track_generator import generate_random_map
-from game_engine.backend.training_session import TrainingSession
+from game_engine.backend.training_session import (
+    GENERATION_DURATION_SECONDS,
+    TrainingSession,
+)
 from game_engine.frontend.config_store import load_runtime_settings, save_runtime_settings
 from game_engine.frontend.profile_store import load_login_profile
 from game_engine.frontend.scenes import AppShell
@@ -56,10 +60,16 @@ def run():
             if choice == "training":
                 result = run_training_config_screen(screen)
                 if result is not None:
-                    fitness_config, map_difficulty, parent_record = result
+                    fitness_strategy, map_difficulty, parent_record = result
                     if map_difficulty == 3:
                         generate_random_map(screen)
-                    run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
+                    run_training_loop(
+                        screen,
+                        settings,
+                        profile,
+                        fitness_strategy,
+                        map_difficulty,
+                    )
             else:
                 run_validation_list_screen(screen)
     except AppQuit:
@@ -68,9 +78,16 @@ def run():
     pygame.quit()
 
 
-def run_training_loop(screen, settings, profile, fitness_config, map_difficulty):
+def run_training_loop(
+    screen,
+    settings,
+    profile,
+    fitness_strategy: FitnessStrategy,
+    map_difficulty,
+):
     session = TrainingSession.from_settings(settings)
     shell = AppShell(settings)
+    fitness_config = fitness_strategy.config
 
     assets = load_game_assets()
     game_display = screen
@@ -86,24 +103,29 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
     )
     simulator = Simulator(track, settings.fps)
 
-    def score_frame(telemetry):
-        return beginner_mix(telemetry, fitness_config).total
-
     number_track = 1
-    frames = 0
+    generation_started_at = pygame.time.get_ticks()
     layer_sizes = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
 
     car = Car(layer_sizes)
     aux_car = Car(layer_sizes)
-    nn_cars = [Car(layer_sizes) for _ in range(session.population_size)]
+    nn_cars = [
+        Car(layer_sizes, mlp_init_rng=session.mlp_init_rng)
+        for _ in range(session.population_size)
+    ]
 
     W, H = screen.get_size()
     back_button = Button("Back (Esc)", pygame.Rect(W - 200, 16, 180, 44))
     new_map_button = Button("新地圖 (M)", pygame.Rect(W - 200, 70, 180, 44)) if map_difficulty == 3 else None
+    next_gen_button_y = 124 if new_map_button is not None else 70
+    next_gen_button = Button(
+        "下一代 (Next Gen)",
+        pygame.Rect(W - 200, next_gen_button_y, 180, 44),
+    )
 
     info_x = max(W - 235, 1200)
     info_y = 600
-    font = pygame.font.Font("/System/Library/Fonts/PingFang.ttc", 18)
+    font = pygame.font.Font(str(FONT_PATH), 18)
     text1 = font.render("0..9 - Change Mutation", True, WHITE)
     text2 = font.render("LMB - Select/Unselect", True, WHITE)
     text3 = font.render("RMB - Delete", True, WHITE)
@@ -144,6 +166,13 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         car.showlines = session.show_sensor_lines
         for nn_car in nn_cars:
             nn_car.showlines = session.show_sensor_lines
+
+    def generation_elapsed_seconds():
+        return (pygame.time.get_ticks() - generation_started_at) / 1000.0
+
+    def restart_generation_timer():
+        nonlocal generation_started_at
+        generation_started_at = pygame.time.get_ticks()
 
     def apply_track_spawn(reset_player=False, reset_images=False):
         spawn_x, spawn_y = track_spawn()
@@ -195,7 +224,14 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             f"Scene: {shell.current_scene.name}", True, WHITE
         )
         info_text9 = font.render(
-            "Fitness: beginner_mix", True, WHITE
+            f"Fitness: {fitness_strategy.name}", True, WHITE
+        )
+        remaining_seconds = max(
+            0.0,
+            GENERATION_DURATION_SECONDS - generation_elapsed_seconds(),
+        )
+        info_text10 = font.render(
+            f"Next generation: {remaining_seconds:.1f}s", True, WHITE
         )
         info_text1_rect = info_text1.get_rect().move(info_text_x, info_text_y)
         info_text2_rect = info_text2.get_rect().move(
@@ -222,6 +258,9 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         info_text9_rect = info_text9.get_rect().move(
             info_text_x, info_text_y + 8 * info_text1_rect.height
         )
+        info_text10_rect = info_text10.get_rect().move(
+            info_text_x, info_text_y + 9 * info_text1_rect.height
+        )
 
         game_display.blit(text1, text1_rect)
         game_display.blit(text2, text2_rect)
@@ -245,6 +284,7 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         game_display.blit(info_text7, info_text7_rect)
         game_display.blit(info_text8, info_text8_rect)
         game_display.blit(info_text9, info_text9_rect)
+        game_display.blit(info_text10, info_text10_rect)
 
     def breed_selected():
         nonlocal nn_cars
@@ -252,7 +292,6 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             return False
         session.selected_cars = select_best_cars(
             nn_cars,
-            fitness_config,
             count=2,
         )
         nn_cars = session.breed_population(
@@ -263,19 +302,52 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             assets=assets,
         )
         apply_track_spawn()
+        restart_generation_timer()
         return True
 
-    def redraw_game_window():
-        nonlocal frames
+    def draw_fitness_leaders():
+        if not nn_cars:
+            return
 
-        frames += 1
+        leader_colors = ((255, 215, 0), (80, 200, 255))
+        leaders = select_best_cars(
+            nn_cars,
+            count=min(2, len(nn_cars)),
+        )
+        for rank, (leader, color) in enumerate(
+            zip(leaders, leader_colors, strict=False),
+            start=1,
+        ):
+            center = (round(leader.x), round(leader.y))
+            radius = round(max(leader.width, leader.height) / 2) + 10
+            pygame.draw.circle(game_display, color, center, radius, width=4)
+
+            label = font.render(
+                f"TOP {rank}  Fitness: {leader.fitness_score:.1f}",
+                True,
+                color,
+            )
+            label_rect = label.get_rect(
+                midbottom=(center[0], center[1] - radius - 5)
+            )
+            pygame.draw.rect(
+                game_display,
+                (0, 0, 0),
+                label_rect.inflate(8, 4),
+                border_radius=4,
+            )
+            game_display.blit(label, label_rect)
+
+    def redraw_game_window():
         game_display.blit(bg, (0, 0))
 
         for nn_car in nn_cars:
             if not nn_car.collided:
-                step_result = simulator.step(nn_car, score_frame)
+                step_result = simulator.step(nn_car, fitness_strategy.score_frame)
                 if step_result.telemetry.collided:
                     session.mark_collision(nn_car)
+
+        for nn_car in nn_cars:
             nn_car.draw(game_display)
 
         if session.show_player:
@@ -285,6 +357,8 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
                 car.refresh_track_state(track)
             car.draw(game_display)
 
+        draw_fitness_leaders()
+
         shell.current_scene.render_overlay(game_display, font)
         if session.show_debug_overlay:
             display_texts()
@@ -292,6 +366,8 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         mouse_pos = pygame.mouse.get_pos()
         back_button.update_hover(mouse_pos)
         back_button.draw(game_display, font)
+        next_gen_button.update_hover(mouse_pos)
+        next_gen_button.draw(game_display, font)
         if new_map_button is not None:
             new_map_button.update_hover(mouse_pos)
             new_map_button.draw(game_display, font)
@@ -311,16 +387,20 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         set_collision_map(bg4)
         configure_car(bg4, assets.white_small_car, MAX_SPEED)
         apply_track_spawn(reset_player=True)
+        restart_generation_timer()
 
     def save_training_record():
-        best_car = select_best_car(nn_cars, fitness_config)
-        payload = export_weight_payload(
-            best_car,
+        top2 = select_best_cars(nn_cars, count=2)
+        parent_a = top2[0]
+        parent_b = top2[1] if len(top2) >= 2 else top2[0]
+        common = dict(
             generation=session.generation,
             track_id=f"training-{map_difficulty}",
             track_seed=settings.track_seed,
             nickname=profile.username,
         )
+        pa_payload = export_weight_payload(parent_a, **common)
+        pb_payload = export_weight_payload(parent_b, **common)
         record_name = run_record_name_screen(screen)
         record = TrainingRecord(
             record_id="",
@@ -328,9 +408,11 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             saved_at=datetime.now(UTC).isoformat(),
             group_id=profile.group_id,
             username=profile.username,
-            layer_sizes=payload.layer_sizes,
-            weights=payload.weights,
-            biases=payload.biases,
+            layer_sizes=pa_payload.layer_sizes,
+            parent_a_weights=pa_payload.weights,
+            parent_a_biases=pa_payload.biases,
+            parent_b_weights=pb_payload.weights,
+            parent_b_biases=pb_payload.biases,
             fitness_config=fitness_config,
             map_difficulty=map_difficulty,
         )
@@ -385,8 +467,11 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
                     session.reset_generation()
                     nn_cars.clear()
                     for _ in range(session.population_size):
-                        nn_cars.append(Car(layer_sizes))
+                        nn_cars.append(
+                            Car(layer_sizes, mlp_init_rng=session.mlp_init_rng)
+                        )
                     apply_track_spawn(reset_player=True, reset_images=True)
+                    restart_generation_timer()
                 if event.key == ord("0"):
                     session.mutation_rate = 0
                 if event.key == ord("1"):
@@ -416,6 +501,8 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
                         leave_requested = True
                     elif new_map_button is not None and new_map_button.contains(pos):
                         do_new_random_map()
+                    elif next_gen_button.contains(pos):
+                        breed_selected()
                     else:
                         point = Point(pos[0], pos[1])
                         for nn_car in nn_cars:
@@ -469,4 +556,6 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             car.set_accel(-0.2)
 
         redraw_game_window()
+        if session.should_end_generation(generation_elapsed_seconds()):
+            breed_selected()
         clock.tick(settings.fps)

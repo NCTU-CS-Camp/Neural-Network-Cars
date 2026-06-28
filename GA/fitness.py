@@ -6,8 +6,6 @@ from game_engine.backend.simulator import FrameTelemetry
 from shared.contracts import FitnessConfig
 
 
-REWARD_NAMES = ("speed", "progress", "centered", "alignment", "safety")
-PENALTY_NAMES = ("stall", "spin", "wrong_way", "time", "crash")
 FITNESS_NAMES = frozenset(FitnessConfig.weight_names())
 
 
@@ -35,7 +33,25 @@ def _penalty_weight(value: int | float) -> float:
     return max(0.0, float(value)) / 100.0
 
 
-def beginner_mix(
+@dataclass(frozen=True, slots=True)
+class FitnessStrategy:
+    name: str
+    config: FitnessConfig
+
+    def copy(self) -> "FitnessStrategy":
+        return type(self)(
+            name=self.name,
+            config=self.config.copy(),
+        )
+
+    def score_frame(self, telemetry: FrameTelemetry) -> float:
+        return self.explain_frame(telemetry).total
+
+    def explain_frame(self, telemetry: FrameTelemetry) -> FitnessBreakdown:
+        return calculate_score(telemetry, self.config)
+
+
+def calculate_score(
     telemetry: FrameTelemetry,
     fitness_config: FitnessConfig,
 ) -> FitnessBreakdown:
@@ -122,21 +138,86 @@ def beginner_mix(
     )
 
 
+# Preset objects. Call copy() before changing config values for a user session.
+BeginnerMix = FitnessStrategy(
+    name="BeginnerMix",
+    config=FitnessConfig(
+        speed=25,
+        progress=10,
+        centered=35,
+        alignment=40,
+        safety=25,
+        stall=20,
+        spin=15,
+        wrong_way=40,
+        time=5,
+        crash=50,
+    ),
+)
+
+ProgressFirst = FitnessStrategy(
+    name="ProgressFirst",
+    config=FitnessConfig(
+        speed=30,
+        progress=20,
+        centered=10,
+        alignment=25,
+        safety=10,
+        stall=15,
+        spin=10,
+        wrong_way=35,
+        time=3,
+        crash=35,
+    ),
+)
+
+SafeFinish = FitnessStrategy(
+    name="SafeFinish",
+    config=FitnessConfig(
+        speed=15,
+        progress=10,
+        centered=60,
+        alignment=60,
+        safety=50,
+        stall=20,
+        spin=25,
+        wrong_way=70,
+        time=5,
+        crash=90,
+    ),
+)
+
+Equal50Debug = FitnessStrategy(
+    name="Equal50Debug",
+    config=FitnessConfig(weights={name: 50 for name in FitnessConfig.weight_names()}),
+)
+
+FITNESS_STRATEGIES: tuple[FitnessStrategy, ...] = (
+    BeginnerMix,
+    ProgressFirst,
+    SafeFinish,
+    Equal50Debug,
+)
+
+
+def fitness_strategy_names() -> tuple[str, ...]:
+    return tuple(strategy.name for strategy in FITNESS_STRATEGIES)
+
+
+def get_fitness_strategy(name: str) -> FitnessStrategy:
+    for strategy in FITNESS_STRATEGIES:
+        if strategy.name == name:
+            return strategy.copy()
+    raise ValueError(f"Unknown fitness strategy: {name}")
+
+
 def score_with_config(car: object, fitness_config: FitnessConfig) -> float:
     validate_fitness_config(fitness_config)
     return float(getattr(car, "fitness_score", 0.0))
 
 
-def score_population(
-    population: list[object],
-    fitness_config: FitnessConfig,
-) -> list[float]:
-    return [score_with_config(car, fitness_config) for car in population]
-
-
 def select_best_cars(
     population: list[object],
-    fitness_config: FitnessConfig,
     *,
     count: int,
 ) -> list[object]:
@@ -144,16 +225,8 @@ def select_best_cars(
         raise ValueError("count must be positive")
     if len(population) < count:
         raise ValueError("population does not contain enough cars")
-    validate_fitness_config(fitness_config)
     return sorted(
         population,
         key=lambda car: float(getattr(car, "fitness_score", 0.0)),
         reverse=True,
     )[:count]
-
-
-def select_best_car(
-    population: list[object],
-    fitness_config: FitnessConfig,
-) -> object:
-    return select_best_cars(population, fitness_config, count=1)[0]

@@ -4,7 +4,13 @@ from typing import Literal
 
 import pygame
 
-from GA.fitness import score_with_config
+from GA.fitness import (
+    BeginnerMix,
+    FitnessStrategy,
+    fitness_strategy_names,
+    get_fitness_strategy,
+    score_with_config,
+)
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car
 from game_engine.backend.record_store import RecordStore
@@ -27,7 +33,7 @@ class AppQuit(Exception):
 
 GROUP_COUNT = 10
 MenuChoice = Literal["training", "validation"]
-TrainingConfigResult = tuple[FitnessConfig, int, TrainingRecord | None]
+TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None]
 
 BONUS_FITNESS_PLACEHOLDERS = [
     "speed",
@@ -200,10 +206,12 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     fitness_top = back_button.rect.bottom + M
     fitness_bottom = H - M
     dropdown_h = max(34, H // 26)
+    selected_strategy = BeginnerMix.copy()
     preset_dropdown = Dropdown(
         pygame.Rect(right_x + M, fitness_top, right_w - M * 2, dropdown_h),
-        FitnessConfig.preset_names(),
+        fitness_strategy_names(),
         placeholder="載入 Fitness preset",
+        selected=selected_strategy.name,
     )
     sliders_top = preset_dropdown.rect.bottom + M // 2
     fitness_step = (fitness_bottom - sliders_top) // 10
@@ -217,7 +225,7 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
             ),
             0,
             100,
-            50,
+            int(selected_strategy.config.get_weight(name)),
         )
         for i, name in enumerate(BONUS_FITNESS_PLACEHOLDERS)
     }
@@ -231,7 +239,7 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
             ),
             0,
             100,
-            50,
+            int(selected_strategy.config.get_weight(name)),
         )
         for i, name in enumerate(PENALTY_FITNESS_PLACEHOLDERS)
     }
@@ -284,11 +292,11 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
                     include_options=dropdown_was_open,
                 )
             )
-            selected_preset = preset_dropdown.handle_event(event)
-            if selected_preset is not None:
-                preset = FitnessConfig.from_preset(selected_preset)
+            selected_strategy_name = preset_dropdown.handle_event(event)
+            if selected_strategy_name is not None:
+                selected_strategy = get_fitness_strategy(selected_strategy_name)
                 for name, slider in all_sliders.items():
-                    slider.value = int(preset.get_weight(name))
+                    slider.value = int(selected_strategy.config.get_weight(name))
 
             if not dropdown_captured_click:
                 for slider in all_sliders.values():
@@ -317,7 +325,8 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
 
                 if go_button.contains(pos) and go_enabled():
                     weights = {name: s.value for name, s in all_sliders.items()}
-                    return FitnessConfig(weights=weights), selected_difficulty, selected_record
+                    selected_strategy.config.update_weights(weights)
+                    return selected_strategy, selected_difficulty, selected_record
 
         mouse_pos = pygame.mouse.get_pos()
         back_button.update_hover(mouse_pos)
