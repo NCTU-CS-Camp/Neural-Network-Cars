@@ -25,6 +25,12 @@ FPS = 30
 MAX_SPEED = 10
 TRACK_HALF_WIDTH = 66.0
 
+# Validation run length. Kept as a config knob because the termination rule is
+# expected to change later (e.g. stagnation / first-completion); for now a flat
+# time limit is the only criterion implemented.
+VALIDATION_TIME_LIMIT_SECONDS = 90
+VALIDATION_FRAME_LIMIT = VALIDATION_TIME_LIMIT_SECONDS * FPS  # 90s @ 30fps = 2700 ticks
+
 WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 128)
@@ -54,10 +60,11 @@ TRAINING_DIFFICULTY_MAPS: dict[int, tuple[Path, Path, Path]] = {
     ),  # random, generated at runtime
 }
 
-VALIDATION_DIFFICULTY_MAPS: dict[int, tuple[Path, Path]] = {
-    1: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
-    2: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
-    3: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
+# Validation maps mirror the training hookup (front for display, back for
+# collision). Scoring checkpoints come from the matching valid_{id}.json.
+VALIDATION_DIFFICULTY_MAPS: dict[str, tuple[Path, Path]] = {
+    "easy": (VALID_MAPS_DIR / "valid_easy.png", VALID_MAPS_DIR / "valid_easy_back.png"),
+    "hard": (VALID_MAPS_DIR / "valid_hard.png", VALID_MAPS_DIR / "valid_hard_back.png"),
 }
 
 # UI text is mostly Traditional Chinese; a CJK-capable font is required or

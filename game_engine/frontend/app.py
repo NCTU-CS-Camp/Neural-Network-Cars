@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import numpy as np
 import pygame
 from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
@@ -39,10 +40,26 @@ from game_engine.frontend.widgets import Button
 from shared.contracts import TrainingRecord
 
 
+def _car_from_flat_weights(
+    layer_sizes: list[int],
+    flat_weights: list[list[float]],
+    flat_biases: list[list[float]],
+) -> Car:
+    """Reconstruct a Car from the flat weight/bias lists stored in a TrainingRecord."""
+    car = Car(layer_sizes)
+    for i in range(len(layer_sizes) - 1):
+        rows, cols = layer_sizes[i + 1], layer_sizes[i]
+        car.weights[i] = np.array(flat_weights[i]).reshape(rows, cols)
+        car.biases[i] = np.array(flat_biases[i]).reshape(rows, 1)
+    return car
+
+
 def run():
     pygame.init()
     info = pygame.display.Info()
-    screen = pygame.display.set_mode((info.current_w - 40, info.current_h - 80))
+    win_w = int(info.current_w * 0.9)
+    win_h = int(info.current_h * 0.9)
+    screen = pygame.display.set_mode((win_w, win_h))
 
     try:
         profile = load_login_profile() or run_login_screen(screen)
@@ -57,7 +74,7 @@ def run():
                     fitness_config, map_difficulty, parent_record = result
                     if map_difficulty == 3:
                         generate_random_map(screen)
-                    run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
+                    run_training_loop(screen, settings, profile, fitness_config, map_difficulty, parent_record)
             else:
                 run_validation_list_screen(screen, profile.server_url)
     except AppQuit:
@@ -66,7 +83,7 @@ def run():
     pygame.quit()
 
 
-def run_training_loop(screen, settings, profile, fitness_config, map_difficulty):
+def run_training_loop(screen, settings, profile, fitness_config, map_difficulty, parent_record: TrainingRecord | None = None):
     session = TrainingSession.from_settings(settings)
     shell = AppShell(settings)
 
@@ -88,9 +105,31 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
     aux_car = Car(layer_sizes)
     nn_cars = [Car(layer_sizes) for _ in range(session.population_size)]
 
+    if parent_record is not None:
+        saved_pa = _car_from_flat_weights(
+            layer_sizes, parent_record.parent_a_weights, parent_record.parent_a_biases
+        )
+        saved_pb = _car_from_flat_weights(
+            layer_sizes, parent_record.parent_b_weights, parent_record.parent_b_biases
+        )
+        session.selected_cars = [saved_pa, saved_pb]
+        nn_cars = session.breed_population(nn_cars, aux_car, Car, layer_sizes, assets)
+        session.generation = 1
+
     W, H = screen.get_size()
     back_button = Button("Back (Esc)", pygame.Rect(W - 200, 16, 180, 44))
     new_map_button = Button("新地圖 (M)", pygame.Rect(W - 200, 70, 180, 44)) if map_difficulty == 3 else None
+
+    # Virtual canvas at the map's native resolution; rendered then scaled to the
+    # physical window. This keeps car coordinates correct (they live in 1600×900
+    # space) while the window can be any size.
+    MAP_W, MAP_H = 1600, 900
+    map_canvas = pygame.Surface((MAP_W, MAP_H))
+    _map_scale = min(W / MAP_W, H / MAP_H)
+    _map_dst_w = int(MAP_W * _map_scale)
+    _map_dst_h = int(MAP_H * _map_scale)
+    _map_dst_x = (W - _map_dst_w) // 2
+    _map_dst_y = (H - _map_dst_h) // 2
 
     info_x = max(W - 235, 1200)
     info_y = 600
@@ -253,7 +292,8 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         nonlocal frames
 
         frames += 1
-        game_display.blit(bg, (0, 0))
+        # Draw map + cars on the 1600×900 virtual canvas.
+        map_canvas.blit(bg, (0, 0))
 
         for nn_car in nn_cars:
             if not nn_car.collided:
@@ -266,16 +306,24 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             else:
                 nn_car.feedforward()
                 nn_car.takeAction()
-            nn_car.draw(game_display)
+            nn_car.draw(map_canvas)
 
         if session.show_player:
             car.update()
             if car.collision():
                 car.resetPosition()
                 car.update()
-            car.draw(game_display)
+            car.draw(map_canvas)
 
-        shell.current_scene.render_overlay(game_display, font)
+        shell.current_scene.render_overlay(map_canvas, font)
+
+        # Scale the game canvas to the physical window, then draw UI on top.
+        game_display.fill((0, 0, 0))
+        game_display.blit(
+            pygame.transform.scale(map_canvas, (_map_dst_w, _map_dst_h)),
+            (_map_dst_x, _map_dst_y),
+        )
+
         if session.show_debug_overlay:
             display_texts()
 

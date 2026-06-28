@@ -4,7 +4,6 @@ from typing import Any, Literal
 
 import pygame
 
-from GA.fitness import FITNESS_STRATEGIES, score_with_config
 from GA.genetic import (
     mutateOneBiasesGene,
     mutateOneWeightGene,
@@ -13,17 +12,25 @@ from GA.genetic import (
 )
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car
-from game_engine.backend.competition_maps import load_competition_map
+from game_engine.backend.competition_maps import (
+    CompetitionMap,
+    load_competition_map,
+    load_validation_map,
+)
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import apply_weight_payload, export_weight_payload
 from game_engine.backend.settings import (
     BLACK,
-    CJK_FONT_PATH,
+    FONT_PATH,
     MAX_SPEED,
+    TRACK_BACK_PATH,
+    TRACK_FRONT_PATH,
     TRAINING_DIFFICULTY_MAPS,
     VALIDATION_DIFFICULTY_MAPS,
+    VALIDATION_FRAME_LIMIT,
     WHITE,
 )
+from game_engine.backend.track_generator import generate_random_map
 from game_engine.frontend.competition_client import (
     EligibilityResult,
     NetworkError,
@@ -58,6 +65,10 @@ _REASON_MESSAGES = {
 # that record's car, not breed something new from it.
 UPLOAD_MUTATION_RATE = 5
 
+# Validation breeds a fresh generation from the record's two parents to probe
+# generalization, so it mutates more aggressively than the upload resubmit path.
+VALIDATION_MUTATION_RATE = 15
+
 
 class AppQuit(Exception):
     """Raised when the user closes the window from within a blocking screen."""
@@ -85,7 +96,7 @@ PENALTY_FITNESS_PLACEHOLDERS = [
 
 
 def _font(size: int = 22) -> pygame.font.Font:
-    return pygame.font.Font(CJK_FONT_PATH, size)
+    return pygame.font.Font(str(FONT_PATH), size)
 
 
 def _check_quit(event: pygame.event.Event) -> None:
@@ -435,6 +446,7 @@ def run_record_name_screen(screen: pygame.Surface) -> str:
 
     name_input = TextInput(pygame.Rect(width // 2 - 200, height // 2, 400, 48))
     name_input.active = True
+    pygame.key.start_text_input()
     confirm_button = Button("確認", pygame.Rect(width // 2 - 80, height // 2 + 80, 160, 56))
 
     while True:
@@ -462,32 +474,47 @@ def run_record_name_screen(screen: pygame.Surface) -> str:
         clock.tick(30)
 
 
+def _rebuild_car(
+    layer_sizes: list[int],
+    weights: list[list[float]],
+    biases: list[list[float]],
+    nickname: str,
+) -> Car:
+    """Reconstruct a Car from saved flat weight/bias payloads."""
+    car = Car(layer_sizes)
+    payload = WeightPayload(
+        model_version="v1",
+        layer_sizes=layer_sizes,
+        weights=weights,
+        biases=biases,
+        fitness_score=0.0,
+        generation=0,
+        track_id="rebuild",
+        track_seed=0,
+        nickname=nickname,
+    )
+    apply_weight_payload(car, payload)
+    return car
+
+
 def _run_record_submission_screen(
     screen: pygame.Surface, server_url: str, record: TrainingRecord
 ) -> None:
-    """Upload entry point: rebuild the record's car and run the same
-    competition submission flow used during live training, just with
-    parent_a == parent_b == this record's car (it's the only model we have)."""
-    car = Car(record.layer_sizes)
-    payload = WeightPayload(
-        model_version="v1",
-        layer_sizes=record.layer_sizes,
-        weights=record.parent_a_weights,
-        biases=record.parent_a_biases,
-        fitness_score=0.0,
-        generation=0,
-        track_id="upload",
-        track_seed=0,
-        nickname=record.username,
+    """Upload entry point: rebuild the record's two parents and run the same
+    competition submission flow used during live training."""
+    parent_a = _rebuild_car(
+        record.layer_sizes, record.parent_a_weights, record.parent_a_biases, record.username
     )
-    apply_weight_payload(car, payload)
+    parent_b = _rebuild_car(
+        record.layer_sizes, record.parent_b_weights, record.parent_b_biases, record.username
+    )
     run_submission_screen(
         screen,
         server_url,
         record.group_id,
         record.username,
-        car,
-        car,
+        parent_a,
+        parent_b,
         record.layer_sizes,
         UPLOAD_MUTATION_RATE,
     )
@@ -522,48 +549,16 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
             delete_button.update_hover(mouse_pos)
             rows.append((record, validate_button, upload_button, delete_button))
 
-        hovered_row = next((row for row in rows if row[1].hovered), None)
-        difficulty_buttons: list[tuple[int, Button]] = []
-        if hovered_row is not None:
-            validate_button = hovered_row[1]
-            difficulty_buttons = [
-                (
-                    difficulty,
-                    Button(
-                        "*" * difficulty,
-                        pygame.Rect(
-                            validate_button.rect.x,
-                            validate_button.rect.bottom + 6 + offset * 46,
-                            validate_button.rect.width,
-                            40,
-                        ),
-                    ),
-                )
-                for offset, difficulty in enumerate(VALIDATION_DIFFICULTY_MAPS)
-            ]
-            for _, button in difficulty_buttons:
-                button.update_hover(mouse_pos)
-
         for event in pygame.event.get():
             _check_quit(event)
             if event.type != pygame.MOUSEBUTTONDOWN:
                 continue
             if back_button.contains(event.pos):
                 return
-            if hovered_row is not None:
-                clicked_difficulty = next(
-                    (
-                        difficulty
-                        for difficulty, button in difficulty_buttons
-                        if button.contains(event.pos)
-                    ),
-                    None,
-                )
-                if clicked_difficulty is not None:
-                    run_validate_replay_screen(screen, hovered_row[0], clicked_difficulty)
-                    continue
             for record, validate_button, upload_button, delete_button in rows:
-                if upload_button.contains(event.pos):
+                if validate_button.contains(event.pos):
+                    _run_record_validation_screen(screen, record)
+                elif upload_button.contains(event.pos):
                     _run_record_submission_screen(screen, server_url, record)
                 elif delete_button.contains(event.pos):
                     store.delete_record(record.record_id)
@@ -581,9 +576,6 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
             validate_button.draw(screen, font)
             upload_button.draw(screen, font)
             delete_button.draw(screen, font)
-        if hovered_row is not None:
-            for _, button in difficulty_buttons:
-                button.draw(screen, font)
         if message:
             screen.blit(font.render(message, True, (120, 220, 120)), (60, height - 60))
 
@@ -591,62 +583,95 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
         clock.tick(30)
 
 
-def run_validate_replay_screen(
-    screen: pygame.Surface, record: TrainingRecord, difficulty: int
-) -> None:
+def _pick_validation_map_screen(screen: pygame.Surface) -> str | None:
+    """Easy / Hard / Random picker with map previews, mirroring the submission
+    competition picker and the training-config map cards."""
     clock = pygame.time.Clock()
-    font = _font(20)
+    W, H = screen.get_size()
+    font = _font(max(16, H // 40))
+    title_font = _font(max(20, H // 30))
+    M = max(16, W // 100)
 
-    front_path, back_path = VALIDATION_DIFFICULTY_MAPS[difficulty]
-    track_front = pygame.image.load(front_path)
-    track_back = pygame.image.load(back_path)
-    assets = load_game_assets()
-    configure_car(track_back, assets.white_small_car, MAX_SPEED)
+    back_button = Button("← 返回", pygame.Rect(M, M, max(100, W // 14), max(36, H // 24)))
 
-    car = Car(record.layer_sizes)
-    payload = WeightPayload(
-        model_version="v1",
-        layer_sizes=record.layer_sizes,
-        weights=record.weights,
-        biases=record.biases,
-        fitness_score=0.0,
-        generation=0,
-        track_id=f"validation-{difficulty}",
-        track_seed=0,
-        nickname=record.username,
+    card_area_top = back_button.rect.bottom + M * 3
+    CARD_W = (W - M * 4) // 3
+    CARD_H = min(H // 2, CARD_W)
+    THUMB_W = CARD_W - M * 2
+    THUMB_H = THUMB_W * 9 // 16
+    easy_thumb = pygame.transform.scale(
+        pygame.image.load(str(VALIDATION_DIFFICULTY_MAPS["easy"][0])), (THUMB_W, THUMB_H)
     )
-    apply_weight_payload(car, payload)
-
-    finished = False
-    final_score = 0.0
-    back_button = Button("返回列表", pygame.Rect(60, 40, 160, 48))
+    hard_thumb = pygame.transform.scale(
+        pygame.image.load(str(VALIDATION_DIFFICULTY_MAPS["hard"][0])), (THUMB_W, THUMB_H)
+    )
+    cards: list[tuple[str, str, pygame.Surface | None, pygame.Rect]] = [
+        ("easy", "Easy", easy_thumb, pygame.Rect(M, card_area_top, CARD_W, CARD_H)),
+        ("hard", "Hard", hard_thumb, pygame.Rect(M * 2 + CARD_W, card_area_top, CARD_W, CARD_H)),
+        ("random", "隨機", None, pygame.Rect(M * 3 + CARD_W * 2, card_area_top, CARD_W, CARD_H)),
+    ]
 
     while True:
         for event in pygame.event.get():
             _check_quit(event)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if back_button.contains(event.pos):
+                    return None
+                for map_id, _, _, rect in cards:
+                    if rect.collidepoint(event.pos):
+                        return map_id
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return
-            if event.type == pygame.MOUSEBUTTONDOWN and finished and back_button.contains(event.pos):
-                return
+                return None
 
-        if not finished:
-            car.update()
-            if car.collision():
-                finished = True
-                final_score = score_with_config(car, record.fitness_config)
+        mouse_pos = pygame.mouse.get_pos()
+        back_button.update_hover(mouse_pos)
+
+        screen.fill(BLACK)
+        back_button.draw(screen, font)
+        screen.blit(title_font.render("選擇 Validation 地圖", True, WHITE),
+                    (M, back_button.rect.bottom + M))
+        for map_id, label, thumb, rect in cards:
+            hovered = rect.collidepoint(mouse_pos)
+            border_color = (110, 110, 110) if hovered else (55, 55, 55)
+            fill_color = (28, 28, 28) if hovered else (18, 18, 18)
+            pygame.draw.rect(screen, fill_color, rect, border_radius=10)
+            pygame.draw.rect(screen, border_color, rect, 2, border_radius=10)
+            img_rect = pygame.Rect(rect.x + M, rect.y + M, THUMB_W, THUMB_H)
+            if thumb is not None:
+                screen.blit(thumb, img_rect)
+                pygame.draw.rect(screen, (50, 50, 50), img_rect, 1)
             else:
-                car.feedforward()
-                car.takeAction()
-
-        screen.blit(track_front, (0, 0))
-        car.draw(screen)
-        if finished:
-            screen.blit(font.render(f"Score: {final_score:.2f}", True, WHITE), (60, 100))
-            back_button.update_hover(pygame.mouse.get_pos())
-            back_button.draw(screen, font)
+                pygame.draw.rect(screen, (22, 22, 32), img_rect, border_radius=4)
+                rng_surf = font.render("隨機生成", True, (140, 140, 200))
+                screen.blit(rng_surf, rng_surf.get_rect(center=img_rect.center))
+            label_surf = font.render(label, True, WHITE)
+            screen.blit(label_surf, label_surf.get_rect(centerx=rect.centerx, y=img_rect.bottom + M))
 
         pygame.display.update()
         clock.tick(30)
+
+
+def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord) -> None:
+    """Validation entry point: pick a map, breed one generation from the
+    record's two parents, race all candidates, then show the run metrics."""
+    map_id = _pick_validation_map_screen(screen)
+    if map_id is None:
+        return
+
+    parent_a = _rebuild_car(
+        record.layer_sizes, record.parent_a_weights, record.parent_a_biases, record.username
+    )
+    parent_b = _rebuild_car(
+        record.layer_sizes, record.parent_b_weights, record.parent_b_biases, record.username
+    )
+
+    outcome = _run_validation_tournament_screen(
+        screen, map_id, parent_a, parent_b, record.layer_sizes
+    )
+    if outcome is None:
+        return
+    client_result, survival_ticks = outcome
+    _validation_result_screen(screen, map_id, client_result, survival_ticks)
 
 
 def _clone_car(source: Any, layer_sizes: list[int]) -> Car:
@@ -774,34 +799,40 @@ def _check_eligibility_screen(
         clock.tick(30)
 
 
-def _run_candidate_tournament_screen(
+def _simulate_candidates(
     screen: pygame.Surface,
-    competition_id: str,
-    parent_a: Any,
-    parent_b: Any,
-    layer_sizes: list[int],
-    mutation_rate: int,
-) -> tuple[Car, ClientResult] | None:
+    track_front: pygame.Surface,
+    track_back: pygame.Surface,
+    spawn: dict[str, float],
+    candidates: list[Car],
+    car_image: pygame.Surface,
+    frame_limit: int,
+    trackers: list[Any] | None,
+    title: str,
+) -> list[int] | None:
+    """Race every candidate on one track until all are eliminated/finished or
+    the frame limit hits. Advances `trackers` in place when provided. Returns
+    each candidate's survival tick count (or None if the user pressed ESC)."""
     clock = pygame.time.Clock()
     font = _font(20)
 
-    assets = load_game_assets()
-    competition_map = load_competition_map(competition_id)
-    track_front = pygame.image.load(competition_map.front_path)
-    track_back = pygame.image.load(competition_map.back_path)
-    configure_car(track_back, assets.white_small_car, MAX_SPEED)
-
-    candidates = _build_candidates(parent_a, parent_b, layer_sizes, mutation_rate)
-    spawn = competition_map.spawn
+    configure_car(track_back, car_image, MAX_SPEED)
     for car in candidates:
-        car.reset_state(spawn["x"], spawn["y"], spawn["angle"], car_image=assets.white_small_car)
+        car.reset_state(spawn["x"], spawn["y"], spawn["angle"], car_image=car_image)
 
-    trackers = [competition_map.new_tracker() for _ in candidates]
     previous_positions = [car.center for car in candidates]
     active = [True] * len(candidates)
+    survival = [frame_limit] * len(candidates)
+
+    MAP_W, MAP_H = track_front.get_size()
+    SCR_W, SCR_H = screen.get_size()
+    scale = min(SCR_W / MAP_W, SCR_H / MAP_H)
+    dst_w, dst_h = int(MAP_W * scale), int(MAP_H * scale)
+    dst_x, dst_y = (SCR_W - dst_w) // 2, (SCR_H - dst_h) // 2
+    canvas = pygame.Surface((MAP_W, MAP_H))
 
     tick = 0
-    while tick < FRAME_LIMIT and any(active):
+    while tick < frame_limit and any(active):
         for event in pygame.event.get():
             _check_quit(event)
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
@@ -815,25 +846,33 @@ def _run_candidate_tournament_screen(
             car.update()
             if car.collision():
                 active[index] = False
+                survival[index] = tick
             else:
                 car.feedforward()
                 car.takeAction()
-            trackers[index].advance(previous, car.center, tick=tick)
+            if trackers is not None:
+                trackers[index].advance(previous, car.center, tick=tick)
+                if trackers[index].completed:
+                    active[index] = False
             previous_positions[index] = car.center
-            if trackers[index].completed:
-                active[index] = False
 
-        screen.blit(track_front, (0, 0))
+        canvas.blit(track_front, (0, 0))
         for car in candidates:
-            car.draw(screen)
-        screen.blit(
-            font.render(f"Tick {tick}/{FRAME_LIMIT}  Active: {sum(active)}", True, WHITE),
+            car.draw(canvas)
+        canvas.blit(
+            font.render(f"{title}  Tick {tick}/{frame_limit}  Active: {sum(active)}", True, WHITE),
             (20, 20),
         )
+        screen.fill(BLACK)
+        screen.blit(pygame.transform.scale(canvas, (dst_w, dst_h)), (dst_x, dst_y))
         pygame.display.update()
         clock.tick(30)
 
-    client_results = [
+    return survival
+
+
+def _client_results_from_trackers(trackers: list[Any]) -> list[ClientResult]:
+    return [
         ClientResult(
             completed=tracker.completed,
             lap_ticks=tracker.lap_ticks,
@@ -842,8 +881,141 @@ def _run_candidate_tournament_screen(
         )
         for tracker in trackers
     ]
+
+
+def _run_candidate_tournament_screen(
+    screen: pygame.Surface,
+    competition_id: str,
+    parent_a: Any,
+    parent_b: Any,
+    layer_sizes: list[int],
+    mutation_rate: int,
+) -> tuple[Car, ClientResult] | None:
+    assets = load_game_assets()
+    competition_map = load_competition_map(competition_id)
+    track_front = pygame.image.load(competition_map.front_path)
+    track_back = pygame.image.load(competition_map.back_path)
+
+    candidates = _build_candidates(parent_a, parent_b, layer_sizes, mutation_rate)
+    trackers = [competition_map.new_tracker() for _ in candidates]
+
+    survival = _simulate_candidates(
+        screen,
+        track_front,
+        track_back,
+        competition_map.spawn,
+        candidates,
+        assets.white_small_car,
+        FRAME_LIMIT,
+        trackers,
+        title=f"Competition：{competition_id}",
+    )
+    if survival is None:
+        return None
+
+    client_results = _client_results_from_trackers(trackers)
     winner_index = min(range(len(candidates)), key=lambda i: client_results[i].ranking_key())
     return candidates[winner_index], client_results[winner_index]
+
+
+# Maze random maps share the training spawn for the generated track (number_track==2).
+_RANDOM_MAP_SPAWN = {"x": 140.0, "y": 610.0, "angle": 180.0}
+
+
+def _run_validation_tournament_screen(
+    screen: pygame.Surface,
+    map_id: str,
+    parent_a: Any,
+    parent_b: Any,
+    layer_sizes: list[int],
+) -> tuple[ClientResult | None, int] | None:
+    """Breed 20 green candidates from the two parents and race them on the
+    chosen validation map. easy/hard have checkpoints -> full ClientResult and
+    ranking; random (maze) has none yet -> rank by survival ticks."""
+    assets = load_game_assets()
+    candidates = _build_candidates(parent_a, parent_b, layer_sizes, VALIDATION_MUTATION_RATE)
+
+    if map_id == "random":
+        generate_random_map(screen)
+        track_front = pygame.image.load(TRACK_FRONT_PATH)
+        track_back = pygame.image.load(TRACK_BACK_PATH)
+        spawn = _RANDOM_MAP_SPAWN
+        trackers: list[Any] | None = None
+    else:
+        validation_map = load_validation_map(map_id)
+        track_front = pygame.image.load(validation_map.front_path)
+        track_back = pygame.image.load(validation_map.back_path)
+        spawn = validation_map.spawn
+        trackers = [validation_map.new_tracker() for _ in candidates]
+
+    survival = _simulate_candidates(
+        screen,
+        track_front,
+        track_back,
+        spawn,
+        candidates,
+        assets.green_small_car,
+        VALIDATION_FRAME_LIMIT,
+        trackers,
+        title=f"Validation：{map_id}",
+    )
+    if survival is None:
+        return None
+
+    if trackers is not None:
+        client_results = _client_results_from_trackers(trackers)
+        winner = min(range(len(client_results)), key=lambda i: client_results[i].ranking_key())
+        return client_results[winner], survival[winner]
+
+    winner = max(range(len(survival)), key=lambda i: survival[i])
+    return None, survival[winner]
+
+
+def _validation_result_screen(
+    screen: pygame.Surface,
+    map_id: str,
+    client_result: ClientResult | None,
+    survival_ticks: int,
+) -> None:
+    clock = pygame.time.Clock()
+    font = _font()
+    title_font = _font(32)
+    width, height = screen.get_size()
+
+    back_button = Button("返回列表", pygame.Rect(60, 40, 160, 48))
+
+    if client_result is not None:
+        lines = [
+            f"completed: {client_result.completed}",
+            f"lap_ticks: {client_result.lap_ticks}",
+            f"max_progress: {client_result.max_progress:.1f} px",
+            f"ticks_to_max_progress: {client_result.ticks_to_max_progress}",
+        ]
+        note = ""
+    else:
+        lines = [f"存活 ticks: {survival_ticks}"]
+        note = "此地圖尚無 checkpoint，progress／完賽指標暫不適用"
+
+    while True:
+        for event in pygame.event.get():
+            _check_quit(event)
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return
+            if event.type == pygame.MOUSEBUTTONDOWN and back_button.contains(event.pos):
+                return
+
+        back_button.update_hover(pygame.mouse.get_pos())
+
+        screen.fill(BLACK)
+        screen.blit(title_font.render(f"Validation 成績：{map_id}", True, WHITE), (60, 120))
+        for i, line in enumerate(lines):
+            screen.blit(font.render(line, True, WHITE), (60, 200 + i * 44))
+        if note:
+            screen.blit(font.render(note, True, (220, 200, 120)), (60, 200 + len(lines) * 44 + 16))
+        back_button.draw(screen, font)
+
+        pygame.display.update()
+        clock.tick(30)
 
 
 def _submit_result_screen(

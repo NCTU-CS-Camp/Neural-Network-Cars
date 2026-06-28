@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from game_engine.backend.competition_track import CompetitionRunTracker, load_competition_track_metadata
-from game_engine.backend.settings import MAPS_DIR
+from game_engine.backend.settings import MAPS_DIR, VALID_MAPS_DIR
 from game_engine.backend.track_layout import angle_for_vector, cell_center
 
 
@@ -17,18 +17,19 @@ class CompetitionMap:
     front_path: Path
     back_path: Path
     spawn: dict[str, float]
+    metadata_path: Path
 
     def new_tracker(self) -> CompetitionRunTracker:
-        metadata = load_competition_track_metadata(KAGGLE_MAPS_DIR / f"kaggle_{self.competition_id}.json")
+        metadata = load_competition_track_metadata(self.metadata_path)
         return CompetitionRunTracker(
             checkpoints=metadata.checkpoints,
             total_length_px=metadata.total_length_px,
         )
 
 
-def load_competition_map(competition_id: str) -> CompetitionMap:
-    stem = f"kaggle_{competition_id}"
-    metadata_path = KAGGLE_MAPS_DIR / f"{stem}.json"
+def _load_scoring_map(
+    competition_id: str, front_path: Path, back_path: Path, metadata_path: Path
+) -> CompetitionMap:
     metadata = load_competition_track_metadata(metadata_path)
 
     start_cell = metadata.route_cells[0]
@@ -43,7 +44,28 @@ def load_competition_map(competition_id: str) -> CompetitionMap:
 
     return CompetitionMap(
         competition_id=competition_id,
+        front_path=front_path,
+        back_path=back_path,
+        spawn=spawn,
+        metadata_path=metadata_path,
+    )
+
+
+def load_competition_map(competition_id: str) -> CompetitionMap:
+    stem = f"kaggle_{competition_id}"
+    return _load_scoring_map(
+        competition_id,
         front_path=KAGGLE_MAPS_DIR / f"{stem}.png",
         back_path=KAGGLE_MAPS_DIR / f"{stem}_back.png",
-        spawn=spawn,
+        metadata_path=KAGGLE_MAPS_DIR / f"{stem}.json",
+    )
+
+
+def load_validation_map(map_id: str) -> CompetitionMap:
+    stem = f"valid_{map_id}"
+    return _load_scoring_map(
+        map_id,
+        front_path=VALID_MAPS_DIR / f"{stem}.png",
+        back_path=VALID_MAPS_DIR / f"{stem}_back.png",
+        metadata_path=VALID_MAPS_DIR / f"{stem}.json",
     )
