@@ -185,11 +185,17 @@ def _render_payload(
         stop_on_finish=stop_on_finish,
     )
     stride = max(1, len(result.trajectory) // 200)
+    map_image_path = None
+    if not isinstance(resolved_ref, int):
+        image_path = resolved_ref.with_suffix(".png")
+        if image_path.exists():
+            map_image_path = str(image_path)
     return {
         "seed": track.seed,
         "track_polyline": track.polyline,
         "canvas_size": track.canvas_size,
         "track_half_width": track.half_width,
+        "map_image_path": map_image_path,
         "trajectory": result.trajectory[::stride] or result.trajectory,
         "car_position": result.trajectory[-1],
         "metrics": asdict(result.metrics),

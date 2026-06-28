@@ -25,6 +25,17 @@ def _angle_delta(angle_a: float, angle_b: float) -> float:
     return ((angle_a - angle_b + 180.0) % 360.0) - 180.0
 
 
+def _image_center_offsets(
+    left_clearance: float,
+    right_clearance: float,
+) -> tuple[float, float]:
+    side_total = left_clearance + right_clearance
+    if side_total <= 0.0:
+        return 0.0, 1.0
+    side_balance = abs(left_clearance - right_clearance)
+    return side_balance / 2.0, min(side_balance / side_total, 1.0)
+
+
 @dataclass
 class EpisodeMetrics:
     finished_within_30s: bool
@@ -84,7 +95,7 @@ class SimCar:
                 if not self.track.is_on_track(point):
                     point = _move(point, self.angle + sensor_angle, -1)
                     break
-                point = _move(point, self.angle + sensor_angle, 4)
+                point = _move(point, self.angle + sensor_angle, 10)
             self.sensor_points.append(point)
             self.sensor_distances.append(math.dist((self.x, self.y), point))
         self.progress, self.center_offset = self.track.project((self.x, self.y))
@@ -210,6 +221,14 @@ class Simulator:
             right_clearance = car.sensor_distances[3] if len(car.sensor_distances) > 3 else 0.0
             left_clearance = car.sensor_distances[4] if len(car.sensor_distances) > 4 else 0.0
             side_clearance_balance = abs(right_clearance - left_clearance)
+            if self.track.collision_mask is not None:
+                center_offset, normalized_center_offset = _image_center_offsets(
+                    left_clearance=left_clearance,
+                    right_clearance=right_clearance,
+                )
+            else:
+                center_offset = car.center_offset
+                normalized_center_offset = car.center_offset / self.track.half_width
             turn_amount = abs(_angle_delta(car.angle, previous_angle))
             finished_now = (
                 not finished
@@ -228,8 +247,8 @@ class Simulator:
                     velocity=car.velocity,
                     progress_delta=progress_delta,
                     progress_ratio=progress_ratio,
-                    center_offset=car.center_offset,
-                    normalized_center_offset=car.center_offset / self.track.half_width,
+                    center_offset=center_offset,
+                    normalized_center_offset=normalized_center_offset,
                     heading_alignment=heading_alignment,
                     front_clearance=front_clearance,
                     min_clearance=min_clearance,

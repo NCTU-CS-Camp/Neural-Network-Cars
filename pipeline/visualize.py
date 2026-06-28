@@ -4,6 +4,7 @@ from html import escape
 import math
 from pathlib import Path
 import queue
+import shutil
 import time
 from typing import Any
 
@@ -46,10 +47,25 @@ def _map_key(title: str, render: dict[str, Any] | None) -> str:
     return f"{title}:{render['seed']}"
 
 
+def _dashboard_image_href(map_image_path: str, dashboard_dir: Path) -> str:
+    source = Path(map_image_path)
+    if not source.exists():
+        return source.as_posix()
+
+    assets_dir = dashboard_dir / "dashboard_assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    asset_name = f"{source.parent.name}_{source.name}"
+    target = assets_dir / asset_name
+    if not target.exists() or target.stat().st_size != source.stat().st_size:
+        shutil.copy2(source, target)
+    return target.relative_to(dashboard_dir).as_posix()
+
+
 def _render_game_view(
     title: str,
     render: dict[str, Any] | None,
     best_entry: dict[str, Any] | None = None,
+    dashboard_dir: Path | None = None,
 ) -> str:
     if not render:
         return f"""
@@ -70,20 +86,39 @@ def _render_game_view(
     metrics = render["metrics"]
     start_x, start_y = render["track_polyline"][0]
     finish_x, finish_y = render["track_polyline"][-1]
+    map_image_path = render.get("map_image_path")
+    map_image = ""
+    if map_image_path:
+        path = Path(map_image_path)
+        if dashboard_dir is not None:
+            href = _dashboard_image_href(map_image_path, dashboard_dir)
+        else:
+            href = path.as_posix()
+        map_image = (
+            f'<image href="{escape(href)}" xlink:href="{escape(href)}" x="0" y="0" '
+            f'width="{width}" height="{height}" preserveAspectRatio="xMidYMid meet" />'
+        )
+    simplified_track = "" if map_image else f"""
+    <rect width="100%" height="100%" fill="#102016" />
+    <rect width="100%" height="100%" fill="url(#grid-{escape(title).replace(" ", "-")})" />
+    <polyline points="{track_points}" fill="none" stroke="#2f3338" stroke-width="{render["track_half_width"] * 2:.2f}" stroke-linecap="round" stroke-linejoin="round" />
+    <polyline points="{track_points}" fill="none" stroke="#4b5058" stroke-width="{max(render["track_half_width"] * 1.55, 1):.2f}" stroke-linecap="round" stroke-linejoin="round" />
+"""
+    centerline = f"""
+    <polyline points="{track_points}" fill="none" stroke="#ffffff" stroke-width="4" stroke-dasharray="12 14" stroke-linecap="round" stroke-linejoin="round" opacity="0.88" />
+    <polyline points="{track_points}" fill="none" stroke="#111827" stroke-width="1.5" stroke-dasharray="12 14" stroke-linecap="round" stroke-linejoin="round" opacity="0.75" />
+"""
     return f"""
 <div class="game-card">
   <div class="game-title">{escape(title)} <span>seed {render["seed"]}</span></div>
-  <svg viewBox="0 0 {width} {height}" class="game-screen" role="img" aria-label="{escape(title)} game view">
+  <svg viewBox="0 0 {width} {height}" class="game-screen" role="img" aria-label="{escape(title)} game view" xmlns:xlink="http://www.w3.org/1999/xlink">
     <defs>
       <pattern id="grid-{escape(title).replace(" ", "-")}" width="60" height="60" patternUnits="userSpaceOnUse">
         <path d="M 60 0 L 0 0 0 60" fill="none" stroke="rgba(255,255,255,0.045)" stroke-width="2" />
       </pattern>
     </defs>
-    <rect width="100%" height="100%" fill="#102016" />
-    <rect width="100%" height="100%" fill="url(#grid-{escape(title).replace(" ", "-")})" />
-    <polyline points="{track_points}" fill="none" stroke="#2f3338" stroke-width="{render["track_half_width"] * 2:.2f}" stroke-linecap="round" stroke-linejoin="round" />
-    <polyline points="{track_points}" fill="none" stroke="#4b5058" stroke-width="{max(render["track_half_width"] * 1.55, 1):.2f}" stroke-linecap="round" stroke-linejoin="round" />
-    <polyline points="{track_points}" fill="none" stroke="#e8e8dc" stroke-width="3" stroke-dasharray="14 16" stroke-linecap="round" stroke-linejoin="round" opacity="0.75" />
+    {map_image or simplified_track}
+    {centerline}
     <circle cx="{start_x:.2f}" cy="{start_y:.2f}" r="14" fill="#38d97b" stroke="#0b1b12" stroke-width="4" />
     <circle cx="{finish_x:.2f}" cy="{finish_y:.2f}" r="14" fill="#ffd166" stroke="#261f0a" stroke-width="4" />
     {f'<polyline points="{best_points}" fill="none" stroke="{best_color}" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" opacity="0.72" />' if best_points else ''}
@@ -190,7 +225,7 @@ def _render_history_table(history: list[dict[str, Any]]) -> str:
 """
 
 
-def _render_strategy_panel(strategy: str, state: dict[str, Any]) -> str:
+def _render_strategy_panel(strategy: str, state: dict[str, Any], dashboard_dir: Path) -> str:
     if state.get("error"):
         return f"""
 <section class="panel">
@@ -215,13 +250,14 @@ def _render_strategy_panel(strategy: str, state: dict[str, Any]) -> str:
             f"Validation map {render['seed']}",
             render,
             best_map_renders.get(_map_key(f"Validation map {render['seed']}", render)),
+            dashboard_dir,
         )
         for render in validation_renders
     )
     game_html = f"""
 <div class="game-grid">
-  {_render_game_view("Training map", train_render, best_map_renders.get(_map_key("Training map", train_render)))}
-  {validation_views or _render_game_view("Validation map", None)}
+  {_render_game_view("Training map", train_render, best_map_renders.get(_map_key("Training map", train_render)), dashboard_dir)}
+  {validation_views or _render_game_view("Validation map", None, dashboard_dir=dashboard_dir)}
 </div>
 """
     if validation_renders:
@@ -258,7 +294,8 @@ def _write_dashboard(
     strategies: list[str],
     finished: int,
 ) -> None:
-    panels = "\n".join(_render_strategy_panel(strategy, states[strategy]) for strategy in strategies)
+    dashboard_dir = dashboard_path.parent
+    panels = "\n".join(_render_strategy_panel(strategy, states[strategy], dashboard_dir) for strategy in strategies)
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -500,43 +537,4 @@ def run_dashboard(
                             "validation_summary": message.get("validation_summary", {}),
                             "retry_scheduled": message.get("retry_scheduled", False),
                         },
-                    ],
-                }
-            elif message["type"] == "result":
-                results.append(message["result"])
-                finished += 1
-                stopped.add(message["result"]["strategy_name"])
-            elif message["type"] == "error":
-                states[message["strategy_name"]] = {
-                    **states[message["strategy_name"]],
-                    "error": message["error"],
-                    "traceback": message.get("traceback", ""),
-                }
-                stopped.add(message["strategy_name"])
-                finished += 1
-
-        if drained:
-            _write_dashboard(dashboard_path, run_name, states, strategies, finished)
-
-        if not any(process.is_alive() for process in processes) and len(stopped) < len(strategies):
-            for strategy in strategies:
-                if strategy in stopped:
-                    continue
-                states[strategy] = {
-                    **states[strategy],
-                    "error": "Process stopped before reporting a result.",
-                }
-                stopped.add(strategy)
-                finished += 1
-            _write_dashboard(dashboard_path, run_name, states, strategies, finished)
-
-        if (
-            (finished >= len(strategies) or not any(process.is_alive() for process in processes))
-            and len(stopped) >= len(strategies)
-        ):
-            break
-        time.sleep(0.25)
-
-    _write_dashboard(dashboard_path, run_name, states, strategies, finished)
-    results.sort(key=lambda item: item["strategy_name"])
-    return results
+                    

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 import json
 import math
 from pathlib import Path
 import random
 from typing import Union
+
+from PIL import Image
 
 
 Point = tuple[float, float]
@@ -36,6 +39,32 @@ def _move(point: Point, dx: float, dy: float) -> Point:
     return point[0] + dx, point[1] + dy
 
 
+def _move_at_angle(point: Point, angle: float, distance: float) -> Point:
+    radians = math.radians(-angle % 360)
+    return point[0] + (distance * math.sin(radians)), point[1] + (distance * math.cos(radians))
+
+
+@dataclass
+class AlphaCollisionMask:
+    alpha: Image.Image = field(repr=False)
+
+    @classmethod
+    def from_path(cls, path: Path) -> "AlphaCollisionMask":
+        with Image.open(path) as image:
+            return cls(alpha=image.convert("RGBA").getchannel("A"))
+
+    @property
+    def size(self) -> tuple[int, int]:
+        return self.alpha.size
+
+    def contains(self, point: Point) -> bool:
+        x = int(point[0])
+        y = int(point[1])
+        if x < 0 or y < 0 or x >= self.alpha.width or y >= self.alpha.height:
+            return False
+        return int(self.alpha.getpixel((x, y))) > 0
+
+
 @dataclass
 class Track:
     seed: int | str
@@ -47,6 +76,7 @@ class Track:
     half_width: float
     canvas_size: tuple[int, int]
     closed_loop: bool = False
+    collision_mask: AlphaCollisionMask | None = None
 
     def segments(self) -> list[tuple[Point, Point]]:
         segments = list(zip(self.polyline[:-1], self.polyline[1:]))
@@ -108,8 +138,84 @@ class Track:
         return best_progress, best_distance
 
     def is_on_track(self, point: Point) -> bool:
+        if self.collision_mask is not None:
+            return self.collision_mask.contains(point)
         _, distance = self.project(point)
         return distance <= self.half_width
+
+
+def _collision_mask_for_map(map_path: Path) -> AlphaCollisionMask | None:
+    back_path = map_path.with_name(f"{map_path.stem}_back.png")
+    if not back_path.exists():
+        return None
+    return AlphaCollisionMask.from_path(back_path)
+
+
+def _heading_between(start: Point, end: Point) -> float:
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    return (-math.degrees(math.atan2(dx, dy))) % 360
+
+
+def _local_route_heading(polyline: list[Point], index: int, closed_loop: bool) -> float:
+    if closed_loop and len(polyline) > 2:
+        previous_point = polyline[index - 1]
+        next_point = polyline[(index + 1) % len(polyline)]
+    else:
+        previous_point = polyline[max(index - 1, 0)]
+        next_point = polyline[min(index + 1, len(polyline) - 1)]
+        if previous_point == next_point and index + 1 < len(polyline):
+            next_point = polyline[index + 1]
+    return _heading_between(previous_point, next_point)
+
+
+def _scan_to_edge(
+    mask: AlphaCollisionMask,
+    origin: Point,
+    angle: float,
+    max_distance: float,
+    step: float = 2.0,
+) -> Point:
+    last_inside = origin
+    distance = step
+    while distance <= max_distance:
+        candidate = _move_at_angle(origin, angle, distance)
+        if not mask.contains(candidate):
+            break
+        last_inside = candidate
+        distance += step
+    return last_inside
+
+
+def _road_center_at(
+    mask: AlphaCollisionMask,
+    point: Point,
+    route_heading: float,
+    max_distance: float,
+) -> Point:
+    if not mask.contains(point):
+        return point
+    left_edge = _scan_to_edge(mask, point, route_heading - 90.0, max_distance)
+    right_edge = _scan_to_edge(mask, point, route_heading + 90.0, max_distance)
+    return (left_edge[0] + right_edge[0]) / 2.0, (left_edge[1] + right_edge[1]) / 2.0
+
+
+def _image_centerline(
+    polyline: list[Point],
+    mask: AlphaCollisionMask,
+    closed_loop: bool,
+    cell_size: int,
+) -> list[Point]:
+    max_distance = cell_size
+    return [
+        _road_center_at(
+            mask=mask,
+            point=point,
+            route_heading=_local_route_heading(polyline, index, closed_loop),
+            max_distance=max_distance,
+        )
+        for index, point in enumerate(polyline)
+    ]
 
 
 def _cell_center(cell_x: int, cell_y: int, cell_size: int, offset_x: int, offset_y: int) -> Point:
@@ -186,6 +292,10 @@ def load_tile_track(path: str | Path, half_width: float = 42.0) -> Track:
     ]
 
     closed_loop = payload.get("metrics", {}).get("topology") == "closed_circuit"
+    collision_mask = _collision_mask_for_map(map_path)
+    if collision_mask is not None:
+        polyline = _image_centerline(polyline, collision_mask, closed_loop, cell_size)
+
     total_length = sum(math.dist(start_point, end_point) for start_point, end_point in zip(polyline[:-1], polyline[1:]))
     if closed_loop:
         total_length += math.dist(polyline[-1], polyline[0])
@@ -204,6 +314,7 @@ def load_tile_track(path: str | Path, half_width: float = 42.0) -> Track:
         half_width=half_width,
         canvas_size=(int(payload["canvas"]["width"]), int(payload["canvas"]["height"])),
         closed_loop=closed_loop,
+        collision_mask=collision_mask,
     )
 
 

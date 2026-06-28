@@ -15,8 +15,8 @@
     "../Neural-Network-Cars/maps/valid_maps/valid_easy.json",
     "../Neural-Network-Cars/maps/valid_maps/valid_hard.json"
   ],
-  "map_difficulty": "easy",
-  "time_limit_seconds": 30.0,
+  "map_difficulty": "hard",
+  "time_limit_seconds": 60.0,
   "fps": 30,
   "parallel_workers": 2,
   "population_workers": 8,
@@ -36,8 +36,8 @@
           "progress": 60,
           "speed": 40,
           "alignment": 0,
-          "safety": 50,
-          "centered": 20
+          "safety": 0,
+          "centered": 0
         },
         "penalties": {
           "stall": 50,
