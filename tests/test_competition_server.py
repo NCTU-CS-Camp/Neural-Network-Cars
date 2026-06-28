@@ -100,16 +100,66 @@ def test_phase_one_submission_is_queued_and_cooldown_is_per_competition(tmp_path
     assert duplicate.json()["error"] == "submission_cooldown"
 
 
+def test_default_phase_one_interval_is_one_minute_and_admin_can_update(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        initial = client.get("/v2/state").json()
+        updated = client.post(
+            "/v2/admin/config",
+            headers={"X-Admin-Token": "secret"},
+            json={"phase_one_batch_minutes": 2},
+        )
+        invalid = client.post(
+            "/v2/admin/config",
+            headers={"X-Admin-Token": "secret"},
+            json={"phase_one_batch_minutes": 3},
+        )
+
+    assert initial["config"]["phase_one_batch_minutes"] == 1
+    assert initial["config"]["next_phase_one_batch_at"].endswith("10:02:00+00:00")
+    assert updated.status_code == 200
+    assert updated.json()["config"]["phase_one_batch_minutes"] == 2
+    assert updated.json()["config"]["next_phase_one_batch_at"].endswith("10:02:00+00:00")
+    assert invalid.status_code == 400
+    assert "phase_one_batch_minutes" in invalid.json()["detail"]
+
+
+def test_phase_one_configured_interval_controls_cooldown(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        client.post(
+            "/v2/admin/config",
+            headers={"X-Admin-Token": "secret"},
+            json={"phase_one_batch_minutes": 2},
+        )
+        submit(client, "easy", username="ada")
+        clock.advance(minutes=1)
+        blocked = client.post(
+            "/v2/competitions/easy/submissions",
+            json=make_payload(username="ada"),
+        )
+        clock.advance(minutes=1)
+        accepted = client.post(
+            "/v2/competitions/easy/submissions",
+            json=make_payload(username="ada"),
+        )
+
+    assert blocked.status_code == 429
+    assert blocked.json()["error"] == "submission_cooldown"
+    assert accepted.status_code == 201
+
+
 def test_batch_boundary_seals_queued_submissions_and_persists_snapshot(tmp_path):
     clock = Clock()
     storage = CompetitionStorage(tmp_path / "competition.db", clock=clock)
     from shared.contracts import ClientResult, SubmissionPayload
 
+    storage.set_phase_one_batch_minutes(2)
     payload = SubmissionPayload("1", "ada", [[0.0] * 36, [0.0] * 24], [[0.0] * 6, [0.0] * 4])
     storage.create_submission("easy", payload, ClientResult(False, None, 1_200.0, 300))
 
     assert storage.seal_phase_one_batches(now=clock.current) == 0
-    clock.advance(minutes=4)
+    clock.advance(minutes=1)
     assert storage.seal_phase_one_batches(now=clock.current) == 1
     leaderboard = storage.leaderboard("easy")
     snapshot = storage.latest_snapshot("easy")
@@ -117,6 +167,8 @@ def test_batch_boundary_seals_queued_submissions_and_persists_snapshot(tmp_path)
     assert leaderboard[0]["status"] == "completed"
     assert snapshot is not None
     assert snapshot["snapshot"]["submission_ids"] == [leaderboard[0]["submission_id"]]
+    assert snapshot["window_start"].endswith("10:00:00+00:00")
+    assert snapshot["window_end"].endswith("10:02:00+00:00")
 
 
 def test_ranking_uses_client_result_and_keeps_individual_historical_best(tmp_path):
@@ -346,9 +398,87 @@ def test_replay_scale_virtual_screen_letterboxes_dummy_surface():
     assert display.get_at((400, 10))[:3] == BACKGROUND
 
 
+def test_empty_replay_session_stops_without_advancing_frames():
+    from game_engine.frontend.replay_client import (
+        ReplaySession,
+        ReplayTrack,
+        replay_panel_status,
+    )
+
+    pygame.init()
+    competition_map = get_competition_map("hard")
+    track = ReplayTrack(
+        competition_map=competition_map,
+        front=pygame.Surface((1600, 900)),
+        collision=pygame.Surface((1600, 900), pygame.SRCALPHA),
+    )
+    session = ReplaySession(
+        competition_id="hard",
+        track=track,
+        cars=[],
+        leaderboard=[],
+    )
+
+    assert replay_panel_status(session) == "WAITING"
+    assert session.tick() is True
+    assert session.stopped is True
+    assert session.frames == 0
+
+
+def test_phase_one_draw_ticks_both_sides_without_short_circuit():
+    from game_engine.frontend.replay_client import _draw_phase_one
+
+    class Track:
+        front = pygame.Surface((1600, 900))
+
+    class Session:
+        competition_id = "demo"
+        track = Track()
+        cars = []
+        leaderboard = []
+        has_cars = True
+        stopped = False
+
+        def __init__(self) -> None:
+            self.ticks = 0
+
+        def tick(self) -> bool:
+            self.ticks += 1
+            return False
+
+    pygame.init()
+    screen = pygame.Surface((1600, 900))
+    fonts = {
+        "title": pygame.font.SysFont("Arial", 28, bold=True),
+        "panel": pygame.font.SysFont("Arial", 18, bold=True),
+        "row": pygame.font.SysFont("Arial", 17, bold=True),
+        "label": pygame.font.SysFont("Arial", 15, bold=True),
+        "meta": pygame.font.SysFont("Arial", 14),
+    }
+    easy = Session()
+    hard = Session()
+
+    finished = _draw_phase_one(  # type: ignore[arg-type]
+        screen,
+        easy,
+        hard,
+        fonts,
+        "RUNNING / PHASE 1 / EASY + HARD",
+    )
+
+    assert finished is False
+    assert easy.ticks == 1
+    assert hard.ticks == 1
+
+
 def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
+        client.post(
+            "/v2/admin/config",
+            headers={"X-Admin-Token": "secret"},
+            json={"phase_one_batch_minutes": 2},
+        )
         submit(client, "easy", username="ada")
         process_now(client)
         client.post(
@@ -363,6 +493,7 @@ def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):
 
     assert reset.json() == {"status": "reset", "scope": "competition"}
     assert state["stage"] == "final"
+    assert state["config"]["phase_one_batch_minutes"] == 2
     assert leaderboard == []
     assert admin_rows == []
 
@@ -383,6 +514,7 @@ def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
     assert "Create Demo Snapshot" in admin.text
     assert event["type"] == "competition_snapshot_updated"
     assert event["leaderboards"]["easy"][0]["username"] == "ada"
+    assert event["config"]["phase_one_batch_minutes"] == 1
 
 
 def test_replay_marks_a_stationary_car_as_stalled_after_stagnation_limit():

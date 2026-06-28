@@ -15,6 +15,7 @@ from server.competition_config import (
     PHASE_ONE_REPLAY_LIMIT,
     previous_batch_boundary,
     public_config,
+    validate_phase_one_batch_minutes,
 )
 from server.competition_maps import get_competition_map, list_competition_maps
 from server.models import (
@@ -84,13 +85,26 @@ class CompetitionStorage:
                     ADD COLUMN replay_generation INTEGER NOT NULL DEFAULT 0
                     """
                 )
+            if "phase_one_batch_minutes" not in columns:
+                connection.execute(
+                    """
+                    ALTER TABLE competition_state
+                    ADD COLUMN phase_one_batch_minutes INTEGER NOT NULL DEFAULT 1
+                    """
+                )
 
             connection.execute(
                 """
-                INSERT OR IGNORE INTO competition_state (id, stage, config_version)
-                VALUES (1, ?, ?)
+                INSERT OR IGNORE INTO competition_state (
+                    id, stage, config_version, phase_one_batch_minutes
+                )
+                VALUES (1, ?, ?, ?)
                 """,
-                (CompetitionStage.PHASE_ONE.value, COMPETITION_CONFIG_VERSION),
+                (
+                    CompetitionStage.PHASE_ONE.value,
+                    COMPETITION_CONFIG_VERSION,
+                    PHASE_ONE_BATCH_MINUTES,
+                ),
             )
 
     def _replace_schema(self, connection: sqlite3.Connection) -> None:
@@ -112,7 +126,8 @@ class CompetitionStorage:
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 stage TEXT NOT NULL,
                 config_version TEXT NOT NULL,
-                replay_generation INTEGER NOT NULL DEFAULT 0
+                replay_generation INTEGER NOT NULL DEFAULT 0,
+                phase_one_batch_minutes INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE submissions (
@@ -172,21 +187,40 @@ class CompetitionStorage:
             )
         return self.state()
 
+    def set_phase_one_batch_minutes(self, minutes: int) -> dict[str, Any]:
+        minutes = validate_phase_one_batch_minutes(minutes)
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE competition_state
+                SET phase_one_batch_minutes = ?
+                WHERE id = 1
+                """,
+                (minutes,),
+            )
+        return self.state()
+
     def state(self, now: datetime | None = None) -> dict[str, Any]:
         timestamp = now or self.now()
         with self._lock, self._connect() as connection:
             row = connection.execute(
                 """
-                SELECT stage, replay_generation
+                SELECT stage, replay_generation, phase_one_batch_minutes
                 FROM competition_state
                 WHERE id = 1
                 """
             ).fetchone()
         stage = CompetitionStage(row["stage"])
+        phase_one_batch_minutes = validate_phase_one_batch_minutes(
+            int(row["phase_one_batch_minutes"])
+        )
         return {
             "stage": stage.value,
             "replay_generation": int(row["replay_generation"]),
-            "config": public_config(timestamp),
+            "config": public_config(
+                timestamp,
+                phase_one_batch_minutes=phase_one_batch_minutes,
+            ),
             "competitions": [item.to_public_dict() for item in list_competition_maps()],
         }
 
@@ -230,9 +264,16 @@ class CompetitionStorage:
         now: datetime,
     ) -> dict[str, Any]:
         stage_row = connection.execute(
-            "SELECT stage FROM competition_state WHERE id = 1"
+            """
+            SELECT stage, phase_one_batch_minutes
+            FROM competition_state
+            WHERE id = 1
+            """
         ).fetchone()
         stage = CompetitionStage(stage_row["stage"])
+        phase_one_batch_minutes = validate_phase_one_batch_minutes(
+            int(stage_row["phase_one_batch_minutes"])
+        )
         result: dict[str, Any] = {
             "competition_id": competition_id.value,
             "stage": stage.value,
@@ -263,7 +304,9 @@ class CompetitionStorage:
             ).fetchone()
             if row is not None:
                 last_submission = _parse_timestamp(row["submitted_at"])
-                next_allowed = last_submission + timedelta(minutes=PHASE_ONE_BATCH_MINUTES)
+                next_allowed = last_submission + timedelta(
+                    minutes=phase_one_batch_minutes,
+                )
                 result["next_submission_at"] = next_allowed.isoformat()
                 if now < next_allowed:
                     result["reason"] = "submission_cooldown"
@@ -406,12 +449,20 @@ class CompetitionStorage:
         force: bool = False,
     ) -> int:
         timestamp = now or self.now()
-        cutoff = timestamp if force else previous_batch_boundary(timestamp)
-        window_start = cutoff - timedelta(minutes=PHASE_ONE_BATCH_MINUTES)
         total = 0
 
         with self._lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            phase_one_batch_minutes = self._phase_one_batch_minutes_locked(connection)
+            cutoff = (
+                timestamp
+                if force
+                else previous_batch_boundary(
+                    timestamp,
+                    phase_one_batch_minutes,
+                )
+            )
+            window_start = cutoff - timedelta(minutes=phase_one_batch_minutes)
             for identifier in (CompetitionId.EASY, CompetitionId.HARD):
                 comparator = "<=" if force else "<"
                 rows = connection.execute(
@@ -545,7 +596,8 @@ class CompetitionStorage:
         return (*client_result.ranking_key(), submission["submitted_at"], submission["submission_id"])
 
     def replay_payload(self) -> dict[str, Any]:
-        stage = self.stage()
+        state = self.state()
+        stage = CompetitionStage(state["stage"])
         identifiers = (
             (CompetitionId.EASY, CompetitionId.HARD)
             if stage is CompetitionStage.PHASE_ONE
@@ -560,9 +612,9 @@ class CompetitionStorage:
                 "items": self._replay_items(identifier),
             }
         return {
-            "stage": stage.value,
-            "replay_generation": self.state()["replay_generation"],
-            "config": public_config(self.now()),
+            "stage": state["stage"],
+            "replay_generation": state["replay_generation"],
+            "config": state["config"],
             "replays": replays,
         }
 
@@ -646,6 +698,17 @@ class CompetitionStorage:
             "batch_id": row["batch_id"],
             "competition_config_version": COMPETITION_CONFIG_VERSION,
         }
+
+    @staticmethod
+    def _phase_one_batch_minutes_locked(connection: sqlite3.Connection) -> int:
+        row = connection.execute(
+            """
+            SELECT phase_one_batch_minutes
+            FROM competition_state
+            WHERE id = 1
+            """
+        ).fetchone()
+        return validate_phase_one_batch_minutes(int(row["phase_one_batch_minutes"]))
 
     @staticmethod
     def _public_submission(submission: dict[str, Any]) -> dict[str, Any]:

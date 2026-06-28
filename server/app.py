@@ -15,7 +15,7 @@ from server.competition_maps import get_competition_map, list_competition_maps
 from server.evaluation_worker import BatchWorker
 from server.events import EventBroadcaster
 from server.models import CompetitionId
-from server.schemas import AdminStageRequest, IdentityIn, SubmissionIn
+from server.schemas import AdminConfigRequest, AdminStageRequest, IdentityIn, SubmissionIn
 from server.storage import CompetitionStorage, SubmissionRejected
 
 
@@ -199,6 +199,20 @@ def create_app(
     ) -> dict[str, Any]:
         require_admin(x_admin_token)
         state = app_storage.set_stage(request.stage)
+        broadcaster.publish(app_storage.competition_update_payload())
+        return state
+
+    @app.post("/v2/admin/config")
+    def admin_config(
+        request: AdminConfigRequest,
+        x_admin_token: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        require_admin(x_admin_token)
+        try:
+            minutes = request.clean_phase_one_batch_minutes()
+        except ValueError as exc:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+        state = app_storage.set_phase_one_batch_minutes(minutes)
         broadcaster.publish(app_storage.competition_update_payload())
         return state
 

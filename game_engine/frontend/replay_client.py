@@ -126,14 +126,20 @@ class ReplaySession:
     frames: int = 0
     stopped: bool = False
 
+    @property
+    def has_cars(self) -> bool:
+        return bool(self.cars)
+
     def tick(self) -> bool:
         if self.stopped:
+            return True
+        if not self.cars:
+            self.stopped = True
             return True
         update_replay_cars(self.cars)
         self.frames += 1
         self.stopped = (
-            bool(self.cars)
-            and all(
+            all(
                 replay_car.crashed or replay_car.stalled or replay_car.finished
                 for replay_car in self.cars
             )
@@ -253,14 +259,20 @@ def run(
                         fonts,
                         display_status,
                     )
+                    previous_hold_until = hold_until
                     hold_until = _handle_finished_cycle(
                         finished,
                         now,
                         hold_until,
-                        state,
-                        assets,
                         sessions,
                     )
+                    if (
+                        previous_hold_until is not None
+                        and hold_until is None
+                        and not sessions
+                    ):
+                        state = None
+                        next_fetch_at = 0.0
                 else:
                     _draw_final_waiting(
                         virtual_screen,
@@ -272,13 +284,17 @@ def run(
                 easy = sessions.get("easy")
                 hard = sessions.get("hard")
                 if easy is not None and hard is not None:
-                    display_status = _replay_status_text(
-                        "PHASE 1",
-                        (easy, hard),
-                        state,
-                        now,
-                        hold_until,
-                    )
+                    runnable_sessions = _runnable_sessions(easy, hard)
+                    if runnable_sessions:
+                        display_status = _replay_status_text(
+                            _phase_one_stage_label(runnable_sessions),
+                            runnable_sessions,
+                            state,
+                            now,
+                            hold_until,
+                        )
+                    else:
+                        display_status = _waiting_status_text(state)
                     finished = _draw_phase_one(
                         virtual_screen,
                         easy,
@@ -286,14 +302,27 @@ def run(
                         fonts,
                         display_status,
                     )
-                    hold_until = _handle_finished_cycle(
-                        finished,
-                        now,
-                        hold_until,
-                        state,
-                        assets,
-                        sessions,
-                    )
+                    if runnable_sessions:
+                        previous_hold_until = hold_until
+                        hold_until = _handle_finished_cycle(
+                            finished,
+                            now,
+                            hold_until,
+                            sessions,
+                        )
+                        if (
+                            previous_hold_until is not None
+                            and hold_until is None
+                            and not sessions
+                        ):
+                            state = None
+                            next_fetch_at = 0.0
+                    else:
+                        hold_until = None
+                        if now >= next_fetch_at:
+                            sessions.clear()
+                            state = None
+                            next_fetch_at = now + 3.0
                 else:
                     _draw_phase_one_waiting(
                         virtual_screen,
@@ -379,6 +408,15 @@ def _replay_status_text(
     return f"RUNNING / {stage}  |  elapsed {elapsed:.1f}s  |  snapshot {snapshot}"
 
 
+def _runnable_sessions(*sessions: ReplaySession) -> tuple[ReplaySession, ...]:
+    return tuple(session for session in sessions if session.has_cars)
+
+
+def _phase_one_stage_label(sessions: tuple[ReplaySession, ...]) -> str:
+    names = " + ".join(session.competition_id.upper() for session in sessions)
+    return f"PHASE 1 / {names}" if names else "PHASE 1 / WAITING"
+
+
 def _waiting_status_text(state: dict[str, Any]) -> str:
     return f"WAITING  |  snapshot {_snapshot_countdown_text(state)}"
 
@@ -401,8 +439,6 @@ def _handle_finished_cycle(
     finished: bool,
     now: float,
     hold_until: float | None,
-    state: dict[str, Any],
-    assets: GameAssets,
     sessions: dict[str, ReplaySession],
 ) -> float | None:
     if not finished:
@@ -412,7 +448,6 @@ def _handle_finished_cycle(
     if now < hold_until:
         return hold_until
     sessions.clear()
-    sessions.update(load_replay_sessions(state, assets))
     return None
 
 
@@ -527,7 +562,9 @@ def _draw_phase_one(
     _draw_map_panel(screen, hard, hard_rect, "HARD", HARD_ACCENT, fonts)
     _draw_compact_leaderboard(screen, easy, pygame.Rect(24, 554, 764, 316), EASY_ACCENT, fonts)
     _draw_compact_leaderboard(screen, hard, pygame.Rect(812, 554, 764, 316), HARD_ACCENT, fonts)
-    return easy.tick() and hard.tick()
+    easy_finished = easy.tick()
+    hard_finished = hard.tick()
+    return easy_finished and hard_finished
 
 
 def _draw_final(
@@ -562,8 +599,8 @@ def _draw_map_panel(
     accent: Color,
     fonts: dict[str, pygame.font.Font],
 ) -> None:
+    panel_status = replay_panel_status(session)
     pygame.draw.rect(screen, PANEL, rect.inflate(0, 0))
-    pygame.draw.rect(screen, BORDER, rect, 1)
     native = session.track.front.copy()
     for replay_car in session.cars:
         color = (
@@ -575,10 +612,15 @@ def _draw_map_panel(
         pygame.draw.circle(native, color, (int(replay_car.car.x), int(replay_car.car.y)), 7)
     scaled = pygame.transform.smoothscale(native, rect.size)
     screen.blit(scaled, rect.topleft)
-    pygame.draw.rect(screen, BORDER, rect, 1)
+    border_color = accent if panel_status == "RUNNING" else BORDER
+    border_width = 3 if panel_status == "RUNNING" else 1
+    pygame.draw.rect(screen, border_color, rect, border_width)
     pygame.draw.rect(screen, BACKGROUND, (rect.x, rect.y, 134, 30))
     pygame.draw.rect(screen, accent, (rect.x, rect.y, 4, 30))
     screen.blit(fonts["panel"].render(title, True, TEXT), (rect.x + 12, rect.y + 6))
+    _draw_panel_badge(screen, rect, panel_status, accent, fonts)
+    if panel_status == "WAITING":
+        _draw_waiting_for_submissions(screen, rect, fonts)
     occupied_labels: list[pygame.Rect] = []
     for replay_car in session.cars:
         color = (
@@ -659,6 +701,47 @@ def _place_label(
         if not any(candidate.colliderect(other) for other in occupied):
             return candidate.x, candidate.y
     return label_x, max(rect.y + 32, min(y - height - 8, rect.bottom - height - 4))
+
+
+def replay_panel_status(session: ReplaySession) -> str:
+    if not session.has_cars:
+        return "WAITING"
+    if session.stopped:
+        return "COMPLETE"
+    return "RUNNING"
+
+
+def _draw_panel_badge(
+    screen: pygame.Surface,
+    rect: pygame.Rect,
+    status: str,
+    accent: Color,
+    fonts: dict[str, pygame.font.Font],
+) -> None:
+    color = accent if status == "RUNNING" else MUTED
+    label = fonts["meta"].render(status, True, TEXT if status == "RUNNING" else MUTED)
+    badge = pygame.Rect(
+        rect.right - label.get_width() - 24,
+        rect.y + 6,
+        label.get_width() + 16,
+        22,
+    )
+    pygame.draw.rect(screen, BACKGROUND, badge)
+    pygame.draw.rect(screen, color, badge, 1)
+    screen.blit(label, (badge.x + 8, badge.y + 4))
+
+
+def _draw_waiting_for_submissions(
+    screen: pygame.Surface,
+    rect: pygame.Rect,
+    fonts: dict[str, pygame.font.Font],
+) -> None:
+    message = fonts["panel"].render("WAITING FOR SUBMISSIONS", True, MUTED)
+    box = pygame.Rect(0, 0, message.get_width() + 34, 42)
+    box.center = rect.center
+    pygame.draw.rect(screen, BACKGROUND, box)
+    pygame.draw.rect(screen, BORDER, box, 1)
+    screen.blit(message, (box.x + 17, box.y + 11))
 
 
 def _result_text(client_result: dict[str, Any]) -> str:

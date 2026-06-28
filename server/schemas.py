@@ -5,7 +5,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from server.competition_config import FRAME_LIMIT, MAX_SUBMISSION_BYTES
+from server.competition_config import (
+    FRAME_LIMIT,
+    MAX_SUBMISSION_BYTES,
+    validate_phase_one_batch_minutes,
+)
 from server.models import CompetitionStage
 from shared.contracts import ClientResult, SubmissionPayload
 
@@ -59,3 +63,12 @@ class AdminStageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stage: CompetitionStage
+
+
+class AdminConfigRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    phase_one_batch_minutes: int
+
+    def clean_phase_one_batch_minutes(self) -> int:
+        return validate_phase_one_batch_minutes(self.phase_one_batch_minutes)
