@@ -94,6 +94,13 @@ def test_run_tracker_advances_only_sequential_gates_and_completes_one_lap():
         current = centers[(index + 1) % len(centers)]
         tracker.advance(previous, current, tick=index + 2)
 
+    assert tracker.awaiting_start_gate is True
+    assert tracker.completed is False
+    assert tracker.max_progress < metadata.total_length_px
+
+    tracker.advance(centers[0], centers[1], tick=len(centers) + 2)
+
     assert tracker.completed is True
-    assert tracker.lap_ticks == len(centers) + 1
+    assert tracker.lap_ticks == len(centers) + 2
+    assert tracker.checkpoints_completed == len(centers) + 1
     assert tracker.max_progress == metadata.total_length_px

@@ -419,13 +419,13 @@ def _replay_status(
     if hold_until is not None:
         remaining = max(0.0, hold_until - now)
         return ReplayStatus(
-            label=f"重播完成 · {stage}",
+            label=f"Replay complete / {stage}",
             elapsed_seconds=elapsed,
             restart_seconds=remaining,
             snapshot_countdown=snapshot,
         )
     return ReplayStatus(
-        label=f"重播中 · {stage}",
+        label=f"Running replay / {stage}",
         elapsed_seconds=elapsed,
         snapshot_countdown=snapshot,
     )
@@ -437,12 +437,12 @@ def _runnable_sessions(*sessions: ReplaySession) -> tuple[ReplaySession, ...]:
 
 def _phase_one_stage_label(sessions: tuple[ReplaySession, ...]) -> str:
     names = " + ".join(session.competition_id.upper() for session in sessions)
-    return f"第一階段 / {names}" if names else "第一階段 / 等待"
+    return f"Phase 1 / {names}" if names else "Phase 1 / Waiting"
 
 
 def _waiting_status_text(state: dict[str, Any]) -> ReplayStatus:
     return ReplayStatus(
-        label="等待提交資料",
+        label="Waiting for submissions",
         snapshot_countdown=_snapshot_countdown_text(state),
     )
 
@@ -719,11 +719,11 @@ def _draw_header(
     screen.blit(fonts["status"].render(status.label, True, TEXT), (bar.x + 18, bar.y + 10))
     chip_x = bar.right - 18
     chips = [
-        f"已跑 {status.elapsed_seconds:.1f}s",
-        f"下次重播 {status.restart_seconds:.0f}s"
+        f"Elapsed {status.elapsed_seconds:.1f}s",
+        f"Next replay {status.restart_seconds:.0f}s"
         if status.restart_seconds is not None
-        else "下次重播 -",
-        f"下次快照 {status.snapshot_countdown}",
+        else "Next replay -",
+        f"Next snapshot {status.snapshot_countdown}",
     ]
     for text in reversed(chips):
         chip_x = _draw_status_chip(screen, fonts, text, chip_x, bar.centery)
@@ -777,8 +777,7 @@ def _draw_map_panel(
     _draw_panel_badge(screen, rect, panel_status, accent, fonts)
     if panel_status == "WAITING":
         _draw_waiting_for_submissions(screen, rect, fonts)
-    occupied_labels: list[pygame.Rect] = []
-    for replay_car in session.cars:
+    for replay_car in sorted(session.cars, key=_replay_rank, reverse=True):
         color = (
             DIM_COLOR
             if replay_car.crashed or replay_car.stalled or replay_car.finished
@@ -787,9 +786,8 @@ def _draw_map_panel(
         x = rect.x + int(replay_car.car.x / SCREEN_SIZE[0] * rect.width)
         y = rect.y + int(replay_car.car.y / SCREEN_SIZE[1] * rect.height)
         label = fonts["label"].render(replay_car.label, True, color)
-        label_x, label_y = _place_label(rect, x, y, label, occupied_labels)
+        label_x, label_y = _fixed_label_position(rect, x, y, label)
         screen.blit(label, (label_x, label_y))
-        occupied_labels.append(pygame.Rect(label_x, label_y, label.get_width(), label.get_height()))
 
 
 def _draw_compact_leaderboard(
@@ -834,9 +832,9 @@ def _draw_leaderboard_reveal_panel(
     accent: Color,
     fonts: dict[str, pygame.font.Font],
 ) -> None:
-    title = fonts["panel"].render("新快照重播中", True, TEXT)
-    subtitle = fonts["meta"].render("排名將於本輪結束後公布", True, MUTED)
-    elapsed = fonts["chip"].render(f"已跑 {session.frames / FPS:.1f}s", True, TEXT)
+    title = fonts["panel"].render("New snapshot replay running", True, TEXT)
+    subtitle = fonts["meta"].render("Leaderboard reveals after this replay", True, MUTED)
+    elapsed = fonts["chip"].render(f"Elapsed {session.frames / FPS:.1f}s", True, TEXT)
     box = pygame.Rect(0, 0, min(rect.width - 52, 390), 132)
     box.center = rect.center
     pygame.draw.rect(screen, BACKGROUND, box, border_radius=6)
@@ -882,26 +880,27 @@ def _draw_centered(screen: pygame.Surface, font: pygame.font.Font, text: str, y:
     screen.blit(rendered, ((SCREEN_SIZE[0] - rendered.get_width()) // 2, y))
 
 
-def _place_label(
+def _fixed_label_position(
     rect: pygame.Rect,
     x: int,
     y: int,
     label: pygame.Surface,
-    occupied: list[pygame.Rect],
 ) -> tuple[int, int]:
-    label_x = min(max(rect.x + 4, x + 8), rect.right - label.get_width() - 4)
     height = label.get_height()
-    candidates = [y - height - 8]
-    candidates.extend(y - height - 8 - (step * (height + 2)) for step in range(1, 16))
-    candidates.extend(y + 10 + (step * (height + 2)) for step in range(16))
+    min_x = rect.x + 4
+    min_y = rect.y + 32
+    max_x = max(min_x, rect.right - label.get_width() - 4)
+    max_y = max(min_y, rect.bottom - height - 4)
+    label_x = min(max(min_x, x + 8), max_x)
+    label_y = min(max(min_y, y - height - 8), max_y)
+    return label_x, label_y
 
-    for candidate_y in candidates:
-        candidate = pygame.Rect(label_x, candidate_y, label.get_width(), height)
-        if candidate.top < rect.y + 32 or candidate.bottom > rect.bottom - 4:
-            continue
-        if not any(candidate.colliderect(other) for other in occupied):
-            return candidate.x, candidate.y
-    return label_x, max(rect.y + 32, min(y - height - 8, rect.bottom - height - 4))
+
+def _replay_rank(replay_car: ReplayCar) -> int:
+    try:
+        return int(replay_car.item.get("rank", 9999))
+    except (TypeError, ValueError):
+        return 9999
 
 
 def replay_panel_status(session: ReplaySession) -> str:
