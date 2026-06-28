@@ -1,30 +1,62 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import pygame
 
-from GA.fitness import (
-    BeginnerMix,
-    FitnessStrategy,
-    fitness_strategy_names,
-    get_fitness_strategy,
-    score_with_config,
+from GA.fitness import FITNESS_STRATEGIES, score_with_config
+from GA.genetic import (
+    mutateOneBiasesGene,
+    mutateOneWeightGene,
+    uniformCrossOverBiases,
+    uniformCrossOverWeights,
 )
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car
+from game_engine.backend.competition_maps import load_competition_map
 from game_engine.backend.record_store import RecordStore
-from game_engine.backend.serialization import apply_weight_payload
+from game_engine.backend.serialization import apply_weight_payload, export_weight_payload
 from game_engine.backend.settings import (
     BLACK,
+    CJK_FONT_PATH,
     MAX_SPEED,
     TRAINING_DIFFICULTY_MAPS,
     VALIDATION_DIFFICULTY_MAPS,
     WHITE,
 )
+from game_engine.frontend.competition_client import (
+    EligibilityResult,
+    NetworkError,
+    SubmissionAccepted,
+    SubmissionRejected,
+    check_eligibility,
+)
+from game_engine.frontend.competition_client import submit as submit_to_competition_server
 from game_engine.frontend.profile_store import save_login_profile
-from game_engine.frontend.widgets import Button, Dropdown, Slider, TextInput
-from shared.contracts import FitnessConfig, LoginProfile, TrainingRecord, WeightPayload
+from game_engine.frontend.widgets import Button, Slider, TextInput
+from shared.contracts import (
+    ClientResult,
+    FitnessConfig,
+    LoginProfile,
+    SubmissionPayload,
+    TrainingRecord,
+    WeightPayload,
+)
+
+
+# Mirrors Competition Server's server/competition_config.py::FRAME_LIMIT. Kept
+# as a plain constant here since the client does not depend on the server package.
+FRAME_LIMIT = 900
+
+_REASON_MESSAGES = {
+    "submission_cooldown": "冷卻中，請稍後再試",
+    "competition_closed": "目前未開放提交",
+    "final_locked": "Final 已提交過或已鎖定",
+}
+
+# Deliberately low: uploading an already-trained record should mostly resubmit
+# that record's car, not breed something new from it.
+UPLOAD_MUTATION_RATE = 5
 
 
 class AppQuit(Exception):
@@ -33,27 +65,27 @@ class AppQuit(Exception):
 
 GROUP_COUNT = 10
 MenuChoice = Literal["training", "validation"]
-TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None]
+TrainingConfigResult = tuple[FitnessConfig, int, TrainingRecord | None]
 
 BONUS_FITNESS_PLACEHOLDERS = [
-    "speed",
-    "progress",
-    "centered",
-    "alignment",
-    "safety",
+    "progress_score",
+    "speed_score",
+    "completion_bonus",
+    "smooth_control",
+    "checkpoint_reward",
 ]
 
 PENALTY_FITNESS_PLACEHOLDERS = [
-    "stall",
-    "spin",
-    "wrong_way",
-    "time",
-    "crash",
+    "collision_penalty",
+    "spin_penalty",
+    "stagnation_penalty",
+    "reverse_penalty",
+    "time_penalty",
 ]
 
 
 def _font(size: int = 22) -> pygame.font.Font:
-    return pygame.font.SysFont("Noto Sans CJK TC", size)
+    return pygame.font.Font(CJK_FONT_PATH, size)
 
 
 def _check_quit(event: pygame.event.Event) -> None:
@@ -76,23 +108,28 @@ def run_login_screen(screen: pygame.Surface) -> LoginProfile:
     ]
     selected_group: str | None = None
     name_input = TextInput(pygame.Rect(60, 340, 360, 48))
-    register_button = Button("註冊", pygame.Rect(60, 420, 160, 52))
+    server_url_input = TextInput(pygame.Rect(60, 460, 360, 48), text="http://127.0.0.1:8000", max_length=120)
+    register_button = Button("註冊", pygame.Rect(60, 540, 160, 52))
     error_message = ""
 
     while True:
         for event in pygame.event.get():
             _check_quit(event)
             name_input.handle_event(event)
+            server_url_input.handle_event(event)
             if event.type == pygame.MOUSEBUTTONDOWN:
                 for button in group_buttons:
                     if button.contains(event.pos):
                         selected_group = button.text
                 if register_button.contains(event.pos):
                     username = name_input.text.strip()
-                    if selected_group is None or not username:
-                        error_message = "請選擇組別並輸入名字"
+                    server_url = server_url_input.text.strip()
+                    if selected_group is None or not username or not server_url:
+                        error_message = "請選擇組別、輸入名字並填寫 server URL"
                     else:
-                        profile = LoginProfile(group_id=selected_group, username=username)
+                        profile = LoginProfile(
+                            group_id=selected_group, username=username, server_url=server_url
+                        )
                         save_login_profile(profile)
                         return profile
 
@@ -109,9 +146,11 @@ def run_login_screen(screen: pygame.Surface) -> LoginProfile:
             button.draw(screen, font)
         screen.blit(font.render("輸入名字", True, WHITE), (60, 312))
         name_input.draw(screen, font)
+        screen.blit(font.render("Server URL", True, WHITE), (60, 432))
+        server_url_input.draw(screen, font)
         register_button.draw(screen, font)
         if error_message:
-            screen.blit(font.render(error_message, True, (255, 90, 90)), (60, 488))
+            screen.blit(font.render(error_message, True, (255, 90, 90)), (60, 608))
 
         pygame.display.update()
         clock.tick(30)
@@ -199,47 +238,25 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     ]
     selected_difficulty: int = 1
 
-    # Fitness preset and sliders (right 1/3, full height)
+    # Fitness sliders (right 1/3, full height, 10 items uniformly)
     slider_label_x = right_x + M
     slider_x = right_x + M + max(140, right_w // 4)
     slider_w = right_w - M * 2 - max(140, right_w // 4) - M
     fitness_top = back_button.rect.bottom + M
     fitness_bottom = H - M
-    dropdown_h = max(34, H // 26)
-    selected_strategy = BeginnerMix.copy()
-    preset_dropdown = Dropdown(
-        pygame.Rect(right_x + M, fitness_top, right_w - M * 2, dropdown_h),
-        fitness_strategy_names(),
-        placeholder="載入 Fitness preset",
-        selected=selected_strategy.name,
-    )
-    sliders_top = preset_dropdown.rect.bottom + M // 2
-    fitness_step = (fitness_bottom - sliders_top) // 10
+    fitness_step = (fitness_bottom - fitness_top) // 10
+    all_fitness = BONUS_FITNESS_PLACEHOLDERS + PENALTY_FITNESS_PLACEHOLDERS
     bonus_sliders = {
         name: Slider(
-            pygame.Rect(
-                slider_x,
-                sliders_top + i * fitness_step + fitness_step // 2,
-                slider_w,
-                max(8, H // 100),
-            ),
-            0,
-            100,
-            int(selected_strategy.config.get_weight(name)),
+            pygame.Rect(slider_x, fitness_top + i * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
+            0, 100, 50,
         )
         for i, name in enumerate(BONUS_FITNESS_PLACEHOLDERS)
     }
     penalty_sliders = {
         name: Slider(
-            pygame.Rect(
-                slider_x,
-                sliders_top + (5 + i) * fitness_step + fitness_step // 2,
-                slider_w,
-                max(8, H // 100),
-            ),
-            0,
-            100,
-            int(selected_strategy.config.get_weight(name)),
+            pygame.Rect(slider_x, fitness_top + (5 + i) * fitness_step + fitness_step // 2, slider_w, max(8, H // 100)),
+            0, 100, 50,
         )
         for i, name in enumerate(PENALTY_FITNESS_PLACEHOLDERS)
     }
@@ -282,25 +299,8 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
     while True:
         for event in pygame.event.get():
             _check_quit(event)
-
-            dropdown_was_open = preset_dropdown.is_open
-            dropdown_captured_click = (
-                event.type == pygame.MOUSEBUTTONDOWN
-                and event.button == 1
-                and preset_dropdown.contains(
-                    event.pos,
-                    include_options=dropdown_was_open,
-                )
-            )
-            selected_strategy_name = preset_dropdown.handle_event(event)
-            if selected_strategy_name is not None:
-                selected_strategy = get_fitness_strategy(selected_strategy_name)
-                for name, slider in all_sliders.items():
-                    slider.value = int(selected_strategy.config.get_weight(name))
-
-            if not dropdown_captured_click:
-                for slider in all_sliders.values():
-                    slider.handle_event(event)
+            for slider in all_sliders.values():
+                slider.handle_event(event)
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 pos = event.pos
@@ -325,8 +325,7 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
 
                 if go_button.contains(pos) and go_enabled():
                     weights = {name: s.value for name, s in all_sliders.items()}
-                    selected_strategy.config.update_weights(weights)
-                    return selected_strategy, selected_difficulty, selected_record
+                    return FitnessConfig(weights=weights), selected_difficulty, selected_record
 
         mouse_pos = pygame.mouse.get_pos()
         back_button.update_hover(mouse_pos)
@@ -388,7 +387,6 @@ def run_training_config_screen(screen: pygame.Surface) -> TrainingConfigResult |
             slider.draw(screen, font)
 
         go_button.draw(screen, font)
-        preset_dropdown.draw(screen, font)
         pygame.display.update()
         clock.tick(30)
 
@@ -464,7 +462,38 @@ def run_record_name_screen(screen: pygame.Surface) -> str:
         clock.tick(30)
 
 
-def run_validation_list_screen(screen: pygame.Surface) -> None:
+def _run_record_submission_screen(
+    screen: pygame.Surface, server_url: str, record: TrainingRecord
+) -> None:
+    """Upload entry point: rebuild the record's car and run the same
+    competition submission flow used during live training, just with
+    parent_a == parent_b == this record's car (it's the only model we have)."""
+    car = Car(record.layer_sizes)
+    payload = WeightPayload(
+        model_version="v1",
+        layer_sizes=record.layer_sizes,
+        weights=record.weights,
+        biases=record.biases,
+        fitness_score=0.0,
+        generation=0,
+        track_id="upload",
+        track_seed=0,
+        nickname=record.username,
+    )
+    apply_weight_payload(car, payload)
+    run_submission_screen(
+        screen,
+        server_url,
+        record.group_id,
+        record.username,
+        car,
+        car,
+        record.layer_sizes,
+        UPLOAD_MUTATION_RATE,
+    )
+
+
+def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
     clock = pygame.time.Clock()
     font = _font(18)
     title_font = _font(32)
@@ -535,7 +564,7 @@ def run_validation_list_screen(screen: pygame.Surface) -> None:
                     continue
             for record, validate_button, upload_button, delete_button in rows:
                 if upload_button.contains(event.pos):
-                    message = f"{record.record_name} 已加入上傳佇列（尚未啟用）"
+                    _run_record_submission_screen(screen, server_url, record)
                 elif delete_button.contains(event.pos):
                     store.delete_record(record.record_id)
                     message = f"已刪除 {record.record_name}"
@@ -618,3 +647,315 @@ def run_validate_replay_screen(
 
         pygame.display.update()
         clock.tick(30)
+
+
+def _clone_car(source: Any, layer_sizes: list[int]) -> Car:
+    clone = Car(layer_sizes)
+    clone.weights = [weight.copy() for weight in source.weights]
+    clone.biases = [bias.copy() for bias in source.biases]
+    return clone
+
+
+def _build_candidates(
+    parent_a: Any,
+    parent_b: Any,
+    layer_sizes: list[int],
+    mutation_rate: int,
+    total: int = 20,
+) -> list[Car]:
+    aux_car = Car(layer_sizes)
+    candidates = [Car(layer_sizes) for _ in range(total)]
+
+    for index in range(0, total - 2, 2):
+        uniformCrossOverWeights(parent_a, parent_b, candidates[index], candidates[index + 1])
+        uniformCrossOverBiases(parent_a, parent_b, candidates[index], candidates[index + 1])
+
+    candidates[total - 2] = _clone_car(parent_a, layer_sizes)
+    candidates[total - 1] = _clone_car(parent_b, layer_sizes)
+
+    for index in range(total - 2):
+        for _ in range(mutation_rate):
+            mutateOneWeightGene(candidates[index], aux_car)
+            mutateOneWeightGene(aux_car, candidates[index])
+            mutateOneBiasesGene(candidates[index], aux_car)
+            mutateOneBiasesGene(aux_car, candidates[index])
+
+    return candidates
+
+
+def _pick_competition_screen(screen: pygame.Surface) -> str | None:
+    clock = pygame.time.Clock()
+    font = _font()
+    title_font = _font(32)
+    width, height = screen.get_size()
+
+    back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
+    options = [("Easy", "easy"), ("Hard", "hard"), ("Final", "final")]
+    buttons = [
+        (competition_id, Button(label, pygame.Rect(width // 2 - 480 + i * 340, height // 2 - 80, 300, 160)))
+        for i, (label, competition_id) in enumerate(options)
+    ]
+
+    while True:
+        for event in pygame.event.get():
+            _check_quit(event)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if back_button.contains(event.pos):
+                    return None
+                for competition_id, button in buttons:
+                    if button.contains(event.pos):
+                        return competition_id
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return None
+
+        mouse_pos = pygame.mouse.get_pos()
+        back_button.update_hover(mouse_pos)
+        for _, button in buttons:
+            button.update_hover(mouse_pos)
+
+        screen.fill(BLACK)
+        screen.blit(title_font.render("選擇要提交的競賽", True, WHITE), (60, 140))
+        back_button.draw(screen, font)
+        for _, button in buttons:
+            button.draw(screen, font)
+
+        pygame.display.update()
+        clock.tick(30)
+
+
+def _check_eligibility_screen(
+    screen: pygame.Surface, server_url: str, competition_id: str, group_id: str, username: str
+) -> bool:
+    clock = pygame.time.Clock()
+    font = _font()
+    title_font = _font(32)
+    width, height = screen.get_size()
+
+    result = check_eligibility(server_url, competition_id, group_id, username)
+
+    back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
+    start_button = Button("開始評測", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
+    can_start = isinstance(result, EligibilityResult) and result.eligible
+
+    while True:
+        for event in pygame.event.get():
+            _check_quit(event)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if back_button.contains(event.pos):
+                    return False
+                if can_start and start_button.contains(event.pos):
+                    return True
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return False
+
+        mouse_pos = pygame.mouse.get_pos()
+        back_button.update_hover(mouse_pos)
+        if can_start:
+            start_button.update_hover(mouse_pos)
+
+        screen.fill(BLACK)
+        screen.blit(title_font.render(f"資格檢查：{competition_id}", True, WHITE), (60, 140))
+        back_button.draw(screen, font)
+
+        if isinstance(result, NetworkError):
+            screen.blit(font.render(f"連線失敗：{result.message}", True, (255, 90, 90)), (60, 220))
+        elif result.eligible:
+            screen.blit(font.render(
+                f"可以提交。stage={result.stage}，version={result.competition_config_version}",
+                True, (120, 220, 120),
+            ), (60, 220))
+            start_button.draw(screen, font)
+        else:
+            reason_text = _REASON_MESSAGES.get(result.reason or "", result.reason or "未知原因")
+            screen.blit(font.render(f"目前無法提交：{reason_text}", True, (255, 90, 90)), (60, 220))
+            screen.blit(font.render(f"下次可提交時間：{result.next_submission_at}", True, WHITE), (60, 256))
+
+        pygame.display.update()
+        clock.tick(30)
+
+
+def _run_candidate_tournament_screen(
+    screen: pygame.Surface,
+    competition_id: str,
+    parent_a: Any,
+    parent_b: Any,
+    layer_sizes: list[int],
+    mutation_rate: int,
+) -> tuple[Car, ClientResult] | None:
+    clock = pygame.time.Clock()
+    font = _font(20)
+
+    assets = load_game_assets()
+    competition_map = load_competition_map(competition_id)
+    track_front = pygame.image.load(competition_map.front_path)
+    track_back = pygame.image.load(competition_map.back_path)
+    configure_car(track_back, assets.white_small_car, MAX_SPEED)
+
+    candidates = _build_candidates(parent_a, parent_b, layer_sizes, mutation_rate)
+    spawn = competition_map.spawn
+    for car in candidates:
+        car.reset_state(spawn["x"], spawn["y"], spawn["angle"], car_image=assets.white_small_car)
+
+    trackers = [competition_map.new_tracker() for _ in candidates]
+    previous_positions = [car.center for car in candidates]
+    active = [True] * len(candidates)
+
+    tick = 0
+    while tick < FRAME_LIMIT and any(active):
+        for event in pygame.event.get():
+            _check_quit(event)
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return None
+
+        tick += 1
+        for index, car in enumerate(candidates):
+            if not active[index]:
+                continue
+            previous = previous_positions[index]
+            car.update()
+            if car.collision():
+                active[index] = False
+            else:
+                car.feedforward()
+                car.takeAction()
+            trackers[index].advance(previous, car.center, tick=tick)
+            previous_positions[index] = car.center
+            if trackers[index].completed:
+                active[index] = False
+
+        screen.blit(track_front, (0, 0))
+        for car in candidates:
+            car.draw(screen)
+        screen.blit(
+            font.render(f"Tick {tick}/{FRAME_LIMIT}  Active: {sum(active)}", True, WHITE),
+            (20, 20),
+        )
+        pygame.display.update()
+        clock.tick(30)
+
+    client_results = [
+        ClientResult(
+            completed=tracker.completed,
+            lap_ticks=tracker.lap_ticks,
+            max_progress=tracker.max_progress,
+            ticks_to_max_progress=tracker.ticks_to_max_progress,
+        )
+        for tracker in trackers
+    ]
+    winner_index = min(range(len(candidates)), key=lambda i: client_results[i].ranking_key())
+    return candidates[winner_index], client_results[winner_index]
+
+
+def _submit_result_screen(
+    screen: pygame.Surface,
+    server_url: str,
+    competition_id: str,
+    group_id: str,
+    username: str,
+    winner_car: Car,
+    layer_sizes: list[int],
+    client_result: ClientResult,
+) -> None:
+    clock = pygame.time.Clock()
+    font = _font()
+    title_font = _font(32)
+    width, height = screen.get_size()
+
+    back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
+    submit_button = Button("送出", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
+    submitted = False
+    response: SubmissionAccepted | SubmissionRejected | NetworkError | None = None
+
+    if client_result.completed:
+        summary = f"完賽！耗時 {client_result.lap_ticks} ticks"
+    else:
+        summary = f"未完賽，最遠進度 {client_result.max_progress:.1f}px（第 {client_result.ticks_to_max_progress} tick 達到）"
+
+    while True:
+        for event in pygame.event.get():
+            _check_quit(event)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if back_button.contains(event.pos):
+                    return
+                if not submitted and submit_button.contains(event.pos):
+                    weight_payload = export_weight_payload(
+                        winner_car,
+                        generation=0,
+                        track_id=f"competition-{competition_id}",
+                        track_seed=0,
+                        nickname=username,
+                    )
+                    payload = SubmissionPayload(
+                        group_id=group_id,
+                        username=username,
+                        weights=weight_payload.weights,
+                        biases=weight_payload.biases,
+                    )
+                    response = submit_to_competition_server(
+                        server_url, competition_id, payload, client_result
+                    )
+                    submitted = True
+            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                return
+
+        mouse_pos = pygame.mouse.get_pos()
+        back_button.update_hover(mouse_pos)
+        if not submitted:
+            submit_button.update_hover(mouse_pos)
+
+        screen.fill(BLACK)
+        screen.blit(title_font.render(f"Local Winner：{competition_id}", True, WHITE), (60, 140))
+        screen.blit(font.render(summary, True, WHITE), (60, 200))
+        back_button.draw(screen, font)
+        if not submitted:
+            submit_button.draw(screen, font)
+
+        if isinstance(response, SubmissionAccepted):
+            status = response.body.get("status", "queued")
+            submission_id = response.body.get("submission_id", "")
+            screen.blit(font.render(
+                f"已送出！submission_id={submission_id}，狀態：{status}", True, (120, 220, 120)
+            ), (60, 260))
+        elif isinstance(response, SubmissionRejected):
+            reason_text = _REASON_MESSAGES.get(response.error, response.error)
+            screen.blit(font.render(f"送出被拒絕：{reason_text}", True, (255, 90, 90)), (60, 260))
+            if response.next_submission_at:
+                screen.blit(
+                    font.render(f"下次可提交時間：{response.next_submission_at}", True, WHITE),
+                    (60, 296),
+                )
+        elif isinstance(response, NetworkError):
+            screen.blit(font.render(f"連線失敗：{response.message}", True, (255, 90, 90)), (60, 260))
+
+        pygame.display.update()
+        clock.tick(30)
+
+
+def run_submission_screen(
+    screen: pygame.Surface,
+    server_url: str,
+    group_id: str,
+    username: str,
+    parent_a: Any,
+    parent_b: Any,
+    layer_sizes: list[int],
+    mutation_rate: int,
+) -> None:
+    competition_id = _pick_competition_screen(screen)
+    if competition_id is None:
+        return
+
+    can_proceed = _check_eligibility_screen(screen, server_url, competition_id, group_id, username)
+    if not can_proceed:
+        return
+
+    tournament_result = _run_candidate_tournament_screen(
+        screen, competition_id, parent_a, parent_b, layer_sizes, mutation_rate
+    )
+    if tournament_result is None:
+        return
+    winner_car, client_result = tournament_result
+
+    _submit_result_screen(
+        screen, server_url, competition_id, group_id, username, winner_car, layer_sizes, client_result
+    )

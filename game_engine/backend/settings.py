@@ -59,3 +59,17 @@ VALIDATION_DIFFICULTY_MAPS: dict[int, tuple[Path, Path]] = {
     2: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
     3: (DEFAULT_TRACK_FRONT_PATH, DEFAULT_TRACK_BACK_PATH),
 }
+
+# UI text is mostly Traditional Chinese; a CJK-capable font is required or
+# labels render blank. Path is OS-specific (no bundled font in the repo yet),
+# so probe known install locations per platform instead of hardcoding one.
+_CJK_FONT_CANDIDATES = [
+    "/System/Library/Fonts/PingFang.ttc",  # macOS
+    "/mnt/c/Windows/Fonts/msjh.ttc",  # WSL2 -> Windows host (Traditional Chinese)
+    "/mnt/c/Windows/Fonts/msyh.ttc",  # WSL2 -> Windows host (Simplified Chinese)
+    "C:/Windows/Fonts/msjh.ttc",  # native Windows
+    "C:/Windows/Fonts/msyh.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",  # common Linux CJK install
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+]
+CJK_FONT_PATH = next((path for path in _CJK_FONT_CANDIDATES if Path(path).exists()), None)
