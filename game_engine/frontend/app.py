@@ -1,25 +1,28 @@
 from datetime import UTC, datetime
 
 import pygame
-from shapely.geometry import Point
-from shapely.geometry.polygon import Polygon
+from shapely.geometry import Point  # type: ignore[import-untyped]
+from shapely.geometry.polygon import Polygon  # type: ignore[import-untyped]
 
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
-from GA.fitness import get_fitness_strategy, select_best_car
+from GA.fitness import beginner_mix, select_best_car, select_best_cars
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import export_weight_payload
+from game_engine.backend.simulator import Simulator
 from game_engine.backend.settings import (
     HIDDEN_LAYER,
     INPUT_LAYER,
     MAX_SPEED,
     OUTPUT_LAYER,
-    SCREEN_SIZE,
     TRACK_BACK_PATH,
     TRACK_FRONT_PATH,
+    TRACK_HALF_WIDTH,
+    TRACK_METADATA_PATH,
     TRAINING_DIFFICULTY_MAPS,
     WHITE,
 )
+from game_engine.backend.track import TrackGeometry
 from game_engine.backend.track_generator import generate_random_map
 from game_engine.backend.training_session import TrainingSession
 from game_engine.frontend.config_store import load_runtime_settings, save_runtime_settings
@@ -73,11 +76,18 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
     game_display = screen
     clock = pygame.time.Clock()
 
-    front_path, back_path = TRAINING_DIFFICULTY_MAPS[map_difficulty]
+    front_path, back_path, metadata_path = TRAINING_DIFFICULTY_MAPS[map_difficulty]
     bg = pygame.image.load(front_path)
     bg4 = pygame.image.load(back_path)
     configure_car(bg4, assets.white_small_car, MAX_SPEED)
-    fitness_strategy = get_fitness_strategy(session.fitness_strategy)
+    track = TrackGeometry.from_json(
+        metadata_path,
+        default_half_width=TRACK_HALF_WIDTH,
+    )
+    simulator = Simulator(track, settings.fps)
+
+    def score_frame(telemetry):
+        return beginner_mix(telemetry, fitness_config).total
 
     number_track = 1
     frames = 0
@@ -144,6 +154,8 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         if reset_player:
             car.reset_state(spawn_x, spawn_y)
             car.showlines = session.show_sensor_lines
+            car.refresh_track_state(track)
+        simulator.reset_population(nn_cars)
         session.alive_count = len(nn_cars)
 
     def remove_selected_car(nn_car):
@@ -183,7 +195,7 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
             f"Scene: {shell.current_scene.name}", True, WHITE
         )
         info_text9 = font.render(
-            f"Fitness: {session.fitness_strategy}", True, WHITE
+            "Fitness: beginner_mix", True, WHITE
         )
         info_text1_rect = info_text1.get_rect().move(info_text_x, info_text_y)
         info_text2_rect = info_text2.get_rect().move(
@@ -236,8 +248,13 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
 
     def breed_selected():
         nonlocal nn_cars
-        if len(session.selected_cars) != 2:
+        if len(nn_cars) < 2:
             return False
+        session.selected_cars = select_best_cars(
+            nn_cars,
+            fitness_config,
+            count=2,
+        )
         nn_cars = session.breed_population(
             population=nn_cars,
             aux_car=aux_car,
@@ -256,22 +273,16 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
 
         for nn_car in nn_cars:
             if not nn_car.collided:
-                nn_car.update()
-
-            if nn_car.collision():
-                nn_car.collided = True
-                setattr(nn_car, "fitness_score", fitness_strategy(nn_car))
-                session.mark_collision(nn_car)
-            else:
-                nn_car.feedforward()
-                nn_car.takeAction()
+                step_result = simulator.step(nn_car, score_frame)
+                if step_result.telemetry.collided:
+                    session.mark_collision(nn_car)
             nn_car.draw(game_display)
 
         if session.show_player:
-            car.update()
-            if car.collision():
+            car.update(track)
+            if car.collision(track):
                 car.resetPosition()
-                car.update()
+                car.refresh_track_state(track)
             car.draw(game_display)
 
         shell.current_scene.render_overlay(game_display, font)
@@ -288,10 +299,15 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         pygame.display.update()
 
     def do_new_random_map():
-        nonlocal bg, bg4
+        nonlocal bg, bg4, simulator, track
         generate_random_map(game_display)
         bg = pygame.image.load(TRACK_FRONT_PATH)
         bg4 = pygame.image.load(TRACK_BACK_PATH)
+        track = TrackGeometry.from_json(
+            TRACK_METADATA_PATH,
+            default_half_width=TRACK_HALF_WIDTH,
+        )
+        simulator = Simulator(track, settings.fps)
         set_collision_map(bg4)
         configure_car(bg4, assets.white_small_car, MAX_SPEED)
         apply_track_spawn(reset_player=True)
@@ -321,6 +337,8 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
         RecordStore().save_record(record)
 
     apply_sensor_line_state()
+    simulator.reset_population(nn_cars)
+    car.refresh_track_state(track)
 
     while True:
         leave_requested = False
@@ -353,11 +371,7 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
                 if event.key == ord("n"):
                     number_track = 2
                     session.track_index = 2
-                    generate_random_map(game_display)
-                    bg = pygame.image.load(TRACK_FRONT_PATH)
-                    bg4 = pygame.image.load(TRACK_BACK_PATH)
-                    set_collision_map(bg4)
-                    apply_track_spawn(reset_player=True)
+                    do_new_random_map()
                 if event.key == ord("b"):
                     breed_selected()
                 if event.key == ord("m"):
@@ -366,11 +380,7 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
                     elif breed_selected():
                         number_track = 2
                         session.track_index = 2
-                        generate_random_map(game_display)
-                        bg = pygame.image.load(TRACK_FRONT_PATH)
-                        bg4 = pygame.image.load(TRACK_BACK_PATH)
-                        set_collision_map(bg4)
-                        apply_track_spawn(reset_player=True)
+                        do_new_random_map()
                 if event.key == ord("r"):
                     session.reset_generation()
                     nn_cars.clear()
@@ -426,8 +436,6 @@ def run_training_loop(screen, settings, profile, fitness_config, map_difficulty)
                                 if nn_car.collided:
                                     nn_car.velocity = 0
                                     nn_car.acceleration = 0
-                                if not nn_car.collided:
-                                    nn_car.update()
                                 break
 
                 if mouse_buttons[2]:

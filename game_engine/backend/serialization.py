@@ -21,7 +21,11 @@ def export_weight_payload(
     nickname: str,
     fitness_score: float | None = None,
 ) -> WeightPayload:
-    score = float(car.score if fitness_score is None else fitness_score)
+    score = float(
+        getattr(car, "fitness_score", 0.0)
+        if fitness_score is None
+        else fitness_score
+    )
     return WeightPayload(
         model_version="v1",
         layer_sizes=[int(size) for size in car.sizes],
@@ -54,4 +58,3 @@ def save_weight_payload(payload: WeightPayload, path: Path) -> None:
 def load_weight_payload(path: Path) -> WeightPayload:
     data = json.loads(path.read_text(encoding="utf-8"))
     return WeightPayload.from_dict(data)
-

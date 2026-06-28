@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 
 @dataclass(slots=True)
@@ -91,16 +92,189 @@ class LoginProfile:
         return asdict(self)
 
 
-@dataclass(slots=True)
+FitnessWeight = int | float
+
+
+@dataclass(slots=True, init=False)
 class FitnessConfig:
-    weights: dict[str, int]
+    speed: FitnessWeight
+    progress: FitnessWeight
+    centered: FitnessWeight
+    alignment: FitnessWeight
+    safety: FitnessWeight
+    stall: FitnessWeight
+    spin: FitnessWeight
+    wrong_way: FitnessWeight
+    time: FitnessWeight
+    crash: FitnessWeight
+
+    WEIGHT_NAMES: ClassVar[tuple[str, ...]] = (
+        "speed",
+        "progress",
+        "centered",
+        "alignment",
+        "safety",
+        "stall",
+        "spin",
+        "wrong_way",
+        "time",
+        "crash",
+    )
+
+    def __init__(
+        self,
+        *,
+        speed: FitnessWeight = 0,
+        progress: FitnessWeight = 0,
+        centered: FitnessWeight = 0,
+        alignment: FitnessWeight = 0,
+        safety: FitnessWeight = 0,
+        stall: FitnessWeight = 0,
+        spin: FitnessWeight = 0,
+        wrong_way: FitnessWeight = 0,
+        time: FitnessWeight = 0,
+        crash: FitnessWeight = 0,
+        weights: Mapping[str, FitnessWeight] | None = None,
+    ) -> None:
+        values: dict[str, FitnessWeight] = {
+            "speed": speed,
+            "progress": progress,
+            "centered": centered,
+            "alignment": alignment,
+            "safety": safety,
+            "stall": stall,
+            "spin": spin,
+            "wrong_way": wrong_way,
+            "time": time,
+            "crash": crash,
+        }
+        if weights is not None:
+            unknown_names = set(weights) - set(self.WEIGHT_NAMES)
+            if unknown_names:
+                raise ValueError(
+                    "Unsupported fitness keys: "
+                    + ", ".join(sorted(unknown_names))
+                )
+            values.update(weights)
+
+        for name, value in values.items():
+            setattr(self, name, _coerce_fitness_weight(name, value))
+
+    @property
+    def weights(self) -> dict[str, FitnessWeight]:
+        """Return a serializable snapshot of all ten weights."""
+        return {name: getattr(self, name) for name in self.WEIGHT_NAMES}
+
+    @classmethod
+    def weight_names(cls) -> tuple[str, ...]:
+        return cls.WEIGHT_NAMES
+
+    @classmethod
+    def preset_names(cls) -> tuple[str, ...]:
+        return tuple(_FITNESS_PRESET_VALUES)
+
+    @classmethod
+    def from_preset(cls, name: str) -> "FitnessConfig":
+        try:
+            preset = _FITNESS_PRESET_VALUES[name]
+        except KeyError as error:
+            raise ValueError(f"Unknown fitness preset: {name}") from error
+        return cls(weights=preset)
+
+    @classmethod
+    def presets(cls) -> dict[str, "FitnessConfig"]:
+        """Return independent config objects suitable for UI selection."""
+        return {
+            name: cls(weights=weights)
+            for name, weights in _FITNESS_PRESET_VALUES.items()
+        }
+
+    def copy(self) -> "FitnessConfig":
+        return type(self)(weights=self.weights)
+
+    def apply_preset(self, name: str) -> None:
+        preset = type(self).from_preset(name)
+        self.update_weights(preset.weights)
+
+    def get_weight(self, name: str) -> FitnessWeight:
+        if name not in self.WEIGHT_NAMES:
+            raise ValueError(f"Unsupported fitness key: {name}")
+        return getattr(self, name)
+
+    def set_weight(self, name: str, value: FitnessWeight) -> None:
+        if name not in self.WEIGHT_NAMES:
+            raise ValueError(f"Unsupported fitness key: {name}")
+        setattr(self, name, _coerce_fitness_weight(name, value))
+
+    def update_weights(self, weights: Mapping[str, FitnessWeight]) -> None:
+        unknown_names = set(weights) - set(self.WEIGHT_NAMES)
+        if unknown_names:
+            raise ValueError(
+                "Unsupported fitness keys: " + ", ".join(sorted(unknown_names))
+            )
+        for name, value in weights.items():
+            self.set_weight(name, value)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "FitnessConfig":
-        return cls(weights={str(key): int(value) for key, value in data["weights"].items()})
+        raw_weights = data.get("weights", data)
+        return cls(
+            weights={
+                str(key): _coerce_fitness_weight(str(key), value)
+                for key, value in raw_weights.items()
+            }
+        )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {"weights": self.weights}
+
+
+def _coerce_fitness_weight(name: str, value: Any) -> FitnessWeight:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"Fitness weight {name!r} must be numeric")
+    numeric = float(value)
+    return int(numeric) if numeric.is_integer() else numeric
+
+
+_FITNESS_PRESET_VALUES: dict[str, dict[str, FitnessWeight]] = {
+    "balanced_v1": {
+        "speed": 25,
+        "progress": 10,
+        "centered": 35,
+        "alignment": 40,
+        "safety": 25,
+        "stall": 20,
+        "spin": 15,
+        "wrong_way": 40,
+        "time": 5,
+        "crash": 50,
+    },
+    "progress_first_v1": {
+        "speed": 30,
+        "progress": 20,
+        "centered": 10,
+        "alignment": 25,
+        "safety": 10,
+        "stall": 15,
+        "spin": 10,
+        "wrong_way": 35,
+        "time": 3,
+        "crash": 35,
+    },
+    "safe_finish_v1": {
+        "speed": 15,
+        "progress": 10,
+        "centered": 60,
+        "alignment": 60,
+        "safety": 50,
+        "stall": 20,
+        "spin": 25,
+        "wrong_way": 70,
+        "time": 5,
+        "crash": 90,
+    },
+    "equal_50_debug": {name: 50 for name in FitnessConfig.WEIGHT_NAMES},
+}
 
 
 @dataclass(slots=True)

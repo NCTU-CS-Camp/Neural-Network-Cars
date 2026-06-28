@@ -16,10 +16,12 @@ DEFAULT_TRACK_BACK_PATH = TRACKS_DIR / "bg4.png"
 DEFAULT_TRACK_FRONT_PATH = TRACKS_DIR / "bg7.png"
 TRACK_BACK_PATH = TRACKS_DIR / "randomGeneratedTrackBack.png"
 TRACK_FRONT_PATH = TRACKS_DIR / "randomGeneratedTrackFront.png"
+TRACK_METADATA_PATH = TRACKS_DIR / "randomGeneratedTrack.json"
 
 SCREEN_SIZE = WIDTH, HEIGHT = 1600, 900
 FPS = 30
 MAX_SPEED = 10
+TRACK_HALF_WIDTH = 66.0
 
 WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)
@@ -32,10 +34,22 @@ HIDDEN_LAYER = 6
 OUTPUT_LAYER = 4
 NUM_OF_NN_CARS = 50
 
-TRAINING_DIFFICULTY_MAPS: dict[int, tuple[Path, Path]] = {
-    1: (TRAIN_MAPS_DIR / "train_easy.png", TRAIN_MAPS_DIR / "train_easy_back.png"),
-    2: (TRAIN_MAPS_DIR / "train_hard.png",  TRAIN_MAPS_DIR / "train_hard_back.png"),
-    3: (TRACK_FRONT_PATH, TRACK_BACK_PATH),  # random, generated at runtime
+TRAINING_DIFFICULTY_MAPS: dict[int, tuple[Path, Path, Path]] = {
+    1: (
+        TRAIN_MAPS_DIR / "train_easy.png",
+        TRAIN_MAPS_DIR / "train_easy_back.png",
+        TRAIN_MAPS_DIR / "train_easy.json",
+    ),
+    2: (
+        TRAIN_MAPS_DIR / "train_hard.png",
+        TRAIN_MAPS_DIR / "train_hard_back.png",
+        TRAIN_MAPS_DIR / "train_hard.json",
+    ),
+    3: (
+        TRACK_FRONT_PATH,
+        TRACK_BACK_PATH,
+        TRACK_METADATA_PATH,
+    ),  # random, generated at runtime
 }
 
 VALIDATION_DIFFICULTY_MAPS: dict[int, tuple[Path, Path]] = {
