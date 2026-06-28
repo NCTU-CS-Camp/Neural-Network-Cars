@@ -404,6 +404,67 @@ def test_dual_replay_sessions_keep_collision_surfaces_per_car():
     assert sessions["hard"].cars[0].car.collision_surface is sessions["hard"].track.collision
 
 
+def test_replay_payload_identity_detects_leaderboard_and_restart_changes():
+    from game_engine.frontend.replay_client import _replay_payload_identity
+
+    def state(*, generation: int = 0, submission_id: str = "sub_a") -> dict:
+        return {
+            "stage": "phase_one",
+            "replay_generation": generation,
+            "replays": {
+                "easy": {
+                    "leaderboard": [
+                        {"rank": 1, "submission_id": submission_id},
+                    ]
+                }
+            },
+        }
+
+    first = state()
+
+    assert _replay_payload_identity(first) != _replay_payload_identity(
+        state(submission_id="sub_b")
+    )
+    assert _replay_payload_identity(first) != _replay_payload_identity(state(generation=1))
+
+
+def test_replay_sessions_hide_unseen_leaderboard_until_revealed():
+    from game_engine.backend.assets import load_game_assets
+    from game_engine.frontend.replay_client import (
+        _reveal_leaderboard_if_stopped,
+        leaderboard_signature,
+        load_replay_sessions,
+    )
+
+    pygame.init()
+    pygame.display.set_mode((1, 1))
+    item = {
+        "rank": 1,
+        "submission_id": "sub_demo",
+        "group_id": "1",
+        "username": "ada",
+        "client_result": make_payload()["client_result"],
+        "weights": [[0.0] * 36, [0.0] * 24],
+        "biases": [[0.0] * 6, [0.0] * 4],
+    }
+    replay = {"items": [item], "leaderboard": [item]}
+    state = {"replays": {"easy": replay}}
+    revealed: dict[str, tuple[tuple[int, str], ...]] = {}
+    sessions = load_replay_sessions(state, load_game_assets(), revealed)
+    session = sessions["easy"]
+
+    assert session.leaderboard_revealed is False
+
+    session.stopped = True
+    _reveal_leaderboard_if_stopped(session, 10.0, revealed)
+
+    assert session.leaderboard_revealed is True
+    assert session.reveal_highlight_until == 12.0
+    assert revealed["easy"] == leaderboard_signature([item])
+    restarted = load_replay_sessions(state, load_game_assets(), revealed)["easy"]
+    assert restarted.leaderboard_revealed is True
+
+
 def test_replay_scaled_rect_preserves_virtual_canvas_aspect_ratio():
     from game_engine.frontend.replay_client import scaled_rect_for_window
 
@@ -455,7 +516,7 @@ def test_empty_replay_session_stops_without_advancing_frames():
 
 
 def test_phase_one_draw_ticks_both_sides_without_short_circuit():
-    from game_engine.frontend.replay_client import _draw_phase_one
+    from game_engine.frontend.replay_client import ReplayStatus, _draw_phase_one, _fonts
 
     class Track:
         front = pygame.Surface((1600, 900))
@@ -465,6 +526,9 @@ def test_phase_one_draw_ticks_both_sides_without_short_circuit():
         track = Track()
         cars = []
         leaderboard = []
+        leaderboard_signature = ()
+        leaderboard_revealed = True
+        reveal_highlight_until = 0.0
         has_cars = True
         stopped = False
 
@@ -477,13 +541,7 @@ def test_phase_one_draw_ticks_both_sides_without_short_circuit():
 
     pygame.init()
     screen = pygame.Surface((1600, 900))
-    fonts = {
-        "title": pygame.font.SysFont("Arial", 28, bold=True),
-        "panel": pygame.font.SysFont("Arial", 18, bold=True),
-        "row": pygame.font.SysFont("Arial", 17, bold=True),
-        "label": pygame.font.SysFont("Arial", 15, bold=True),
-        "meta": pygame.font.SysFont("Arial", 14),
-    }
+    fonts = _fonts()
     easy = Session()
     hard = Session()
 
@@ -492,7 +550,9 @@ def test_phase_one_draw_ticks_both_sides_without_short_circuit():
         easy,
         hard,
         fonts,
-        "RUNNING / PHASE 1 / EASY + HARD",
+        ReplayStatus("重播中 · 第一階段 / EASY + HARD"),
+        0.0,
+        {},
     )
 
     assert finished is False

@@ -28,6 +28,7 @@ from shared.contracts import EXPECTED_LAYER_SIZES, SubmissionPayload
 
 
 Color = tuple[int, int, int]
+LeaderboardSignature = tuple[tuple[int, str], ...]
 BACKGROUND: Color = (11, 17, 24)
 PANEL: Color = (16, 25, 33)
 BORDER: Color = (39, 54, 67)
@@ -39,6 +40,8 @@ FINAL_ACCENT: Color = (217, 168, 255)
 DIM_COLOR: Color = (92, 105, 116)
 REPLAY_PROGRESS_DISTANCE_PX = 24.0
 REPLAY_HOLD_SECONDS = 3.0
+REPLAY_FETCH_SECONDS = 5.0
+LEADERBOARD_REVEAL_HIGHLIGHT_SECONDS = 2.0
 VIRTUAL_SIZE = SCREEN_SIZE
 REPLAY_COLORS: list[Color] = [
     (76, 169, 255),
@@ -122,6 +125,9 @@ class ReplaySession:
     track: ReplayTrack
     cars: list[ReplayCar]
     leaderboard: list[dict[str, Any]]
+    leaderboard_signature: LeaderboardSignature = ()
+    leaderboard_revealed: bool = False
+    reveal_highlight_until: float = 0.0
     frame_limit: int = FRAME_LIMIT
     frames: int = 0
     stopped: bool = False
@@ -147,6 +153,14 @@ class ReplaySession:
         return self.stopped
 
 
+@dataclass(frozen=True, slots=True)
+class ReplayStatus:
+    label: str
+    elapsed_seconds: float = 0.0
+    restart_seconds: float | None = None
+    snapshot_countdown: str = "-"
+
+
 def run(
     server_url: str | None = None,
     token: str | None = None,
@@ -167,10 +181,10 @@ def run(
     )
 
     state: dict[str, Any] | None = None
+    pending_state: dict[str, Any] | None = None
     sessions: dict[str, ReplaySession] = {}
+    revealed_signatures: dict[str, LeaderboardSignature] = {}
     next_fetch_at = 0.0
-    next_generation_check_at = 0.0
-    replay_generation: int | None = None
     status = "Connecting to protected replay feed"
     hold_until: float | None = None
 
@@ -211,29 +225,38 @@ def run(
                             return
 
             now = time.monotonic()
-            if not sessions and now >= next_fetch_at:
+            if now >= next_fetch_at:
                 try:
-                    state = fetch_replay_state(replay_url, replay_token)
-                    sessions = load_replay_sessions(state, assets)
-                    replay_generation = int(state.get("replay_generation", 0))
-                    hold_until = None
+                    incoming_state = fetch_replay_state(replay_url, replay_token)
+                    next_fetch_at = now + REPLAY_FETCH_SECONDS
+                    if state is None:
+                        state = incoming_state
+                        sessions = load_replay_sessions(
+                            state,
+                            assets,
+                            revealed_signatures,
+                        )
+                        pending_state = None
+                        hold_until = None
+                    elif _replay_payload_identity(incoming_state) != _replay_payload_identity(state):
+                        if _has_runnable_sessions(sessions):
+                            pending_state = incoming_state
+                        else:
+                            state = incoming_state
+                            sessions = load_replay_sessions(
+                                state,
+                                assets,
+                                revealed_signatures,
+                            )
+                            pending_state = None
+                            hold_until = None
+                    else:
+                        state = incoming_state
+                        pending_state = None
                     status = "RUNNING"
                 except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
                     status = f"Replay feed unavailable: {exc}"
-                    next_fetch_at = now + 5.0
-
-            if sessions and now >= next_generation_check_at:
-                try:
-                    current_generation = fetch_replay_generation(replay_url)
-                    if replay_generation is not None and current_generation != replay_generation:
-                        sessions = {}
-                        state = None
-                        hold_until = None
-                        next_fetch_at = 0.0
-                        status = "Restarting replay"
-                    next_generation_check_at = now + 1.0
-                except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError):
-                    next_generation_check_at = now + 5.0
+                    next_fetch_at = now + REPLAY_FETCH_SECONDS
 
             virtual_screen.fill(BACKGROUND)
             if state is None:
@@ -246,7 +269,7 @@ def run(
             elif state.get("stage") == "final":
                 session = sessions.get("final")
                 if session is not None:
-                    display_status = _replay_status_text(
+                    display_status = _replay_status(
                         "FINAL",
                         (session,),
                         state,
@@ -258,21 +281,21 @@ def run(
                         session,
                         fonts,
                         display_status,
+                        now,
+                        revealed_signatures,
                     )
-                    previous_hold_until = hold_until
-                    hold_until = _handle_finished_cycle(
+                    hold_until, cycle_done = _handle_finished_cycle(
                         finished,
                         now,
                         hold_until,
-                        sessions,
                     )
-                    if (
-                        previous_hold_until is not None
-                        and hold_until is None
-                        and not sessions
-                    ):
-                        state = None
-                        next_fetch_at = 0.0
+                    if cycle_done:
+                        state, sessions, pending_state, hold_until = _start_next_replay_cycle(
+                            state,
+                            pending_state,
+                            assets,
+                            revealed_signatures,
+                        )
                 else:
                     _draw_final_waiting(
                         virtual_screen,
@@ -286,7 +309,7 @@ def run(
                 if easy is not None and hard is not None:
                     runnable_sessions = _runnable_sessions(easy, hard)
                     if runnable_sessions:
-                        display_status = _replay_status_text(
+                        display_status = _replay_status(
                             _phase_one_stage_label(runnable_sessions),
                             runnable_sessions,
                             state,
@@ -301,22 +324,22 @@ def run(
                         hard,
                         fonts,
                         display_status,
+                        now,
+                        revealed_signatures,
                     )
                     if runnable_sessions:
-                        previous_hold_until = hold_until
-                        hold_until = _handle_finished_cycle(
+                        hold_until, cycle_done = _handle_finished_cycle(
                             finished,
                             now,
                             hold_until,
-                            sessions,
                         )
-                        if (
-                            previous_hold_until is not None
-                            and hold_until is None
-                            and not sessions
-                        ):
-                            state = None
-                            next_fetch_at = 0.0
+                        if cycle_done:
+                            state, sessions, pending_state, hold_until = _start_next_replay_cycle(
+                                state,
+                                pending_state,
+                                assets,
+                                revealed_signatures,
+                            )
                     else:
                         hold_until = None
                         if now >= next_fetch_at:
@@ -384,28 +407,28 @@ def fetch_replay_state(server_url: str, token: str) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
-def fetch_replay_generation(server_url: str) -> int:
-    with urlopen(server_url.rstrip("/") + "/v2/state", timeout=5.0) as response:
-        state = json.loads(response.read().decode("utf-8"))
-    return int(state["replay_generation"])
-
-
-def _replay_status_text(
+def _replay_status(
     stage: str,
     sessions: tuple[ReplaySession, ...],
     state: dict[str, Any],
     now: float,
     hold_until: float | None,
-) -> str:
+) -> ReplayStatus:
     elapsed = max((session.frames for session in sessions), default=0) / FPS
     snapshot = _snapshot_countdown_text(state)
     if hold_until is not None:
         remaining = max(0.0, hold_until - now)
-        return (
-            f"REPLAY COMPLETE / {stage}  |  elapsed {elapsed:.1f}s"
-            f"  |  next replay {remaining:.0f}s  |  snapshot {snapshot}"
+        return ReplayStatus(
+            label=f"重播完成 · {stage}",
+            elapsed_seconds=elapsed,
+            restart_seconds=remaining,
+            snapshot_countdown=snapshot,
         )
-    return f"RUNNING / {stage}  |  elapsed {elapsed:.1f}s  |  snapshot {snapshot}"
+    return ReplayStatus(
+        label=f"重播中 · {stage}",
+        elapsed_seconds=elapsed,
+        snapshot_countdown=snapshot,
+    )
 
 
 def _runnable_sessions(*sessions: ReplaySession) -> tuple[ReplaySession, ...]:
@@ -414,14 +437,19 @@ def _runnable_sessions(*sessions: ReplaySession) -> tuple[ReplaySession, ...]:
 
 def _phase_one_stage_label(sessions: tuple[ReplaySession, ...]) -> str:
     names = " + ".join(session.competition_id.upper() for session in sessions)
-    return f"PHASE 1 / {names}" if names else "PHASE 1 / WAITING"
+    return f"第一階段 / {names}" if names else "第一階段 / 等待"
 
 
-def _waiting_status_text(state: dict[str, Any]) -> str:
-    return f"WAITING  |  snapshot {_snapshot_countdown_text(state)}"
+def _waiting_status_text(state: dict[str, Any]) -> ReplayStatus:
+    return ReplayStatus(
+        label="等待提交資料",
+        snapshot_countdown=_snapshot_countdown_text(state),
+    )
 
 
 def _snapshot_countdown_text(state: dict[str, Any]) -> str:
+    if state.get("stage") == "final":
+        return "-"
     target = state.get("config", {}).get("next_phase_one_batch_at")
     if not target:
         return "-"
@@ -435,29 +463,80 @@ def _snapshot_countdown_text(state: dict[str, Any]) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
+def leaderboard_signature(leaderboard: list[dict[str, Any]]) -> LeaderboardSignature:
+    return tuple(
+        (int(entry.get("rank", 0)), str(entry.get("submission_id", "")))
+        for entry in leaderboard
+    )
+
+
+def _replay_payload_signatures(state: dict[str, Any]) -> tuple[tuple[str, LeaderboardSignature], ...]:
+    return tuple(
+        sorted(
+            (
+                str(competition_id),
+                leaderboard_signature(list(replay.get("leaderboard", []))),
+            )
+            for competition_id, replay in state.get("replays", {}).items()
+        )
+    )
+
+
+def _replay_payload_identity(state: dict[str, Any]) -> tuple[str, int, tuple[tuple[str, LeaderboardSignature], ...]]:
+    return (
+        str(state.get("stage", "")),
+        int(state.get("replay_generation", 0)),
+        _replay_payload_signatures(state),
+    )
+
+
+def _has_runnable_sessions(sessions: dict[str, ReplaySession]) -> bool:
+    return any(session.has_cars for session in sessions.values())
+
+
 def _handle_finished_cycle(
     finished: bool,
     now: float,
     hold_until: float | None,
-    sessions: dict[str, ReplaySession],
-) -> float | None:
+) -> tuple[float | None, bool]:
     if not finished:
-        return None
+        return None, False
     if hold_until is None:
-        return now + REPLAY_HOLD_SECONDS
+        return now + REPLAY_HOLD_SECONDS, False
     if now < hold_until:
-        return hold_until
-    sessions.clear()
-    return None
+        return hold_until, False
+    return None, True
 
 
-def load_replay_sessions(state: dict[str, Any], assets: GameAssets) -> dict[str, ReplaySession]:
+def _start_next_replay_cycle(
+    state: dict[str, Any] | None,
+    pending_state: dict[str, Any] | None,
+    assets: GameAssets,
+    revealed_signatures: dict[str, LeaderboardSignature],
+) -> tuple[dict[str, Any] | None, dict[str, ReplaySession], dict[str, Any] | None, None]:
+    next_state = pending_state or state
+    if next_state is None:
+        return None, {}, None, None
+    return (
+        next_state,
+        load_replay_sessions(next_state, assets, revealed_signatures),
+        None,
+        None,
+    )
+
+
+def load_replay_sessions(
+    state: dict[str, Any],
+    assets: GameAssets,
+    revealed_signatures: dict[str, LeaderboardSignature] | None = None,
+) -> dict[str, ReplaySession]:
     sessions = {}
     for competition_id, replay in state.get("replays", {}).items():
         sessions[competition_id] = load_replay_session(
             competition_id,
             replay,
             assets,
+            revealed_signatures or {},
         )
     return sessions
 
@@ -466,6 +545,7 @@ def load_replay_session(
     competition_id: str,
     replay: dict[str, Any],
     assets: GameAssets,
+    revealed_signatures: dict[str, LeaderboardSignature] | None = None,
 ) -> ReplaySession:
     identifier = CompetitionId(competition_id)
     competition_map = get_competition_map(identifier)
@@ -483,11 +563,20 @@ def load_replay_session(
         )
         for index, item in enumerate(replay.get("items", [])[:PHASE_ONE_REPLAY_LIMIT])
     ]
+    leaderboard = list(replay.get("leaderboard", []))
+    signature = leaderboard_signature(leaderboard)
+    is_revealed = (
+        not signature
+        or not cars
+        or signature == (revealed_signatures or {}).get(competition_id)
+    )
     return ReplaySession(
         competition_id=competition_id,
         track=track,
         cars=cars,
-        leaderboard=list(replay.get("leaderboard", [])),
+        leaderboard=leaderboard,
+        leaderboard_signature=signature,
+        leaderboard_revealed=is_revealed,
     )
 
 
@@ -553,17 +642,35 @@ def _draw_phase_one(
     easy: ReplaySession,
     hard: ReplaySession,
     fonts: dict[str, pygame.font.Font],
-    status: str,
+    status: ReplayStatus,
+    now: float,
+    revealed_signatures: dict[str, LeaderboardSignature],
 ) -> bool:
     _draw_header(screen, fonts, "PHASE 1", status)
-    easy_rect = pygame.Rect(24, 94, 764, 430)
-    hard_rect = pygame.Rect(812, 94, 764, 430)
+    easy_rect = pygame.Rect(24, 136, 764, 390)
+    hard_rect = pygame.Rect(812, 136, 764, 390)
     _draw_map_panel(screen, easy, easy_rect, "EASY", EASY_ACCENT, fonts)
     _draw_map_panel(screen, hard, hard_rect, "HARD", HARD_ACCENT, fonts)
-    _draw_compact_leaderboard(screen, easy, pygame.Rect(24, 554, 764, 316), EASY_ACCENT, fonts)
-    _draw_compact_leaderboard(screen, hard, pygame.Rect(812, 554, 764, 316), HARD_ACCENT, fonts)
+    _draw_compact_leaderboard(
+        screen,
+        easy,
+        pygame.Rect(24, 554, 764, 316),
+        EASY_ACCENT,
+        fonts,
+        now=now,
+    )
+    _draw_compact_leaderboard(
+        screen,
+        hard,
+        pygame.Rect(812, 554, 764, 316),
+        HARD_ACCENT,
+        fonts,
+        now=now,
+    )
     easy_finished = easy.tick()
     hard_finished = hard.tick()
+    _reveal_leaderboard_if_stopped(easy, now, revealed_signatures)
+    _reveal_leaderboard_if_stopped(hard, now, revealed_signatures)
     return easy_finished and hard_finished
 
 
@@ -571,24 +678,73 @@ def _draw_final(
     screen: pygame.Surface,
     session: ReplaySession,
     fonts: dict[str, pygame.font.Font],
-    status: str,
+    status: ReplayStatus,
+    now: float,
+    revealed_signatures: dict[str, LeaderboardSignature],
 ) -> bool:
     _draw_header(screen, fonts, "FINAL", status)
-    _draw_map_panel(screen, session, pygame.Rect(24, 94, 1032, 581), "FINAL HARD MAP", FINAL_ACCENT, fonts)
-    _draw_compact_leaderboard(screen, session, pygame.Rect(1080, 94, 496, 776), FINAL_ACCENT, fonts, rows=10)
-    return session.tick()
+    _draw_map_panel(
+        screen,
+        session,
+        pygame.Rect(24, 136, 1032, 540),
+        "FINAL HARD MAP",
+        FINAL_ACCENT,
+        fonts,
+    )
+    _draw_compact_leaderboard(
+        screen,
+        session,
+        pygame.Rect(1080, 136, 496, 734),
+        FINAL_ACCENT,
+        fonts,
+        rows=10,
+        now=now,
+    )
+    finished = session.tick()
+    _reveal_leaderboard_if_stopped(session, now, revealed_signatures)
+    return finished
 
 
 def _draw_header(
     screen: pygame.Surface,
     fonts: dict[str, pygame.font.Font],
     stage: str,
-    status: str,
+    status: ReplayStatus,
 ) -> None:
     screen.blit(fonts["title"].render(f"NEURAL CARS  /  {stage}", True, TEXT), (24, 20))
-    text = fonts["meta"].render(status, True, MUTED)
-    screen.blit(text, (SCREEN_SIZE[0] - text.get_width() - 24, 31))
-    pygame.draw.line(screen, BORDER, (24, 72), (SCREEN_SIZE[0] - 24, 72), 1)
+    bar = pygame.Rect(24, 58, SCREEN_SIZE[0] - 48, 54)
+    pygame.draw.rect(screen, PANEL, bar)
+    pygame.draw.rect(screen, BORDER, bar, 1)
+    pygame.draw.rect(screen, EASY_ACCENT, (bar.x, bar.y, 5, bar.height))
+    screen.blit(fonts["status"].render(status.label, True, TEXT), (bar.x + 18, bar.y + 10))
+    chip_x = bar.right - 18
+    chips = [
+        f"已跑 {status.elapsed_seconds:.1f}s",
+        f"下次重播 {status.restart_seconds:.0f}s"
+        if status.restart_seconds is not None
+        else "下次重播 -",
+        f"下次快照 {status.snapshot_countdown}",
+    ]
+    for text in reversed(chips):
+        chip_x = _draw_status_chip(screen, fonts, text, chip_x, bar.centery)
+    pygame.draw.line(screen, BORDER, (24, 124), (SCREEN_SIZE[0] - 24, 124), 1)
+
+
+def _draw_status_chip(
+    screen: pygame.Surface,
+    fonts: dict[str, pygame.font.Font],
+    text: str,
+    right: int,
+    center_y: int,
+) -> int:
+    rendered = fonts["chip"].render(text, True, TEXT)
+    chip = pygame.Rect(0, 0, rendered.get_width() + 22, 34)
+    chip.right = right
+    chip.centery = center_y
+    pygame.draw.rect(screen, BACKGROUND, chip, border_radius=4)
+    pygame.draw.rect(screen, BORDER, chip, 1, border_radius=4)
+    screen.blit(rendered, (chip.x + 11, chip.y + 7))
+    return chip.x - 10
 
 
 def _draw_map_panel(
@@ -644,13 +800,18 @@ def _draw_compact_leaderboard(
     fonts: dict[str, pygame.font.Font],
     *,
     rows: int = 5,
+    now: float = 0.0,
 ) -> None:
     pygame.draw.rect(screen, PANEL, rect)
-    pygame.draw.rect(screen, BORDER, rect, 1)
+    highlighted = session.reveal_highlight_until > now
+    pygame.draw.rect(screen, accent if highlighted else BORDER, rect, 3 if highlighted else 1)
     screen.blit(fonts["panel"].render("LEADERBOARD", True, TEXT), (rect.x + 14, rect.y + 13))
     pygame.draw.line(screen, accent, (rect.x + 14, rect.y + 43), (rect.right - 14, rect.y + 43), 2)
     if not session.leaderboard:
         screen.blit(fonts["meta"].render("Waiting for completed submissions", True, MUTED), (rect.x + 14, rect.y + 62))
+        return
+    if not session.leaderboard_revealed:
+        _draw_leaderboard_reveal_panel(screen, session, rect, accent, fonts)
         return
     y = rect.y + 60
     for entry in session.leaderboard[:rows]:
@@ -666,12 +827,52 @@ def _draw_compact_leaderboard(
         y += 48
 
 
-def _draw_phase_one_waiting(screen: pygame.Surface, fonts: dict[str, pygame.font.Font], status: str) -> None:
+def _draw_leaderboard_reveal_panel(
+    screen: pygame.Surface,
+    session: ReplaySession,
+    rect: pygame.Rect,
+    accent: Color,
+    fonts: dict[str, pygame.font.Font],
+) -> None:
+    title = fonts["panel"].render("新快照重播中", True, TEXT)
+    subtitle = fonts["meta"].render("排名將於本輪結束後公布", True, MUTED)
+    elapsed = fonts["chip"].render(f"已跑 {session.frames / FPS:.1f}s", True, TEXT)
+    box = pygame.Rect(0, 0, min(rect.width - 52, 390), 132)
+    box.center = rect.center
+    pygame.draw.rect(screen, BACKGROUND, box, border_radius=6)
+    pygame.draw.rect(screen, accent, box, 2, border_radius=6)
+    screen.blit(title, (box.centerx - title.get_width() // 2, box.y + 24))
+    screen.blit(subtitle, (box.centerx - subtitle.get_width() // 2, box.y + 58))
+    screen.blit(elapsed, (box.centerx - elapsed.get_width() // 2, box.y + 91))
+
+
+def _reveal_leaderboard_if_stopped(
+    session: ReplaySession,
+    now: float,
+    revealed_signatures: dict[str, LeaderboardSignature],
+) -> None:
+    if not session.stopped or session.leaderboard_revealed:
+        return
+    session.leaderboard_revealed = True
+    session.reveal_highlight_until = now + LEADERBOARD_REVEAL_HIGHLIGHT_SECONDS
+    if session.leaderboard_signature:
+        revealed_signatures[session.competition_id] = session.leaderboard_signature
+
+
+def _draw_phase_one_waiting(
+    screen: pygame.Surface,
+    fonts: dict[str, pygame.font.Font],
+    status: ReplayStatus,
+) -> None:
     _draw_header(screen, fonts, "PHASE 1", status)
     _draw_centered(screen, fonts["title"], "Waiting for Easy and Hard replay data", 450)
 
 
-def _draw_final_waiting(screen: pygame.Surface, fonts: dict[str, pygame.font.Font], status: str) -> None:
+def _draw_final_waiting(
+    screen: pygame.Surface,
+    fonts: dict[str, pygame.font.Font],
+    status: ReplayStatus,
+) -> None:
     _draw_header(screen, fonts, "FINAL", status)
     _draw_centered(screen, fonts["title"], "Waiting for Final replay data", 450)
 
@@ -752,10 +953,63 @@ def _result_text(client_result: dict[str, Any]) -> str:
 
 
 def _fonts() -> dict[str, pygame.font.Font]:
+    def font(size: int, *, bold: bool = False) -> pygame.font.Font:
+        for path in _font_path_candidates(bold=bold):
+            if os.path.exists(path):
+                return pygame.font.Font(path, size)
+        for name in _font_name_candidates():
+            matched = pygame.font.match_font(name, bold=bold)
+            if matched:
+                return pygame.font.Font(matched, size)
+        return pygame.font.SysFont("Arial", size, bold=bold)
+
     return {
-        "title": pygame.font.SysFont("Arial", 28, bold=True),
-        "panel": pygame.font.SysFont("Arial", 18, bold=True),
-        "row": pygame.font.SysFont("Arial", 17, bold=True),
-        "label": pygame.font.SysFont("Arial", 15, bold=True),
-        "meta": pygame.font.SysFont("Arial", 14),
+        "title": font(28, bold=True),
+        "status": font(30, bold=True),
+        "chip": font(20, bold=True),
+        "panel": font(18, bold=True),
+        "row": font(17, bold=True),
+        "label": font(15, bold=True),
+        "meta": font(14),
     }
+
+
+def _font_path_candidates(*, bold: bool) -> list[str]:
+    configured = os.environ.get("COMPETITION_REPLAY_FONT_PATH")
+    candidates = [
+        "/System/Library/Fonts/Hiragino Sans GB.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/Supplemental/Songti.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
+        "/usr/share/fonts/truetype/arphic/ukai.ttc",
+        "C:/Windows/Fonts/msjh.ttc",
+        "C:/Windows/Fonts/msjhbd.ttc",
+    ]
+    if bold:
+        candidates = sorted(candidates, key=lambda path: "Bold" not in path and "bd" not in path)
+    if configured:
+        return [configured, *candidates]
+    return candidates
+
+
+def _font_name_candidates() -> list[str]:
+    return [
+        "hiraginosansgb",
+        "stheitimedium",
+        "stheitilight",
+        "PingFang TC",
+        "PingFang HK",
+        "PingFang SC",
+        "Heiti TC",
+        "Microsoft JhengHei",
+        "Noto Sans CJK TC",
+        "Noto Sans CJK SC",
+        "Noto Sans CJK",
+        "Arial Unicode MS",
+        "Arial",
+    ]
