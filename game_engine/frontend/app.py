@@ -7,6 +7,7 @@ from shapely.geometry import Point  # type: ignore[import-untyped]
 from shapely.geometry.polygon import Polygon  # type: ignore[import-untyped]
 
 from game_engine.backend.assets import load_game_assets
+from game_engine.backend.environment import load_server_url
 from game_engine.backend.car import (
     DEFAULT_MLP_INIT_SEED,
     Car,
@@ -36,10 +37,14 @@ from game_engine.backend.training_session import (
     TrainingSession,
 )
 from game_engine.frontend.config_store import load_runtime_settings, save_runtime_settings
-from game_engine.frontend.profile_store import load_login_profile
+from game_engine.frontend.profile_store import (
+    clear_login_profile,
+    load_login_profile,
+)
 from game_engine.frontend.scenes import AppShell
 from game_engine.frontend.screens import (
     AppQuit,
+    run_clear_user_confirm_screen,
     run_login_screen,
     run_main_menu_screen,
     run_record_name_screen,
@@ -75,11 +80,11 @@ def run():
 
     try:
         settings = load_runtime_settings()
+        settings.server_url = load_server_url()
         profile = load_login_profile()
         should_save_settings = profile is None
         if profile is None:
             profile = run_login_screen(screen, settings.server_url)
-            settings.server_url = profile.server_url
         else:
             profile.server_url = settings.server_url
         settings.nickname = profile.username
@@ -88,6 +93,14 @@ def run():
 
         while True:
             choice = run_main_menu_screen(screen, profile)
+            if choice == "clear_user":
+                if run_clear_user_confirm_screen(screen):
+                    clear_login_profile()
+                    RecordStore().clear()
+                    profile = run_login_screen(screen, settings.server_url)
+                    settings.nickname = profile.username
+                    save_runtime_settings(settings)
+                continue
             if choice == "training":
                 result = run_training_config_screen(screen, settings.max_speed)
                 if result is not None:

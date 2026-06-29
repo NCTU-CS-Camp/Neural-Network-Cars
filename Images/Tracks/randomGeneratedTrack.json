@@ -41,11 +41,6 @@
     {
       "x": 4,
       "y": 0,
-      "tile": "Straight1"
-    },
-    {
-      "x": 5,
-      "y": 0,
       "tile": "Curve2"
     },
     {
@@ -76,12 +71,12 @@
     {
       "x": 1,
       "y": 1,
-      "tile": "Curve4"
+      "tile": "Straight2"
     },
     {
       "x": 2,
       "y": 1,
-      "tile": "Curve3"
+      "tile": "Straight2"
     },
     {
       "x": 3,
@@ -90,11 +85,6 @@
     },
     {
       "x": 4,
-      "y": 1,
-      "tile": "Straight1"
-    },
-    {
-      "x": 5,
       "y": 1,
       "tile": "Curve3"
     },
@@ -105,6 +95,11 @@
     },
     {
       "x": 7,
+      "y": 1,
+      "tile": "Straight1"
+    },
+    {
+      "x": 8,
       "y": 1,
       "tile": "Curve2"
     },
@@ -121,12 +116,12 @@
     {
       "x": 1,
       "y": 2,
-      "tile": "Curve1"
+      "tile": "Curve4"
     },
     {
       "x": 2,
       "y": 2,
-      "tile": "Curve2"
+      "tile": "Curve3"
     },
     {
       "x": 3,
@@ -150,6 +145,11 @@
     },
     {
       "x": 7,
+      "y": 2,
+      "tile": "Straight1"
+    },
+    {
+      "x": 8,
       "y": 2,
       "tile": "Curve3"
     },
@@ -166,12 +166,12 @@
     {
       "x": 1,
       "y": 3,
-      "tile": "Straight2"
+      "tile": "Curve1"
     },
     {
       "x": 2,
       "y": 3,
-      "tile": "Straight2"
+      "tile": "Curve2"
     },
     {
       "x": 7,
@@ -181,12 +181,12 @@
     {
       "x": 8,
       "y": 3,
-      "tile": "Curve2"
+      "tile": "Straight1"
     },
     {
       "x": 9,
       "y": 3,
-      "tile": "Straight2"
+      "tile": "Curve3"
     },
     {
       "x": 0,
@@ -225,16 +225,6 @@
     },
     {
       "x": 7,
-      "y": 4,
-      "tile": "Curve3"
-    },
-    {
-      "x": 8,
-      "y": 4,
-      "tile": "Curve4"
-    },
-    {
-      "x": 9,
       "y": 4,
       "tile": "Curve3"
     }

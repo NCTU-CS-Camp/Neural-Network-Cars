@@ -2,7 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from game_engine.frontend.profile_store import load_login_profile
+from game_engine.frontend.profile_store import (
+    clear_login_profile,
+    load_login_profile,
+)
 
 
 @pytest.mark.parametrize(
@@ -41,3 +44,12 @@ def test_valid_profile_is_loaded(tmp_path: Path) -> None:
     assert profile.group_id == "group-1"
     assert profile.username == "apollo"
     assert profile.server_url == "http://localhost:8000"
+
+
+def test_clear_login_profile_deletes_file(tmp_path: Path) -> None:
+    path = tmp_path / "profile.json"
+    path.write_text("{}", encoding="utf-8")
+
+    clear_login_profile(path)
+
+    assert not path.exists()

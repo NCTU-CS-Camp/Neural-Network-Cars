@@ -46,3 +46,6 @@ class RecordStore:
     def delete_record(self, record_id: str) -> None:
         records = [item for item in self._read() if item["record_id"] != record_id]
         self._write(records)
+
+    def clear(self) -> None:
+        self._write([])

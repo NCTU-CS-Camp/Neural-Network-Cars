@@ -27,3 +27,7 @@ def load_login_profile(path: Path = PROFILE_PATH) -> LoginProfile | None:
 
 def save_login_profile(profile: LoginProfile, path: Path = PROFILE_PATH) -> None:
     path.write_text(json.dumps(profile.to_dict(), indent=2), encoding="utf-8")
+
+
+def clear_login_profile(path: Path = PROFILE_PATH) -> None:
+    path.unlink(missing_ok=True)

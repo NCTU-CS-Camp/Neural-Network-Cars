@@ -94,7 +94,7 @@ class AppQuit(Exception):
 
 
 GROUP_COUNT = 10
-MenuChoice = Literal["training", "validation"]
+MenuChoice = Literal["training", "validation", "clear_user"]
 TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None, int]
 
 BONUS_FITNESS_PLACEHOLDERS = [
@@ -142,7 +142,7 @@ def format_ticks_as_seconds(ticks: int | None, fps: int = FPS) -> str:
     return f"{ticks / fps:.1f} 秒"
 
 
-def run_login_screen(screen: pygame.Surface, default_server_url: str) -> LoginProfile:
+def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
     clock = pygame.time.Clock()
     font = _font()
     title_font = _font(36)
@@ -153,26 +153,21 @@ def run_login_screen(screen: pygame.Surface, default_server_url: str) -> LoginPr
     ]
     selected_group: str | None = None
     name_input = TextInput(pygame.Rect(60, 340, 360, 48))
-    server_url_input = TextInput(
-        pygame.Rect(60, 460, 360, 48), text=default_server_url, max_length=120
-    )
-    register_button = Button("註冊", pygame.Rect(60, 540, 160, 52))
+    register_button = Button("註冊", pygame.Rect(60, 430, 160, 52))
     error_message = ""
 
     while True:
         for event in pygame.event.get():
             _check_quit(event)
             name_input.handle_event(event)
-            server_url_input.handle_event(event)
             if event.type == pygame.MOUSEBUTTONDOWN:
                 for button in group_buttons:
                     if button.contains(event.pos):
                         selected_group = button.text
                 if register_button.contains(event.pos):
                     username = name_input.text.strip()
-                    server_url = server_url_input.text.strip()
-                    if selected_group is None or not username or not server_url:
-                        error_message = "請選擇組別、輸入名字並填寫 server URL"
+                    if selected_group is None or not username:
+                        error_message = "請選擇組別並輸入名字"
                     else:
                         profile = LoginProfile(
                             group_id=selected_group, username=username, server_url=server_url
@@ -193,11 +188,9 @@ def run_login_screen(screen: pygame.Surface, default_server_url: str) -> LoginPr
             button.draw(screen, font)
         screen.blit(font.render("輸入名字", True, WHITE), (60, 312))
         name_input.draw(screen, font)
-        screen.blit(font.render("Server URL", True, WHITE), (60, 432))
-        server_url_input.draw(screen, font)
         register_button.draw(screen, font)
         if error_message:
-            screen.blit(font.render(error_message, True, (255, 90, 90)), (60, 608))
+            screen.blit(font.render(error_message, True, (255, 90, 90)), (60, 500))
 
         pygame.display.update()
         clock.tick(30)
@@ -215,6 +208,13 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
     validation_button = Button(
         "Validation", pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200)
     )
+    clear_user_button = Button(
+        "清除使用者資料",
+        pygame.Rect(width // 2 - 160, height // 2 + 140, 320, 56),
+        fill_color=(100, 30, 30),
+        hover_color=(145, 40, 40),
+        border_color=(190, 70, 70),
+    )
 
     while True:
         for event in pygame.event.get():
@@ -224,10 +224,13 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
                     return "training"
                 if validation_button.contains(event.pos):
                     return "validation"
+                if clear_user_button.contains(event.pos):
+                    return "clear_user"
 
         mouse_pos = pygame.mouse.get_pos()
         training_button.update_hover(mouse_pos)
         validation_button.update_hover(mouse_pos)
+        clear_user_button.update_hover(mouse_pos)
 
         screen.fill(BLACK)
         screen.blit(
@@ -236,6 +239,57 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
         )
         training_button.draw(screen, font)
         validation_button.draw(screen, font)
+        clear_user_button.draw(screen, font)
+
+        pygame.display.update()
+        clock.tick(30)
+
+
+def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
+    clock = pygame.time.Clock()
+    font = _font()
+    title_font = _font(32)
+    width, height = screen.get_size()
+
+    confirm_button = Button(
+        "確認清除",
+        pygame.Rect(width // 2 - 180, height // 2 + 60, 160, 56),
+        fill_color=(110, 30, 30),
+        hover_color=(155, 40, 40),
+        border_color=(200, 70, 70),
+    )
+    cancel_button = Button(
+        "取消",
+        pygame.Rect(width // 2 + 20, height // 2 + 60, 160, 56),
+    )
+
+    while True:
+        for event in pygame.event.get():
+            _check_quit(event)
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if confirm_button.contains(event.pos):
+                    return True
+                if cancel_button.contains(event.pos):
+                    return False
+
+        mouse_pos = pygame.mouse.get_pos()
+        confirm_button.update_hover(mouse_pos)
+        cancel_button.update_hover(mouse_pos)
+
+        screen.fill(BLACK)
+        title = title_font.render("確定要清除使用者資料？", True, WHITE)
+        warning = font.render(
+            "profile 與所有本機訓練紀錄都會刪除，且無法復原。",
+            True,
+            (255, 120, 120),
+        )
+        screen.blit(title, title.get_rect(center=(width // 2, height // 2 - 50)))
+        screen.blit(
+            warning,
+            warning.get_rect(center=(width // 2, height // 2)),
+        )
+        confirm_button.draw(screen, font)
+        cancel_button.draw(screen, font)
 
         pygame.display.update()
         clock.tick(30)

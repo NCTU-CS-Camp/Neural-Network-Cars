@@ -8,7 +8,7 @@ from game_engine.frontend.screens import (
     _simulate_candidates,
     format_ticks_as_seconds,
 )
-from shared.contracts import FitnessConfig
+from shared.contracts import FitnessConfig, LoginProfile
 
 
 class _FakeCar:
@@ -81,6 +81,85 @@ class _FakeRecordStore:
         self.records = [
             record for record in self.records if record.record_id != record_id
         ]
+
+
+def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
+    events = [
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (88, 248)},
+        ),
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (100, 360)},
+        ),
+        pygame.event.Event(pygame.TEXTINPUT, {"text": "apollo"}),
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (100, 450)},
+        ),
+    ]
+    monkeypatch.setattr(pygame.event, "get", lambda: events)
+    monkeypatch.setattr(
+        screens,
+        "save_login_profile",
+        lambda _: None,
+    )
+    pygame.font.init()
+
+    profile = screens.run_login_screen(
+        pygame.Surface((1600, 900)),
+        "http://192.168.1.20:8000",
+    )
+
+    assert profile.group_id == "1"
+    assert profile.username == "apollo"
+    assert profile.server_url == "http://192.168.1.20:8000"
+
+
+def test_main_menu_exposes_clear_user_action(monkeypatch) -> None:
+    events = [
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (800, 618)},
+        )
+    ]
+    monkeypatch.setattr(pygame.event, "get", lambda: events)
+    pygame.font.init()
+
+    choice = screens.run_main_menu_screen(
+        pygame.Surface((1600, 900)),
+        LoginProfile(group_id="1", username="apollo"),
+    )
+
+    assert choice == "clear_user"
+
+
+@pytest.mark.parametrize(
+    ("position", "expected"),
+    [
+        ((700, 538), True),
+        ((900, 538), False),
+    ],
+)
+def test_clear_user_requires_confirmation(
+    monkeypatch,
+    position: tuple[int, int],
+    expected: bool,
+) -> None:
+    events = [
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": position},
+        )
+    ]
+    monkeypatch.setattr(pygame.event, "get", lambda: events)
+    pygame.font.init()
+
+    assert (
+        screens.run_clear_user_confirm_screen(pygame.Surface((1600, 900)))
+        is expected
+    )
 
 
 def test_ticks_are_displayed_as_seconds_with_one_decimal() -> None:
