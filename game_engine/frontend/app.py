@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import secrets
 
 import numpy as np
 import pygame
@@ -201,7 +202,6 @@ def run_training_loop(
         )
 
     font = pygame.font.Font(str(FONT_PATH), 18)
-    seed_text = font.render(f"NN Seed: {session.evolution_seed}", True, WHITE)
     speed_text = font.render(f"Max Speed: {settings.max_speed}", True, WHITE)
 
     def persist_settings():
@@ -323,7 +323,12 @@ def run_training_loop(
 
     def restart_training():
         nonlocal nn_cars
-        session.reset_generation()
+        new_seed = secrets.randbits(32)
+        while new_seed == session.evolution_seed:
+            new_seed = secrets.randbits(32)
+        session.restart_with_seed(new_seed)
+        settings.evolution_seed = new_seed
+        save_runtime_settings(settings)
         nn_cars = [
             Car(
                 layer_sizes,
@@ -411,6 +416,11 @@ def run_training_loop(
         if new_map_button is not None:
             new_map_button.update_hover(mouse_pos)
             new_map_button.draw(game_display, font)
+        seed_text = font.render(
+            f"NN Seed: {session.evolution_seed}",
+            True,
+            WHITE,
+        )
         game_display.blit(
             seed_text,
             seed_text.get_rect(topright=(W - 20, restart_button.rect.bottom + 12)),

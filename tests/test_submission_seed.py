@@ -17,7 +17,7 @@ LAYER_SIZES = [2, 3, 1]
 
 def test_submission_and_validation_population_sizes() -> None:
     assert SUBMISSION_POPULATION_SIZE == 100
-    assert VALIDATION_POPULATION_SIZE == 20
+    assert VALIDATION_POPULATION_SIZE == 100
     candidates = _build_candidates(
         Car(LAYER_SIZES),
         Car(LAYER_SIZES),

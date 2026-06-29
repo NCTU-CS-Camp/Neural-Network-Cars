@@ -86,6 +86,14 @@ class TrainingSession:
         self.clear_selection()
         self._reset_evolution_rngs()
 
+    def restart_with_seed(self, seed: int) -> None:
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise TypeError("seed must be an integer")
+        if seed < 0:
+            raise ValueError("seed cannot be negative")
+        self.evolution_seed = seed
+        self.reset_generation()
+
     def _reset_evolution_rngs(self) -> None:
         self.mlp_init_rng, self.mutation_rng = create_evolution_rngs(
             self.evolution_seed

@@ -66,6 +66,27 @@ def test_reset_generation_replays_evolution_random_streams() -> None:
     ) == pytest.approx(first_mutation_values)
 
 
+def test_restart_with_seed_rebuilds_random_streams_from_new_seed() -> None:
+    session = TrainingSession(
+        population_size=2,
+        mutation_rate=1,
+        evolution_seed=3057,
+    )
+
+    session.restart_with_seed(9001)
+
+    expected = TrainingSession(
+        population_size=2,
+        mutation_rate=1,
+        evolution_seed=9001,
+    )
+    assert session.evolution_seed == 9001
+    assert session.generation == 1
+    assert session.mlp_init_rng.standard_normal(4) == pytest.approx(
+        expected.mlp_init_rng.standard_normal(4)
+    )
+
+
 def test_saved_rng_states_continue_from_the_same_position() -> None:
     session = TrainingSession(
         population_size=2,
