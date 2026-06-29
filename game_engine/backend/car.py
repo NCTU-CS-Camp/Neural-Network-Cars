@@ -168,11 +168,16 @@ class Car:
     max_steps = 10000
     steps = 0
     while contains(point):
-        point = move(point, angle, step)
-        steps += 1
-        if steps >= max_steps:
-            raise RuntimeError("Sensor ray did not leave the track")
-    return move(point, angle, -1)
+      point = move(point, angle, step)
+      steps += 1
+      if steps >= max_steps:
+        raise RuntimeError("Sensor ray did not leave the track")
+    while not contains(point):
+      point = move(point, angle, -1)
+      steps += 1
+      if steps >= max_steps:
+        raise RuntimeError("Sensor ray did not return to the track")
+    return point
 
   def _update_sensors(self, track: TrackGeometry | None):
     contains = self._containment_check(track)
@@ -194,7 +199,7 @@ class Car:
     ]
     self.c1, self.c2, self.c3, self.c4, self.c5 = endpoints
     distances = [
-        calculateDistance(self.center[0], self.center[1], point[0], point[1])
+        int(calculateDistance(self.center[0], self.center[1], point[0], point[1]))
         for point in endpoints
     ]
     self.d1, self.d2, self.d3, self.d4, self.d5 = distances
