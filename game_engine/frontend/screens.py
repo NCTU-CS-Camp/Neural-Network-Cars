@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Literal
 
 import pygame
@@ -87,6 +88,7 @@ VALIDATION_MUTATION_RATE = 15
 VALIDATION_POPULATION_SIZE = 100
 VALID_FITNESS_INPUT_COLOR = (90, 90, 90)
 INVALID_FITNESS_INPUT_COLOR = (255, 90, 90)
+UTC_PLUS_8 = timezone(timedelta(hours=8))
 
 
 class AppQuit(Exception):
@@ -123,10 +125,6 @@ def _check_quit(event: pygame.event.Event) -> None:
         raise AppQuit()
 
 
-def _fitness_summary(fitness_config: FitnessConfig) -> str:
-    return "  ".join(f"{name}:{value}" for name, value in fitness_config.weights.items())
-
-
 def _ellipsize(font: pygame.font.Font, text: str, max_width: int) -> str:
     if font.size(text)[0] <= max_width:
         return text
@@ -140,6 +138,30 @@ def format_ticks_as_seconds(ticks: int | None, fps: int = FPS) -> str:
     if ticks is None:
         return "--"
     return f"{ticks / fps:.1f} 秒"
+
+
+def format_timestamp_utc8(timestamp: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return timestamp
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC_PLUS_8).strftime(
+        "%Y-%m-%d %H:%M:%S UTC+8"
+    )
+
+
+def _fitness_parameter_lines(fitness_config: FitnessConfig) -> tuple[str, str]:
+    penalties = "  ".join(
+        f"{name}:{fitness_config.get_weight(name):g}"
+        for name in ("crash", "spin", "stall", "time", "wrong_way")
+    )
+    rewards = "  ".join(
+        f"{name}:{fitness_config.get_weight(name):g}"
+        for name in ("alignment", "centered", "progress", "safety", "speed")
+    )
+    return f"Penalties  {penalties}", f"Rewards    {rewards}"
 
 
 def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
@@ -782,34 +804,64 @@ def _run_record_submission_screen(
 def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
     clock = pygame.time.Clock()
     font = _font(18)
+    detail_font = _font(16)
     title_font = _font(32)
     width, height = screen.get_size()
     store = RecordStore()
 
     margin = 40
     back_button = Button("返回", pygame.Rect(margin, margin, 120, 48))
-    row_height = 64
+    row_height = 126
+    row_gap = 10
     list_top = back_button.rect.bottom + margin
-    max_visible_records = max(1, (height - list_top - 80) // row_height)
+    max_visible_records = max(
+        1,
+        (height - list_top - margin) // (row_height + row_gap),
+    )
     message = ""
     pending_delete_record_id: str | None = None
 
     while True:
-        records = store.list_records()[:max_visible_records]
+        all_records = store.list_records()
+        records = all_records[:max_visible_records]
 
         mouse_pos = pygame.mouse.get_pos()
         back_button.update_hover(mouse_pos)
 
         rows = []
         for index, record in enumerate(records):
-            row_y = list_top + index * row_height
-            validate_button = Button("Validate", pygame.Rect(width - 420, row_y, 110, 44))
-            upload_button = Button("Upload", pygame.Rect(width - 300, row_y, 110, 44))
-            delete_button = Button("Delete", pygame.Rect(width - 180, row_y, 110, 44))
+            row_y = list_top + index * (row_height + row_gap)
+            button_y = row_y + (row_height - 44) // 2
+            validate_button = Button(
+                "Validate",
+                pygame.Rect(width - 420, button_y, 110, 44),
+            )
+            upload_button = Button(
+                "Upload",
+                pygame.Rect(width - 300, button_y, 110, 44),
+            )
+            delete_button = Button(
+                "Delete",
+                pygame.Rect(width - 180, button_y, 110, 44),
+            )
             validate_button.update_hover(mouse_pos)
             upload_button.update_hover(mouse_pos)
             delete_button.update_hover(mouse_pos)
-            rows.append((record, validate_button, upload_button, delete_button))
+            card_rect = pygame.Rect(
+                margin,
+                row_y,
+                width - margin * 2,
+                row_height,
+            )
+            rows.append(
+                (
+                    record,
+                    card_rect,
+                    validate_button,
+                    upload_button,
+                    delete_button,
+                )
+            )
 
         for event in pygame.event.get():
             _check_quit(event)
@@ -817,7 +869,7 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
                 pending_delete_record_id = None
                 if back_button.contains(event.pos):
                     return
-                for record, validate_button, upload_button, delete_button in rows:
+                for record, _, validate_button, upload_button, delete_button in rows:
                     if validate_button.contains(event.pos):
                         _run_record_validation_screen(screen, record)
                         break
@@ -829,7 +881,7 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
                         break
 
             if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                for record, _, _, delete_button in rows:
+                for record, _, _, _, delete_button in rows:
                     if (
                         pending_delete_record_id == record.record_id
                         and delete_button.contains(event.pos)
@@ -848,19 +900,48 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
             ),
         )
         back_button.draw(screen, font)
-        for record, validate_button, upload_button, delete_button in rows:
-            info = (
-                f"{record.record_name}  |  {record.saved_at}  |  "
-                f"{_fitness_summary(record.fitness_config)}"
+        for record, card_rect, validate_button, upload_button, delete_button in rows:
+            pygame.draw.rect(
+                screen,
+                (18, 18, 18),
+                card_rect,
+                border_radius=8,
             )
-            info = _ellipsize(
-                font,
-                info,
-                validate_button.rect.left - margin * 2,
+            pygame.draw.rect(
+                screen,
+                (65, 65, 65),
+                card_rect,
+                1,
+                border_radius=8,
+            )
+            performance = (
+                f"{record.best_fitness_score:.1f}"
+                if record.best_fitness_score is not None
+                else "N/A"
+            )
+            metadata = (
+                f"{record.record_name}  |  "
+                f"{format_timestamp_utc8(record.saved_at)}  |  "
+                f"NN Seed: {record.mlp_init_seed}  |  "
+                f"Best Fitness: {performance}  |  "
+                f"Max Speed: {record.max_speed}"
+            )
+            content_width = validate_button.rect.left - margin * 2
+            metadata = _ellipsize(font, metadata, content_width)
+            penalty_line, reward_line = _fitness_parameter_lines(
+                record.fitness_config
             )
             screen.blit(
-                font.render(info, True, WHITE),
-                (margin, validate_button.rect.y + 12),
+                font.render(metadata, True, WHITE),
+                (card_rect.x + 12, card_rect.y + 12),
+            )
+            screen.blit(
+                detail_font.render(penalty_line, True, (235, 125, 125)),
+                (card_rect.x + 12, card_rect.y + 50),
+            )
+            screen.blit(
+                detail_font.render(reward_line, True, (125, 220, 135)),
+                (card_rect.x + 12, card_rect.y + 82),
             )
             validate_button.draw(screen, font)
             upload_button.draw(screen, font)

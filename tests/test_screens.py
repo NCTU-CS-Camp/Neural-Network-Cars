@@ -5,7 +5,9 @@ import pytest
 
 import game_engine.frontend.screens as screens
 from game_engine.frontend.screens import (
+    _fitness_parameter_lines,
     _simulate_candidates,
+    format_timestamp_utc8,
     format_ticks_as_seconds,
 )
 from shared.contracts import FitnessConfig, LoginProfile
@@ -66,6 +68,9 @@ class _FakeRecord:
         self.record_name = record_id
         self.saved_at = "2026-06-29"
         self.fitness_config = FitnessConfig()
+        self.best_fitness_score = None
+        self.mlp_init_seed = 3057
+        self.max_speed = 10
 
 
 class _FakeRecordStore:
@@ -168,6 +173,36 @@ def test_ticks_are_displayed_as_seconds_with_one_decimal() -> None:
     assert format_ticks_as_seconds(None, fps=30) == "--"
 
 
+def test_timestamp_is_displayed_in_utc_plus_8() -> None:
+    assert format_timestamp_utc8(
+        "2026-06-29T03:15:27.171244+00:00"
+    ) == "2026-06-29 11:15:27 UTC+8"
+
+
+def test_all_ten_fitness_parameters_are_split_across_two_lines() -> None:
+    config = FitnessConfig(
+        crash=70,
+        spin=40,
+        stall=50,
+        time=30,
+        wrong_way=0,
+        alignment=1,
+        centered=2,
+        progress=60,
+        safety=3,
+        speed=40,
+    )
+
+    penalty_line, reward_line = _fitness_parameter_lines(config)
+
+    assert penalty_line == (
+        "Penalties  crash:70  spin:40  stall:50  time:30  wrong_way:0"
+    )
+    assert reward_line == (
+        "Rewards    alignment:1  centered:2  progress:60  safety:3  speed:40"
+    )
+
+
 def test_validation_stops_after_first_clean_completion(monkeypatch) -> None:
     configured_speeds: list[int] = []
     monkeypatch.setattr(pygame.event, "get", lambda: [])
@@ -243,8 +278,8 @@ def test_collision_frame_does_not_count_as_valid_completion(monkeypatch) -> None
 @pytest.mark.parametrize(
     ("release_position", "expected_deleted"),
     [
-        ((1475, 150), ["first"]),
-        ((1475, 214), []),
+        ((1475, 190), ["first"]),
+        ((1475, 326), []),
     ],
 )
 def test_delete_requires_release_on_same_record(
@@ -256,7 +291,7 @@ def test_delete_requires_release_on_same_record(
     events = [
         pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
-            {"button": 1, "pos": (1475, 150)},
+            {"button": 1, "pos": (1475, 190)},
         ),
         pygame.event.Event(
             pygame.MOUSEMOTION,

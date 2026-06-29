@@ -70,9 +70,11 @@ def test_legacy_training_record_defaults_seed_to_3057() -> None:
     )
 
     assert record.mlp_init_seed == 3057
+    assert record.best_fitness_score is None
     assert record.mlp_init_rng_state is None
     assert record.mutation_rng_state is None
     assert record.to_dict()["mlp_init_seed"] == 3057
+    assert record.to_dict()["best_fitness_score"] is None
 
 
 def test_submission_continues_json_round_tripped_training_rng_states() -> None:

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import datetime, timedelta, timezone
 import secrets
 
 import numpy as np
@@ -54,6 +54,9 @@ from game_engine.frontend.screens import (
 )
 from game_engine.frontend.widgets import Button
 from shared.contracts import TrainingRecord
+
+
+UTC_PLUS_8 = timezone(timedelta(hours=8))
 
 
 def _car_from_flat_weights(
@@ -479,7 +482,7 @@ def run_training_loop(
         record = TrainingRecord(
             record_id="",
             record_name=record_name,
-            saved_at=datetime.now(UTC).isoformat(),
+            saved_at=datetime.now(UTC_PLUS_8).isoformat(timespec="seconds"),
             group_id=profile.group_id,
             username=profile.username,
             layer_sizes=pa_payload.layer_sizes,
@@ -490,6 +493,10 @@ def run_training_loop(
             fitness_config=fitness_config,
             map_difficulty=map_difficulty,
             max_speed=settings.max_speed,
+            best_fitness_score=max(
+                pa_payload.fitness_score,
+                pb_payload.fitness_score,
+            ),
             mlp_init_seed=(
                 parent_a.mlp_init_seed
                 if parent_a.mlp_init_seed is not None

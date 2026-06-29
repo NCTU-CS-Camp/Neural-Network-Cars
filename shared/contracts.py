@@ -326,6 +326,7 @@ class TrainingRecord:
     fitness_config: FitnessConfig
     map_difficulty: int
     max_speed: int = 10
+    best_fitness_score: float | None = None
     mlp_init_seed: int = DEFAULT_EVOLUTION_SEED
     mlp_init_rng_state: dict[str, Any] | None = None
     mutation_rng_state: tuple[Any, ...] | list[Any] | None = None
@@ -349,6 +350,11 @@ class TrainingRecord:
             fitness_config=FitnessConfig.from_dict(data["fitness_config"]),
             map_difficulty=int(data["map_difficulty"]),
             max_speed=max(5, min(30, int(data.get("max_speed", 10)))),
+            best_fitness_score=(
+                float(data["best_fitness_score"])
+                if data.get("best_fitness_score") is not None
+                else None
+            ),
             mlp_init_seed=int(
                 data.get("mlp_init_seed", DEFAULT_EVOLUTION_SEED)
             ),
@@ -371,6 +377,7 @@ class TrainingRecord:
             "fitness_config": self.fitness_config.to_dict(),
             "map_difficulty": self.map_difficulty,
             "max_speed": self.max_speed,
+            "best_fitness_score": self.best_fitness_score,
             "mlp_init_seed": self.mlp_init_seed,
             "mlp_init_rng_state": self.mlp_init_rng_state,
             "mutation_rng_state": self.mutation_rng_state,
