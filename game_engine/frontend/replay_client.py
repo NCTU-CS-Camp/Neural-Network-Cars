@@ -95,7 +95,7 @@ class ReplayCar:
         state = ""
         if self.finished:
             if self.finish_ticks is not None:
-                state = f" FINISHED {self.finish_ticks / FPS:.1f}s"
+                state = f" FINISHED {self.finish_ticks / FPS:.3f}s"
             else:
                 state = " FINISHED"
         elif self.stalled:
@@ -947,7 +947,7 @@ def _draw_waiting_for_submissions(
 def _result_text(client_result: dict[str, Any]) -> str:
     if client_result.get("completed"):
         ticks = int(client_result["lap_ticks"])
-        return f"{ticks / FPS:.1f}s"
+        return f"{ticks / FPS:.3f}s"
     return f"{float(client_result['max_progress']):.0f} prog"
 
 
