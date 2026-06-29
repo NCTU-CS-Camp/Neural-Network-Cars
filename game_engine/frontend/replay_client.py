@@ -102,7 +102,7 @@ class ReplayCar:
             state = " STALLED"
         elif self.crashed:
             state = " CRASHED"
-        return f"#{self.item.get('rank', '?')} {self.item.get('username', 'unknown')}{state}"
+        return f"{self.item.get('username', 'unknown')}{state}"
 
     def observe_position(self) -> None:
         current = (float(self.car.x), float(self.car.y))
