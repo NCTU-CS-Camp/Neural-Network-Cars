@@ -11,7 +11,6 @@ import pygame
 from shapely.geometry import Point  # type: ignore[import-untyped]
 from shapely.geometry.polygon import Polygon  # type: ignore[import-untyped]
 
-from GA.fitness import get_fitness_strategy
 from game_engine.backend.assets import GameAssets, load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
 from game_engine.backend.competition_track import CompetitionRunTracker
@@ -135,7 +134,7 @@ class CompetitionTrainingClient:
     result_fields: list[TextField] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.fitness_strategy = get_fitness_strategy(self.session.fitness_strategy)
+        self.fitness_strategy = rank_car
         self.fields = _build_fields(self.settings)
         self.result_fields = _build_result_fields()
         self.fields[0].active = True

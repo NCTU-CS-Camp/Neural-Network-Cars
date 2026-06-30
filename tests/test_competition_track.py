@@ -30,9 +30,10 @@ def test_tracker_completes_only_after_checkpoints_are_crossed_in_order() -> None
 
     tracker.advance((0.0, 0.0), (11.0, 0.0), tick=1)
     tracker.advance((91.0, 0.0), (101.0, 0.0), tick=2)
+    tracker.advance((0.0, 0.0), (11.0, 0.0), tick=3)
 
     assert tracker.completed
-    assert tracker.lap_ticks == 2
+    assert tracker.lap_ticks == 3
 
 
 def test_reverse_checkpoint_order_does_not_complete_lap() -> None:
