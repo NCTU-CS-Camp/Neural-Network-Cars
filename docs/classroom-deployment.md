@@ -157,16 +157,16 @@ Replay 會讀取 protected model payload，所以必須有 token。不要把 rep
 - 確認 macOS / Windows 防火牆允許 Python 或 port `8000` inbound。
 - 確認學生與 server 主機在同一 subnet，例如都是 `192.168.1.x`。
 - 確認沒有 VPN、校園網路隔離、Guest Wi-Fi client isolation。
-- 換 port 測試，例如 `8010`。
+- 確認 server 與學生端都使用標準 port `8000`。
 
 ```bash
-uv run uvicorn server.app:app --host 0.0.0.0 --port 8010
+uv run uvicorn server.app:app --host 0.0.0.0 --port 8000
 ```
 
-學生端同步改成：
+學生端 URL：
 
 ```text
-http://192.168.1.23:8010
+http://192.168.1.23:8000
 ```
 
 常用檢查：

@@ -4,6 +4,7 @@ import pytest
 
 import game_engine.backend.car as car_module
 from game_engine.backend.car import Car
+from game_engine.frontend.app import _set_collision_surface
 
 
 LAYER_SIZES = [2, 3, 1]
@@ -130,6 +131,18 @@ def test_sensor_and_collision_checks_prefer_collision_surface(
 
     assert not car.collision(track)  # type: ignore[arg-type]
     assert min(car.d1, car.d2, car.d3, car.d4, car.d5) > 0
+
+
+def test_random_map_switch_updates_every_existing_car_collision_surface() -> None:
+    old_surface = pygame.Surface((10, 10))
+    new_surface = pygame.Surface((10, 10))
+    cars = [Car(LAYER_SIZES, mlp_init_seed=123) for _ in range(3)]
+    for car in cars:
+        car.set_collision_surface(old_surface)
+
+    _set_collision_surface(cars, new_surface)
+
+    assert all(car.collision_surface is new_surface for car in cars)
 
 
 def test_sensor_and_collision_checks_fall_back_to_geometry(

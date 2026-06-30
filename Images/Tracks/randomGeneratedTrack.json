@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
-  "name": "random_generated_track",
+  "name": "random_seed_178846",
+  "seed": 178846,
   "grid": {
     "cols": 10,
     "rows": 5,
@@ -20,156 +21,126 @@
   "tiles": [
     {
       "x": 0,
-      "y": 0,
-      "tile": "Curve1"
-    },
-    {
-      "x": 1,
-      "y": 0,
-      "tile": "Curve2"
-    },
-    {
-      "x": 2,
-      "y": 0,
-      "tile": "Curve1"
-    },
-    {
-      "x": 3,
-      "y": 0,
-      "tile": "Straight1"
-    },
-    {
-      "x": 4,
-      "y": 0,
-      "tile": "Curve2"
-    },
-    {
-      "x": 6,
-      "y": 0,
-      "tile": "Curve1"
-    },
-    {
-      "x": 7,
-      "y": 0,
-      "tile": "Straight1"
-    },
-    {
-      "x": 8,
-      "y": 0,
-      "tile": "Straight1"
-    },
-    {
-      "x": 9,
-      "y": 0,
-      "tile": "Curve2"
-    },
-    {
-      "x": 0,
-      "y": 1,
-      "tile": "Straight2"
-    },
-    {
-      "x": 1,
-      "y": 1,
-      "tile": "Straight2"
-    },
-    {
-      "x": 2,
-      "y": 1,
-      "tile": "Straight2"
-    },
-    {
-      "x": 3,
-      "y": 1,
-      "tile": "Curve1"
-    },
-    {
-      "x": 4,
-      "y": 1,
-      "tile": "Curve3"
-    },
-    {
-      "x": 6,
-      "y": 1,
-      "tile": "Curve4"
-    },
-    {
-      "x": 7,
-      "y": 1,
-      "tile": "Straight1"
-    },
-    {
-      "x": 8,
-      "y": 1,
-      "tile": "Curve2"
-    },
-    {
-      "x": 9,
-      "y": 1,
-      "tile": "Straight2"
-    },
-    {
-      "x": 0,
-      "y": 2,
-      "tile": "Straight2"
-    },
-    {
-      "x": 1,
-      "y": 2,
-      "tile": "Curve4"
-    },
-    {
-      "x": 2,
-      "y": 2,
-      "tile": "Curve3"
-    },
-    {
-      "x": 3,
-      "y": 2,
-      "tile": "Curve4"
-    },
-    {
-      "x": 4,
-      "y": 2,
-      "tile": "Straight1"
-    },
-    {
-      "x": 5,
-      "y": 2,
-      "tile": "Straight1"
-    },
-    {
-      "x": 6,
-      "y": 2,
-      "tile": "Straight1"
-    },
-    {
-      "x": 7,
-      "y": 2,
-      "tile": "Straight1"
-    },
-    {
-      "x": 8,
-      "y": 2,
-      "tile": "Curve3"
-    },
-    {
-      "x": 9,
-      "y": 2,
-      "tile": "Straight2"
-    },
-    {
-      "x": 0,
       "y": 3,
       "tile": "Initial"
     },
     {
+      "x": 0,
+      "y": 2,
+      "tile": "Straight2"
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "tile": "Curve1"
+    },
+    {
       "x": 1,
-      "y": 3,
+      "y": 1,
+      "tile": "Curve3"
+    },
+    {
+      "x": 1,
+      "y": 0,
       "tile": "Curve1"
     },
     {
       "x": 2,
+      "y": 0,
+      "tile": "Straight1"
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "tile": "Curve2"
+    },
+    {
+      "x": 3,
+      "y": 1,
+      "tile": "Curve4"
+    },
+    {
+      "x": 4,
+      "y": 1,
+      "tile": "Curve3"
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "tile": "Curve1"
+    },
+    {
+      "x": 5,
+      "y": 0,
+      "tile": "Straight1"
+    },
+    {
+      "x": 6,
+      "y": 0,
+      "tile": "Curve2"
+    },
+    {
+      "x": 6,
+      "y": 1,
+      "tile": "Curve4"
+    },
+    {
+      "x": 7,
+      "y": 1,
+      "tile": "Curve3"
+    },
+    {
+      "x": 7,
+      "y": 0,
+      "tile": "Curve1"
+    },
+    {
+      "x": 8,
+      "y": 0,
+      "tile": "Straight1"
+    },
+    {
+      "x": 9,
+      "y": 0,
+      "tile": "Curve2"
+    },
+    {
+      "x": 9,
+      "y": 1,
+      "tile": "Curve3"
+    },
+    {
+      "x": 8,
+      "y": 1,
+      "tile": "Curve1"
+    },
+    {
+      "x": 8,
+      "y": 2,
+      "tile": "Curve4"
+    },
+    {
+      "x": 9,
+      "y": 2,
+      "tile": "Curve2"
+    },
+    {
+      "x": 9,
+      "y": 3,
+      "tile": "Straight2"
+    },
+    {
+      "x": 9,
+      "y": 4,
+      "tile": "Curve3"
+    },
+    {
+      "x": 8,
+      "y": 4,
+      "tile": "Curve4"
+    },
+    {
+      "x": 8,
       "y": 3,
       "tile": "Curve2"
     },
@@ -179,34 +150,29 @@
       "tile": "Curve1"
     },
     {
-      "x": 8,
-      "y": 3,
-      "tile": "Straight1"
-    },
-    {
-      "x": 9,
-      "y": 3,
-      "tile": "Curve3"
-    },
-    {
-      "x": 0,
-      "y": 4,
-      "tile": "Curve4"
-    },
-    {
-      "x": 1,
+      "x": 7,
       "y": 4,
       "tile": "Curve3"
     },
     {
-      "x": 2,
+      "x": 6,
       "y": 4,
       "tile": "Curve4"
     },
     {
-      "x": 3,
+      "x": 6,
+      "y": 3,
+      "tile": "Curve2"
+    },
+    {
+      "x": 5,
+      "y": 3,
+      "tile": "Curve1"
+    },
+    {
+      "x": 5,
       "y": 4,
-      "tile": "Straight1"
+      "tile": "Curve3"
     },
     {
       "x": 4,
@@ -214,19 +180,64 @@
       "tile": "Straight1"
     },
     {
-      "x": 5,
+      "x": 3,
       "y": 4,
       "tile": "Straight1"
     },
     {
-      "x": 6,
+      "x": 2,
       "y": 4,
+      "tile": "Curve4"
+    },
+    {
+      "x": 2,
+      "y": 3,
+      "tile": "Curve1"
+    },
+    {
+      "x": 3,
+      "y": 3,
       "tile": "Straight1"
     },
     {
-      "x": 7,
+      "x": 4,
+      "y": 3,
+      "tile": "Curve3"
+    },
+    {
+      "x": 4,
+      "y": 2,
+      "tile": "Curve2"
+    },
+    {
+      "x": 3,
+      "y": 2,
+      "tile": "Straight1"
+    },
+    {
+      "x": 2,
+      "y": 2,
+      "tile": "Straight1"
+    },
+    {
+      "x": 1,
+      "y": 2,
+      "tile": "Curve1"
+    },
+    {
+      "x": 1,
+      "y": 3,
+      "tile": "Straight2"
+    },
+    {
+      "x": 1,
       "y": 4,
       "tile": "Curve3"
+    },
+    {
+      "x": 0,
+      "y": 4,
+      "tile": "Curve4"
     }
   ]
 }
