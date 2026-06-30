@@ -26,7 +26,10 @@ class Scene:
 
 def build_default_scenes(settings: RuntimeSettings) -> dict[str, Scene]:
     common_labels = [
-        Label(f"Nickname: {settings.nickname}", (20, 76)),
+        Label(
+            f"User: {settings.username}  Group: {settings.group_id}",
+            (20, 76),
+        ),
     ]
     return {
         "home": Scene(

@@ -7,6 +7,7 @@ IMAGES_DIR = PROJECT_ROOT / "Images"
 SPRITES_DIR = IMAGES_DIR / "Sprites"
 TRACK_ASSETS_DIR = IMAGES_DIR / "TracksMapGen"
 TRACKS_DIR = IMAGES_DIR / "Tracks"
+OFFICIAL_TRACKS_DIR = IMAGES_DIR / "OfficialTracks"
 
 FONT_PATH = PROJECT_ROOT / "fonts" / "GenSenRounded-R.ttc"
 

@@ -3,14 +3,18 @@ name = "neural-network-cars"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115.0",
     "numpy>=2.4.6",
     "pillow>=12.2.0",
     "pygame>=2.6.1",
     "shapely>=2.1.2",
+    "uvicorn>=0.30.0",
+    "websockets>=15.0.1",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx>=0.27.0",
     "mypy>=2.1.0",
     "pytest>=9.1.0",
     "ruff>=0.15.17",

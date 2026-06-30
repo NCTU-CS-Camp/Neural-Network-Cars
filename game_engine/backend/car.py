@@ -75,6 +75,8 @@ class Car:
     self.collided = False
     self.color = WHITE
     self.car_image = default_car_image
+    # Existing training code configures a global map. Replays can override it per car.
+    self.collision_surface = collision_surface
 
   @property
   def mlp_init_seed(self) -> int | None:
@@ -142,15 +144,20 @@ class Car:
     self.d = rotation((self.x,self.y), self.d, math.radians(self.angle))
 
   def _surface_contains(self, point):
-    if collision_surface is None:
+    surface = self.collision_surface or collision_surface
+    if surface is None:
         return False
     x, y = int(point[0]), int(point[1])
-    width, height = collision_surface.get_size()
-    return 0 <= x < width and 0 <= y < height and collision_surface.get_at((x, y)).a != 0
+    width, height = surface.get_size()
+    return (
+        0 <= x < width
+        and 0 <= y < height
+        and surface.get_at((x, y)).a != 0
+    )
 
   def _containment_check(self, track: TrackGeometry | None):
     """Prefer the collision bitmap for hot-path sensor and collision checks."""
-    if collision_surface is not None:
+    if self.collision_surface is not None or collision_surface is not None:
         return self._surface_contains
     if track is not None:
         return track.contains
@@ -169,7 +176,11 @@ class Car:
 
   def _update_sensors(self, track: TrackGeometry | None):
     contains = self._containment_check(track)
-    step = 10 if collision_surface is not None else 4
+    step = (
+        10
+        if self.collision_surface is not None or collision_surface is not None
+        else 4
+    )
     angles = (
         self.angle,
         self.angle + 45,
@@ -219,6 +230,9 @@ class Car:
   def collision(self, track: TrackGeometry | None = None):
       contains = self._containment_check(track)
       return not all(contains(corner) for corner in (self.a, self.b, self.c, self.d))
+
+  def set_collision_surface(self, surface):
+      self.collision_surface = surface
 
   def resetPosition(self):
       self.reset_state()

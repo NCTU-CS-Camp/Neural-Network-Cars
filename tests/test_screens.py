@@ -17,6 +17,10 @@ class _FakeCar:
     def __init__(self, *, collided: bool = False) -> None:
         self.center = (0.0, 0.0)
         self._collided = collided
+        self.collision_surface: pygame.Surface | None = None
+
+    def set_collision_surface(self, surface: pygame.Surface) -> None:
+        self.collision_surface = surface
 
     def reset_state(
         self,
@@ -222,6 +226,9 @@ def test_validation_stops_after_first_clean_completion(monkeypatch) -> None:
     pygame.font.init()
 
     cars = [_FakeCar(), _FakeCar()]
+    stale_surface = pygame.Surface((10, 10))
+    for car in cars:
+        car.collision_surface = stale_surface
     trackers = [_CompletingTracker(), _CompletingTracker()]
     surface = pygame.Surface((100, 100))
 
@@ -242,6 +249,7 @@ def test_validation_stops_after_first_clean_completion(monkeypatch) -> None:
     assert survival == [1, 1]
     assert [tracker.advance_count for tracker in trackers] == [1, 1]
     assert configured_speeds == [25]
+    assert all(car.collision_surface is surface for car in cars)
 
 
 def test_collision_frame_does_not_count_as_valid_completion(monkeypatch) -> None:

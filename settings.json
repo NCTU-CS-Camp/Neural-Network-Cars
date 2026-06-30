@@ -1,6 +1,8 @@
 {
-  "nickname": "898",
-  "server_url": "http://10.10.10.4:8000",
+  "group_id": "1",
+  "username": "898",
+  "nickname": "7",
+  "server_url": "http://127.0.0.1:8010",
   "fps": 30,
   "population_size": 300,
   "mutation_rate": 90,

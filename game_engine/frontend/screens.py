@@ -1231,6 +1231,7 @@ def _simulate_candidates(
 
     configure_car(track_back, car_image, max_speed)
     for car in candidates:
+        car.set_collision_surface(track_back)
         car.reset_state(spawn["x"], spawn["y"], spawn["angle"], car_image=car_image)
 
     previous_positions = [car.center for car in candidates]

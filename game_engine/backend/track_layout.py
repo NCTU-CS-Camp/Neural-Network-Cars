@@ -41,6 +41,14 @@ class TrackLayout:
     seed: int
     route_cells: tuple[tuple[int, int], ...]
 
+    @property
+    def map_name(self) -> str:
+        return f"random_seed_{self.seed}"
+
+    @property
+    def polyline(self) -> tuple[tuple[float, float], ...]:
+        return self.centerline
+
     def connections_for(self, index: int) -> frozenset[str]:
         current = self.route_cells[index]
         previous = self.route_cells[index - 1]
