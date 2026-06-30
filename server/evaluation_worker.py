@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
 import threading
 from datetime import datetime
 from typing import Callable
 
 from server.storage import CompetitionStorage
+
+
+logger = logging.getLogger(__name__)
 
 
 class BatchWorker:
@@ -53,7 +57,12 @@ class BatchWorker:
 
     def _run(self) -> None:
         while not self._stop_event.is_set():
-            self.process_due()
+            try:
+                self.process_due()
+            except Exception:
+                logger.exception(
+                    "Phase-one batch processing failed; retrying after poll interval"
+                )
             self._stop_event.wait(self.poll_interval)
 
 
