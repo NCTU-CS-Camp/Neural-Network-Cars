@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, datetime, timedelta
 
 import pygame
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from server.app import create_app
 from server.competition_config import STAGNATION_TICKS
 from server.competition_maps import get_competition_map
+from server.evaluation_worker import BatchWorker
 from server.storage import CompetitionStorage
 
 
@@ -69,6 +71,32 @@ def process_now(client: TestClient) -> int:
     )
     assert response.status_code == 200
     return int(response.json()["processed"])
+
+
+def test_batch_worker_retries_after_transient_failure(caplog):
+    recovered = threading.Event()
+
+    class FlakyStorage:
+        calls = 0
+
+        def seal_phase_one_batches(self, *, now=None, force=False):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary database failure")
+            recovered.set()
+            return 0
+
+    storage = FlakyStorage()
+    worker = BatchWorker(storage, poll_interval=0.01)  # type: ignore[arg-type]
+
+    worker.start()
+    try:
+        assert recovered.wait(timeout=1.0)
+    finally:
+        worker.stop()
+
+    assert storage.calls >= 2
+    assert "retrying after poll interval" in caplog.text
 
 
 def test_phase_one_submission_is_queued_and_cooldown_is_per_competition(tmp_path):
