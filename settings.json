@@ -1,11 +1,13 @@
 {
-  "nickname": "player1",
+  "nickname": "898",
+  "server_url": "http://10.10.10.4:8000",
   "fps": 30,
-  "population_size": 50,
+  "population_size": 300,
   "mutation_rate": 90,
   "show_player": true,
   "show_debug_overlay": true,
   "map_mode": "default",
   "track_seed": 42,
-  "fitness_strategy": "baseline_distance"
+  "evolution_seed": 3057,
+  "max_speed": 10
 }

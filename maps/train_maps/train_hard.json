@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "name": "train_hard",
+  "canvas": {
+    "width": 1600,
+    "height": 900
+  },
+  "grid": {
+    "cols": 10,
+    "rows": 5,
+    "cell_size": 146,
+    "offset_x": 70,
+    "offset_y": 85
+  },
+  "asset_root": "Images/TracksMapGen",
+  "start": {
+    "x": 0,
+    "y": 2
+  },
+  "finish": {
+    "x": 0,
+    "y": 3
+  },
+  "tiles": [
+    {
+      "x": 0,
+      "y": 0,
+      "tile": "Curve1"
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "tile": "Curve2"
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "tile": "Curve1"
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "tile": "Straight1"
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "tile": "Straight1"
+    },
+    {
+      "x": 5,
+      "y": 0,
+      "tile": "Straight1"
+    },
+    {
+      "x": 6,
+      "y": 0,
+      "tile": "Straight1"
+    },
+    {
+      "x": 7,
+      "y": 0,
+      "tile": "Curve2"
+    },
+    {
+      "x": 8,
+      "y": 0,
+      "tile": "Curve1"
+    },
+    {
+      "x": 9,
+      "y": 0,
+      "tile": "Curve2"
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "tile": "Straight2"
+    },
+    {
+      "x": 1,
+      "y": 1,
+      "tile": "Curve4"
+    },
+    {
+      "x": 2,
+      "y": 1,
+      "tile": "Curve3"
+    },
+    {
+      "x": 4,
+      "y": 1,
+      "tile": "Curve1"
+    },
+    {
+      "x": 5,
+      "y": 1,
+      "tile": "Curve2"
+    },
+    {
+      "x": 7,
+      "y": 1,
+      "tile": "Curve4"
+    },
+    {
+      "x": 8,
+      "y": 1,
+      "tile": "Curve3"
+    },
+    {
+      "x": 9,
+      "y": 1,
+      "tile": "Straight2"
+    },
+    {
+      "x": 0,
+      "y": 2,
+      "tile": "Initial"
+    },
+    {
+      "x": 4,
+      "y": 2,
+      "tile": "Straight2"
+    },
+    {
+      "x": 5,
+      "y": 2,
+      "tile": "Straight2"
+    },
+    {
+      "x": 9,
+      "y": 2,
+      "tile": "Straight2"
+    },
+    {
+      "x": 0,
+      "y": 3,
+      "tile": "Straight2"
+    },
+    {
+      "x": 4,
+      "y": 3,
+      "tile": "Straight2"
+    },
+    {
+      "x": 5,
+      "y": 3,
+      "tile": "Straight2"
+    },
+    {
+      "x": 9,
+      "y": 3,
+      "tile": "Straight2"
+    },
+    {
+      "x": 0,
+      "y": 4,
+      "tile": "Curve4"
+    },
+    {
+      "x": 1,
+      "y": 4,
+      "tile": "Straight1"
+    },
+    {
+      "x": 2,
+      "y": 4,
+      "tile": "Straight1"
+    },
+    {
+      "x": 3,
+      "y": 4,
+      "tile": "Straight1"
+    },
+    {
+      "x": 4,
+      "y": 4,
+      "tile": "Curve3"
+    },
+    {
+      "x": 5,
+      "y": 4,
+      "tile": "Curve4"
+    },
+    {
+      "x": 6,
+      "y": 4,
+      "tile": "Straight1"
+    },
+    {
+      "x": 7,
+      "y": 4,
+      "tile": "Straight1"
+    },
+    {
+      "x": 8,
+      "y": 4,
+      "tile": "Straight1"
+    },
+    {
+      "x": 9,
+      "y": 4,
+      "tile": "Curve3"
+    }
+  ],
+  "metrics": {
+    "topology": "closed_circuit",
+    "road_tiles": 36,
+    "route_cells": 36,
+    "total_length_px": 5256,
+    "segment_count": 36,
+    "turn_count": 16,
+    "turn_density": 0.444,
+    "early_turn_count": 4,
+    "longest_straight_cells": 5,
+    "tight_turn_sequence_count": 9,
+    "long_straight_before_turn": true,
+    "difficulty_score": 78.05,
+    "estimated_difficulty": "hard"
+  }
+}
