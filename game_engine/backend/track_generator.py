@@ -88,17 +88,24 @@ def render_track_layout(
 
 
 def _load_tiles(suffix: str) -> dict[str, pygame.Surface]:
-    return {
-        tile_name: pygame.image.load(TRACK_ASSETS_DIR / f"{tile_name}{suffix}.png")
-        for tile_name in (
-            "Straight1",
-            "Straight2",
-            "Curve1",
-            "Curve2",
-            "Curve3",
-            "Curve4",
+    tiles = {}
+    for tile_name in (
+        "Straight1",
+        "Straight2",
+        "Curve1",
+        "Curve2",
+        "Curve3",
+        "Curve4",
+    ):
+        tile = pygame.image.load(
+            TRACK_ASSETS_DIR / f"{tile_name}{suffix}.png"
         )
-    }
+        if not suffix:
+            # Collision tiles use opaque black outside the road instead of
+            # transparency. Do not copy those pixels into the alpha mask.
+            tile.set_colorkey((0, 0, 0))
+        tiles[tile_name] = tile
+    return tiles
 
 
 def _back_tile_position(origin_x: int, origin_y: int) -> tuple[int, int]:

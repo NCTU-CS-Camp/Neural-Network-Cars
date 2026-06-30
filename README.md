@@ -133,11 +133,11 @@ User ID 與 Group ID，產生或覆寫 test-only `client_result`，並提交到 
 
 ## Competition 操作流程
 
-以下四個入口使用同一個 competition server。預設 server URL 是
-`http://127.0.0.1:8000`；若改用其他 port，可在啟動 Pygame client 前設定：
+以下四個入口使用同一個 competition server，統一使用
+`http://127.0.0.1:8000`。啟動 Pygame client 前可明確設定：
 
 ```bash
-export COMPETITION_SERVER_URL=http://127.0.0.1:8010
+export COMPETITION_SERVER_URL=http://127.0.0.1:8000
 ```
 
 ### 1. Admin：設定賽程與建立 snapshot

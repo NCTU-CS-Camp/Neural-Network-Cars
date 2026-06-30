@@ -1,8 +1,8 @@
 {
   "group_id": "1",
   "username": "898",
-  "nickname": "8",
-  "server_url": "http://127.0.0.1:8010",
+  "nickname": "79",
+  "server_url": "http://127.0.0.1:8000",
   "fps": 30,
   "population_size": 300,
   "mutation_rate": 90,
@@ -11,5 +11,5 @@
   "map_mode": "default",
   "track_seed": 42,
   "evolution_seed": 3057,
-  "max_speed": 10
+  "max_speed": 30
 }

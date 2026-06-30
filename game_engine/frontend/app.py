@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 import secrets
 
@@ -58,6 +59,14 @@ from shared.contracts import TrainingRecord
 
 
 UTC_PLUS_8 = timezone(timedelta(hours=8))
+
+
+def _set_collision_surface(
+    cars: Iterable[Car],
+    surface: pygame.Surface,
+) -> None:
+    for target_car in cars:
+        target_car.set_collision_surface(surface)
 
 
 def _car_from_flat_weights(
@@ -487,6 +496,7 @@ def run_training_loop(
         simulator = Simulator(track, settings.fps)
         set_collision_map(bg4)
         configure_car(bg4, assets.white_small_car, settings.max_speed)
+        _set_collision_surface((car, aux_car, *nn_cars), bg4)
         apply_track_spawn(reset_player=True)
         restart_generation_timer()
 
