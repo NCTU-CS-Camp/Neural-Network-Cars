@@ -17,6 +17,7 @@ class _FakeCar:
     def __init__(self, *, collided: bool = False) -> None:
         self.center = (0.0, 0.0)
         self._collided = collided
+        self.velocity = 5.0
         self.collision_surface: pygame.Surface | None = None
 
     def set_collision_surface(self, surface: pygame.Surface) -> None:
@@ -178,10 +179,10 @@ def test_ticks_are_displayed_as_seconds_with_one_decimal() -> None:
     assert format_ticks_as_seconds(None, fps=30) == "--"
 
 
-def test_timestamp_is_displayed_in_utc_plus_8() -> None:
+def test_timestamp_is_displayed_as_time_only_in_utc_plus_8() -> None:
     assert format_timestamp_utc8(
         "2026-06-29T03:15:27.171244+00:00"
-    ) == "2026-06-29 11:15:27 UTC+8"
+    ) == "11:15:27"
 
 
 def test_all_ten_fitness_parameters_are_split_across_two_lines() -> None:
@@ -233,7 +234,7 @@ def test_validation_stops_after_first_clean_completion(monkeypatch) -> None:
     trackers = [_CompletingTracker(), _CompletingTracker()]
     surface = pygame.Surface((100, 100))
 
-    survival = _simulate_candidates(
+    outcome = _simulate_candidates(
         surface,
         surface,
         surface,
@@ -247,7 +248,8 @@ def test_validation_stops_after_first_clean_completion(monkeypatch) -> None:
         max_speed=25,
     )
 
-    assert survival == [1, 1]
+    assert outcome.survival == [1, 1]
+    assert outcome.collided == [False, False]
     assert [tracker.advance_count for tracker in trackers] == [1, 1]
     assert configured_speeds == [25]
     assert all(car.collision_surface is surface for car in cars)
@@ -266,7 +268,7 @@ def test_collision_frame_does_not_count_as_valid_completion(monkeypatch) -> None
     tracker = _CompletingTracker()
     surface = pygame.Surface((100, 100))
 
-    survival = _simulate_candidates(
+    outcome = _simulate_candidates(
         surface,
         surface,
         surface,
@@ -279,7 +281,8 @@ def test_collision_frame_does_not_count_as_valid_completion(monkeypatch) -> None
         stop_on_first_completion=True,
     )
 
-    assert survival == [1]
+    assert outcome.survival == [1]
+    assert outcome.collided == [True]
     assert not tracker.completed
     assert tracker.advance_count == 0
 

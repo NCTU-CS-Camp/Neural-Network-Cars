@@ -56,6 +56,45 @@ class Button:
 
 
 @dataclass(slots=True)
+class Checkbox:
+    rect: pygame.Rect
+    label: str = ""
+    checked: bool = False
+    box_color: tuple[int, int, int] = (30, 30, 30)
+    border_color: tuple[int, int, int] = (90, 90, 90)
+    check_color: tuple[int, int, int] = (120, 220, 120)
+    text_color: tuple[int, int, int] = (255, 255, 255)
+
+    def contains(self, position: tuple[int, int]) -> bool:
+        return self.rect.collidepoint(position)
+
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        if (
+            event.type == pygame.MOUSEBUTTONDOWN
+            and event.button == 1
+            and self.contains(event.pos)
+        ):
+            self.checked = not self.checked
+            return True
+        return False
+
+    def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+        pygame.draw.rect(surface, self.box_color, self.rect, border_radius=4)
+        pygame.draw.rect(surface, self.border_color, self.rect, 2, border_radius=4)
+        if self.checked:
+            inset = self.rect.inflate(-self.rect.width // 3, -self.rect.height // 3)
+            pygame.draw.rect(surface, self.check_color, inset, border_radius=2)
+        if self.label:
+            label_surface = font.render(self.label, True, self.text_color)
+            surface.blit(
+                label_surface,
+                label_surface.get_rect(
+                    midleft=(self.rect.right + 10, self.rect.centery)
+                ),
+            )
+
+
+@dataclass(slots=True)
 class Dropdown:
     rect: pygame.Rect
     options: tuple[str, ...]
@@ -245,6 +284,108 @@ class TextInput:
             pygame.draw.line(surface, self.composing_color,
                              (composing_rect.left, underline_y),
                              (composing_rect.right, underline_y), 1)
+
+
+@dataclass(slots=True)
+class ProgressBar:
+    rect: pygame.Rect
+    value: float = 0.0
+    max_value: float = 1.0
+    track_color: tuple[int, int, int] = (40, 40, 40)
+    fill_color: tuple[int, int, int] = (90, 170, 255)
+    border_color: tuple[int, int, int] = (90, 90, 90)
+
+    def ratio(self) -> float:
+        if self.max_value <= 0:
+            return 0.0
+        return max(0.0, min(1.0, self.value / self.max_value))
+
+    def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+        pygame.draw.rect(surface, self.track_color, self.rect, border_radius=6)
+        fill_width = int(self.rect.width * self.ratio())
+        if fill_width > 0:
+            fill_rect = pygame.Rect(self.rect.x, self.rect.y, fill_width, self.rect.height)
+            pygame.draw.rect(surface, self.fill_color, fill_rect, border_radius=6)
+        pygame.draw.rect(surface, self.border_color, self.rect, 2, border_radius=6)
+        del font
+
+
+@dataclass(slots=True)
+class VerticalScrollbar:
+    rect: pygame.Rect
+    total_items: int
+    visible_items: int
+    offset: int = 0
+    dragging: bool = False
+    drag_grab_offset: int = 0
+    track_color: tuple[int, int, int] = (30, 30, 30)
+    thumb_color: tuple[int, int, int] = (100, 100, 100)
+    hover_thumb_color: tuple[int, int, int] = (140, 140, 140)
+
+    def max_offset(self) -> int:
+        return max(0, self.total_items - self.visible_items)
+
+    def clamp(self) -> None:
+        self.offset = max(0, min(self.offset, self.max_offset()))
+
+    def is_needed(self) -> bool:
+        return self.total_items > self.visible_items
+
+    def _thumb_rect(self) -> pygame.Rect:
+        ratio = self.visible_items / max(1, self.total_items)
+        thumb_h = max(24, int(self.rect.height * ratio))
+        span = self.rect.height - thumb_h
+        max_offset = self.max_offset()
+        thumb_y = self.rect.y + (0 if max_offset == 0 else int(span * self.offset / max_offset))
+        return pygame.Rect(self.rect.x, thumb_y, self.rect.width, thumb_h)
+
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        if not self.is_needed():
+            return False
+        if event.type == pygame.MOUSEWHEEL:
+            self.offset -= event.y
+            self.clamp()
+            return True
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            thumb_rect = self._thumb_rect()
+            if thumb_rect.collidepoint(event.pos):
+                self.dragging = True
+                self.drag_grab_offset = event.pos[1] - thumb_rect.y
+                return True
+            if self.rect.collidepoint(event.pos):
+                span = self.rect.height - thumb_rect.height
+                if span > 0:
+                    target_y = event.pos[1] - thumb_rect.height // 2 - self.rect.y
+                    self.offset = round(self.max_offset() * max(0, min(span, target_y)) / span)
+                    self.clamp()
+                return True
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            was_dragging = self.dragging
+            self.dragging = False
+            return was_dragging
+        if event.type == pygame.MOUSEMOTION and self.dragging:
+            thumb_rect = self._thumb_rect()
+            span = self.rect.height - thumb_rect.height
+            if span > 0:
+                target_y = event.pos[1] - self.drag_grab_offset - self.rect.y
+                self.offset = round(self.max_offset() * max(0, min(span, target_y)) / span)
+                self.clamp()
+            return True
+        return False
+
+    def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+        del font
+        if not self.is_needed():
+            return
+        pygame.draw.rect(surface, self.track_color, self.rect, border_radius=4)
+        thumb_rect = self._thumb_rect()
+        mouse_pos = pygame.mouse.get_pos()
+        color = (
+            self.hover_thumb_color
+            if self.dragging or thumb_rect.collidepoint(mouse_pos)
+            else self.thumb_color
+        )
+        pygame.draw.rect(surface, color, thumb_rect, border_radius=4)
 
 
 @dataclass(slots=True)

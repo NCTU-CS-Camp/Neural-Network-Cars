@@ -283,54 +283,39 @@ class CompetitionStorage:
             "competition_config_version": COMPETITION_CONFIG_VERSION,
         }
 
-        if competition_id in (CompetitionId.EASY, CompetitionId.HARD):
-            if stage is not CompetitionStage.PHASE_ONE:
-                result["reason"] = "competition_closed"
-                return result
-            row = connection.execute(
-                """
-                SELECT submitted_at FROM submissions
-                WHERE competition_id = ? AND group_id = ? AND username = ?
-                  AND status != ?
-                ORDER BY submitted_at DESC
-                LIMIT 1
-                """,
-                (
-                    competition_id.value,
-                    group_id,
-                    username,
-                    SubmissionStatus.FAILED.value,
-                ),
-            ).fetchone()
-            if row is not None:
-                last_submission = _parse_timestamp(row["submitted_at"])
-                next_allowed = last_submission + timedelta(
-                    minutes=phase_one_batch_minutes,
-                )
-                result["next_submission_at"] = next_allowed.isoformat()
-                if now < next_allowed:
-                    result["reason"] = "submission_cooldown"
-                    return result
-
-            result["eligible"] = True
-            return result
-
-        if stage is not CompetitionStage.FINAL:
+        required_stage = (
+            CompetitionStage.FINAL
+            if competition_id is CompetitionId.FINAL
+            else CompetitionStage.PHASE_ONE
+        )
+        if stage is not required_stage:
             result["reason"] = "competition_closed"
             return result
 
         row = connection.execute(
             """
-            SELECT submission_id FROM submissions
-            WHERE competition_id = ? AND group_id = ? AND status != ?
+            SELECT submitted_at FROM submissions
+            WHERE competition_id = ? AND group_id = ? AND username = ?
+              AND status != ?
+            ORDER BY submitted_at DESC
             LIMIT 1
             """,
-            (CompetitionId.FINAL.value, group_id, SubmissionStatus.FAILED.value),
+            (
+                competition_id.value,
+                group_id,
+                username,
+                SubmissionStatus.FAILED.value,
+            ),
         ).fetchone()
         if row is not None:
-            result["reason"] = "final_locked"
-            result["locked_submission_id"] = row["submission_id"]
-            return result
+            last_submission = _parse_timestamp(row["submitted_at"])
+            next_allowed = last_submission + timedelta(
+                minutes=phase_one_batch_minutes,
+            )
+            result["next_submission_at"] = next_allowed.isoformat()
+            if now < next_allowed:
+                result["reason"] = "submission_cooldown"
+                return result
 
         result["eligible"] = True
         return result

@@ -33,10 +33,7 @@ from game_engine.backend.settings import (
 )
 from game_engine.backend.track import TrackGeometry
 from game_engine.backend.track_generator import generate_random_map
-from game_engine.backend.training_session import (
-    GENERATION_DURATION_SECONDS,
-    TrainingSession,
-)
+from game_engine.backend.training_session import TrainingSession
 from game_engine.frontend.config_store import load_runtime_settings, save_runtime_settings
 from game_engine.frontend.profile_store import (
     clear_login_profile,
@@ -47,6 +44,7 @@ from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
     AppQuit,
     run_clear_user_confirm_screen,
+    run_loading_screen,
     run_login_screen,
     run_main_menu_screen,
     run_record_name_screen,
@@ -54,6 +52,7 @@ from game_engine.frontend.screens import (
     run_training_config_screen,
     run_validation_list_screen,
 )
+from game_engine.backend.fitness_preset_store import FitnessPresetStore
 from game_engine.frontend.widgets import Button
 from shared.contracts import TrainingRecord
 
@@ -115,11 +114,21 @@ def run():
                     save_runtime_settings(settings)
                 continue
             if choice == "training":
-                result = run_training_config_screen(screen, settings.max_speed)
+                result = run_training_config_screen(
+                    screen, settings.max_speed, settings.auto_breed_seconds
+                )
                 if result is not None:
-                    fitness_strategy, map_difficulty, parent_record, max_speed = result
+                    (
+                        fitness_strategy,
+                        map_difficulty,
+                        parent_record,
+                        max_speed,
+                        auto_breed_seconds,
+                    ) = result
                     settings.max_speed = max_speed
+                    settings.auto_breed_seconds = auto_breed_seconds
                     save_runtime_settings(settings)
+                    run_loading_screen(screen)
                     if map_difficulty == 3:
                         generate_random_map(screen)
                     run_training_loop(
@@ -288,7 +297,7 @@ def run_training_loop(
         )
         remaining_seconds = max(
             0.0,
-            GENERATION_DURATION_SECONDS - generation_elapsed_seconds(),
+            session.generation_duration_seconds - generation_elapsed_seconds(),
         )
         info_text9 = font.render(
             f"Next generation: {remaining_seconds:.1f}s", True, WHITE
@@ -576,18 +585,7 @@ def run_training_loop(
                         for nn_car in nn_cars:
                             polygon = Polygon([nn_car.a, nn_car.b, nn_car.c, nn_car.d])
                             if polygon.contains(point):
-                                was_selected = nn_car in session.selected_cars
                                 session.toggle_selected_car(nn_car)
-                                if was_selected:
-                                    if nn_car.car_image == assets.white_big_car:
-                                        nn_car.car_image = assets.white_small_car
-                                    if nn_car.car_image == assets.green_big_car:
-                                        nn_car.car_image = assets.green_small_car
-                                elif nn_car in session.selected_cars:
-                                    if nn_car.car_image == assets.white_small_car:
-                                        nn_car.car_image = assets.white_big_car
-                                    if nn_car.car_image == assets.green_small_car:
-                                        nn_car.car_image = assets.green_big_car
                                 if nn_car.collided:
                                     nn_car.velocity = 0
                                     nn_car.acceleration = 0
@@ -607,8 +605,14 @@ def run_training_loop(
 
         if leave_requested:
             persist_settings()
-            if run_save_confirm_screen(screen):
+            save_record, save_as_preset = run_save_confirm_screen(screen)
+            if save_record:
                 save_training_record()
+            if save_as_preset:
+                preset_name = run_record_name_screen(
+                    screen, title="幫這組 Fitness 參數命名"
+                )
+                FitnessPresetStore().save_preset(preset_name, fitness_config)
             return
 
         redraw_game_window()

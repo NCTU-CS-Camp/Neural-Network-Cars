@@ -52,6 +52,7 @@ class RuntimeSettings:
     track_seed: int = 42
     evolution_seed: int = DEFAULT_EVOLUTION_SEED
     max_speed: int = 10
+    auto_breed_seconds: int = 40
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
@@ -77,6 +78,9 @@ class RuntimeSettings:
                 data.get("evolution_seed", defaults.evolution_seed)
             ),
             max_speed=max(5, min(30, int(data.get("max_speed", defaults.max_speed)))),
+            auto_breed_seconds=max(
+                30, min(90, int(data.get("auto_breed_seconds", defaults.auto_breed_seconds)))
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -396,6 +400,12 @@ class TrainingRecord:
     mlp_init_seed: int = DEFAULT_EVOLUTION_SEED
     mlp_init_rng_state: dict[str, Any] | None = None
     mutation_rng_state: tuple[Any, ...] | list[Any] | None = None
+    last_upload_completed: bool | None = None
+    last_upload_lap_ticks: int | None = None
+    last_upload_max_progress: float | None = None
+    last_upload_survival_rate: float | None = None
+    last_upload_status: str | None = None
+    last_upload_at: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrainingRecord":
@@ -426,6 +436,12 @@ class TrainingRecord:
             ),
             mlp_init_rng_state=data.get("mlp_init_rng_state"),
             mutation_rng_state=data.get("mutation_rng_state"),
+            last_upload_completed=data.get("last_upload_completed"),
+            last_upload_lap_ticks=data.get("last_upload_lap_ticks"),
+            last_upload_max_progress=data.get("last_upload_max_progress"),
+            last_upload_survival_rate=data.get("last_upload_survival_rate"),
+            last_upload_status=data.get("last_upload_status"),
+            last_upload_at=data.get("last_upload_at"),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -447,6 +463,34 @@ class TrainingRecord:
             "mlp_init_seed": self.mlp_init_seed,
             "mlp_init_rng_state": self.mlp_init_rng_state,
             "mutation_rng_state": self.mutation_rng_state,
+            "last_upload_completed": self.last_upload_completed,
+            "last_upload_lap_ticks": self.last_upload_lap_ticks,
+            "last_upload_max_progress": self.last_upload_max_progress,
+            "last_upload_survival_rate": self.last_upload_survival_rate,
+            "last_upload_status": self.last_upload_status,
+            "last_upload_at": self.last_upload_at,
+        }
+
+
+@dataclass(slots=True)
+class CustomFitnessPreset:
+    preset_id: str
+    preset_name: str
+    fitness_config: FitnessConfig
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CustomFitnessPreset":
+        return cls(
+            preset_id=str(data["preset_id"]),
+            preset_name=str(data["preset_name"]),
+            fitness_config=FitnessConfig.from_dict(data["fitness_config"]),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "preset_id": self.preset_id,
+            "preset_name": self.preset_name,
+            "fitness_config": self.fitness_config.to_dict(),
         }
 
 

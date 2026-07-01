@@ -29,8 +29,8 @@ TRACK_HALF_WIDTH = 66.0
 # Validation run length. Kept as a config knob because the termination rule is
 # expected to change later (e.g. stagnation / first-completion); for now a flat
 # time limit is the only criterion implemented.
-VALIDATION_TIME_LIMIT_SECONDS = 90
-VALIDATION_FRAME_LIMIT = VALIDATION_TIME_LIMIT_SECONDS * FPS  # 90s @ 30fps = 2700 ticks
+VALIDATION_TIME_LIMIT_SECONDS = 60
+VALIDATION_FRAME_LIMIT = VALIDATION_TIME_LIMIT_SECONDS * FPS  # 60s @ 30fps = 1800 ticks
 
 WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)

@@ -275,7 +275,7 @@ def test_ranking_prefers_completion_then_lap_ticks_then_progress_then_time(tmp_p
     ]
 
 
-def test_final_stage_gates_submissions_and_locks_one_model_per_group(tmp_path):
+def test_final_stage_gates_submissions_and_uses_per_individual_cooldown(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
         closed = client.post("/v2/finals/submissions", json=make_payload(group_id="1", username="ada"))
@@ -288,24 +288,36 @@ def test_final_stage_gates_submissions_and_locks_one_model_per_group(tmp_path):
             "/v2/finals/submissions",
             json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=520),
         )
-        duplicate = client.post(
+        teammate = client.post(
             "/v2/finals/submissions",
             json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
+        )
+        cooldown = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=510),
+        )
+        clock.advance(minutes=1)
+        resubmit = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=500),
         )
         other = client.post(
             "/v2/finals/submissions",
             json=make_payload(group_id="2", username="cy", completed=True, lap_ticks=480),
         )
-        leaderboard = client.get("/v2/competitions/final/leaderboard").json()
 
     assert closed.status_code == 409
     assert stage.json()["stage"] == "final"
     assert first.status_code == 201
     assert first.json()["status"] == "completed"
-    assert duplicate.status_code == 409
-    assert duplicate.json()["error"] == "final_locked"
+    # Same group, different member: no longer locked out by ada's submission.
+    assert teammate.status_code == 201
+    # Same person resubmitting immediately still hits the per-individual cooldown.
+    assert cooldown.status_code == 429
+    assert cooldown.json()["error"] == "submission_cooldown"
+    # Once the cooldown window passes, that same person can submit again.
+    assert resubmit.status_code == 201
     assert other.status_code == 201
-    assert [row["group_id"] for row in leaderboard] == ["2", "1"]
 
 
 def test_final_eligibility_keeps_current_group_and_username_schema(tmp_path):

@@ -43,6 +43,14 @@ class RecordStore:
         self._write(records)
         return record
 
+    def update_record(self, record: TrainingRecord) -> None:
+        records = self._read()
+        for index, item in enumerate(records):
+            if item["record_id"] == record.record_id:
+                records[index] = record.to_dict()
+                break
+        self._write(records)
+
     def delete_record(self, record_id: str) -> None:
         records = [item for item in self._read() if item["record_id"] != record_id]
         self._write(records)
