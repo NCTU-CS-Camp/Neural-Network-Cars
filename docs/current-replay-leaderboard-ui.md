@@ -2,6 +2,16 @@
 
 This document records the current frontend style and implementation shape for the Pygame replay display and browser leaderboard. It is a baseline for future redesign work, not a redesign proposal.
 
+## F1 "Podium Hero" Restyle (2026-07-02)
+
+Both spectator surfaces were restyled into an F1‑TV broadcast look. This is **presentation only** — no change to endpoints, data contract, ranking, or the replay state machine. The palette/layout sections further below describe the earlier baseline; the current look is:
+
+- **Palette:** stage bg `#111017`, panels `#1A1A22`/`#1E1E27`, borders `#34343E`; brand red `#E10600`, gold `#E1B44C`, silver `#C7CBD4`, bronze `#CD7F32`. Per‑competition accents changed to **Easy = silver `#B8BCC6`, Hard = red `#E10600`, Final = gold `#E1B44C`**.
+- **Typography:** Saira Condensed / Saira Semi Condensed / Titillium Web TTFs added to `fonts/` (SIL OFL, see `fonts/*-OFL.txt`). Used for the ASCII chrome (wordmark, numerals, tags, banners, results). **User text (usernames / groups) still renders through the CJK‑capable fallback chain**, so Chinese names remain legible; `COMPETITION_REPLAY_FONT_PATH` still overrides.
+- **Pygame replay** (`game_engine/frontend/replay_client.py`): header = skewed "N" logo tile + `NEURAL CARS` wordmark + stage label + outlined `ELAPSED / NEXT REPLAY / SNAPSHOT` timing chips (pulsing dot). Maps are darkened with a skewed `EASY/HARD/FINAL` banner, a `LIVE` badge, and car markers drawn as colored dots + skewed tag pills (dim when finished/crashed/stalled). The compact leaderboard is now a **podium band (ranks 1–3, medal borders + ghost numerals)** plus **tower rows (4–8 / 4–10)** and a `SHOWING n OF m` / `TOP …` footer. Phase 1 keeps the two symmetric columns; Final keeps the large map + right‑hand standings (stacked podium cards showing `Group N` + submitter). Safe‑reveal, 3s hold, 5s fetch, and the 2s reveal highlight are unchanged.
+- **Browser leaderboard** (`server/static/leaderboard.html`): same data flow; new F1 theme, skewed `EASY/HARD/FINAL` tabs (active fills with the competition accent), a top‑3 podium band, and a table with position blocks, driver tags, leader row tint, and 50%‑opacity DNF rows. Fonts load from Google Fonts.
+- Design source: `design_handoff_f1_podium_hero/` (`leaderboard.reference.html`, `replay_theme.py`, `README.md`).
+
 ## Entry Points
 
 - Pygame big-screen replay:
