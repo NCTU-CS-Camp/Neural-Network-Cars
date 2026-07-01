@@ -715,8 +715,7 @@ def run_record_name_screen(screen: pygame.Surface) -> str:
     width, height = screen.get_size()
 
     name_input = TextInput(pygame.Rect(width // 2 - 200, height // 2, 400, 48))
-    name_input.active = True
-    pygame.key.start_text_input()
+    name_input.focus()
     confirm_button = Button("確認", pygame.Rect(width // 2 - 80, height // 2 + 80, 160, 56))
 
     while True:
@@ -728,6 +727,7 @@ def run_record_name_screen(screen: pygame.Surface) -> str:
                     return name_input.text.strip()
             if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
                 if name_input.text.strip():
+                    name_input.blur()
                     return name_input.text.strip()
 
         mouse_pos = pygame.mouse.get_pos()

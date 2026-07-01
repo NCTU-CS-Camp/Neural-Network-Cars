@@ -13,3 +13,14 @@ __pycache__/
 shared/__pycache__/
 server/*.db
 server/*.db-*
+
+# Local runtime configuration and user data
+.env
+profile.json
+records.json
+settings.json
+
+# Runtime-generated random track outputs
+Images/Tracks/randomGeneratedTrack.json
+Images/Tracks/randomGeneratedTrackBack.png
+Images/Tracks/randomGeneratedTrackFront.png

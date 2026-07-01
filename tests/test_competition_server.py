@@ -247,6 +247,16 @@ def test_ranking_uses_client_result_and_keeps_individual_historical_best(tmp_pat
     assert leaderboard[2]["group_id"] == "2"
 
 
+def test_chinese_username_round_trips_through_leaderboard(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        submit(client, "easy", username="吳榮恆")
+        assert process_now(client) == 1
+        leaderboard = client.get("/v2/competitions/easy/leaderboard").json()
+
+    assert leaderboard[0]["username"] == "吳榮恆"
+
+
 def test_ranking_prefers_completion_then_lap_ticks_then_progress_then_time(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:

@@ -24,14 +24,28 @@ class Button:
     hover_color: tuple[int, int, int] = (55, 55, 55)
     text_color: tuple[int, int, int] = (255, 255, 255)
     border_color: tuple[int, int, int] = (90, 90, 90)
+    shadow_color: tuple[int, int, int] = (12, 12, 12)
+    press_offset: int = 3
     hovered: bool = False
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+        face_rect = self.rect.copy()
+        face_rect.height -= self.press_offset
+        if self.hovered:
+            face_rect.y += self.press_offset
+
         fill = self.hover_color if self.hovered else self.fill_color
-        pygame.draw.rect(surface, fill, self.rect)
-        pygame.draw.rect(surface, self.border_color, self.rect, 2)
+        pygame.draw.rect(surface, self.shadow_color, self.rect, border_radius=4)
+        pygame.draw.rect(surface, fill, face_rect, border_radius=4)
+        pygame.draw.rect(
+            surface,
+            self.border_color,
+            face_rect,
+            2,
+            border_radius=4,
+        )
         rendered = font.render(self.text, True, self.text_color)
-        text_rect = rendered.get_rect(center=self.rect.center)
+        text_rect = rendered.get_rect(center=face_rect.center)
         surface.blit(rendered, text_rect)
 
     def contains(self, position: tuple[int, int]) -> bool:
@@ -160,17 +174,28 @@ class TextInput:
     allowed_characters: str | None = None
     clear_on_focus: bool = False
 
+    def focus(self) -> None:
+        self.active = True
+        pygame.key.start_text_input()
+        pygame.key.set_text_input_rect(self.rect)
+
+    def blur(self) -> None:
+        self.active = False
+        self.composing = ""
+        pygame.key.stop_text_input()
+
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN:
             was_active = self.active
-            self.active = self.rect.collidepoint(event.pos)
-            if self.active and not was_active:
+            clicked_inside = self.rect.collidepoint(event.pos)
+            if clicked_inside and not was_active:
                 if self.clear_on_focus:
                     self.text = ""
-                pygame.key.start_text_input()
-            elif not self.active and was_active:
-                pygame.key.stop_text_input()
-                self.composing = ""
+                self.focus()
+            elif clicked_inside:
+                pygame.key.set_text_input_rect(self.rect)
+            elif was_active:
+                self.blur()
             return self.active
 
         if not self.active:

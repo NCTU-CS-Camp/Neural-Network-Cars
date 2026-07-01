@@ -1,6 +1,6 @@
 import pygame
 
-from game_engine.frontend.widgets import Dropdown, Slider, TextInput
+from game_engine.frontend.widgets import Button, Dropdown, Slider, TextInput
 
 
 def _left_click(position: tuple[int, int]) -> pygame.event.Event:
@@ -69,6 +69,50 @@ def test_text_input_can_replace_existing_numeric_value_on_focus() -> None:
 
     assert input_value.active
     assert input_value.text == ""
+
+
+def test_text_input_commits_chinese_ime_text() -> None:
+    input_value = TextInput(
+        pygame.Rect(10, 20, 160, 30),
+        active=True,
+    )
+
+    assert input_value.handle_event(
+        pygame.event.Event(pygame.TEXTEDITING, {"text": "ㄨ"})
+    )
+    assert input_value.composing == "ㄨ"
+
+    assert input_value.handle_event(
+        pygame.event.Event(pygame.TEXTINPUT, {"text": "吳榮恆"})
+    )
+    assert input_value.text == "吳榮恆"
+    assert input_value.composing == ""
+
+
+def test_button_hover_moves_face_down_like_a_pressed_button() -> None:
+    pygame.font.init()
+    button = Button("Test", pygame.Rect(10, 20, 120, 40))
+    surface = pygame.Surface((160, 80))
+    font = pygame.font.Font(None, 20)
+
+    button.hovered = False
+    button.draw(surface, font)
+    normal_face_top = next(
+        y
+        for y in range(button.rect.top, button.rect.bottom)
+        if surface.get_at((button.rect.centerx, y))[:3] == button.fill_color
+    )
+
+    surface.fill((0, 0, 0))
+    button.hovered = True
+    button.draw(surface, font)
+    pressed_face_top = next(
+        y
+        for y in range(button.rect.top, button.rect.bottom)
+        if surface.get_at((button.rect.centerx, y))[:3] == button.hover_color
+    )
+
+    assert pressed_face_top == normal_face_top + button.press_offset
 
 
 def test_slider_large_handle_area_is_draggable() -> None:

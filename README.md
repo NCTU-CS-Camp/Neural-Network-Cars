@@ -46,7 +46,7 @@ uv run python main.py
 
 - `game_engine/frontend/app.py`：本地 simulator 的主要入口，負責串接設定、scene、training session 與 render loop。
 - `game_engine/frontend/scenes.py`：`home`、`settings`、`training`、`replay` 四個場景的基礎殼層。
-- `game_engine/frontend/config_store.py`：讀寫 `settings.json`。
+- `game_engine/frontend/config_store.py`：讀寫本機的 `settings.json`。
 - `game_engine/frontend/widgets.py`：提供基礎 UI 元件骨架。
 - `game_engine/backend/car.py`：車輛狀態、感測器、碰撞判定與神經網路輸出動作。
 - `GA/genetic.py`：mutation 與 crossover 的既有實作。
@@ -67,10 +67,10 @@ GA/          genetic operators 與 fitness strategy
 shared/     共用資料契約
 server/     submission 與 replay 服務
 Images/     車輛 sprite 與賽道生成素材
-Images/Tracks/  預設賽道與隨機產生賽道圖片
+Images/Tracks/  預設賽道，以及執行期產生且不納入版控的隨機賽道
 Images/OfficialTracks/  官方競賽地圖與 checkpoint metadata
 docs/       專案設計與協作文件
-settings.json  本地執行設定
+settings.json  本地執行設定（不納入版控）
 ```
 
 ## 啟動方式
@@ -90,7 +90,7 @@ Client 使用的 API 位址由專案根目錄的 `.env` 設定：
 COMPETITION_SERVER_URL=http://127.0.0.1:8000
 ```
 
-可複製 `.env.example` 後修改 IP、protocol 與 port。登入畫面不允許使用者修改此位址；若作業系統環境變數中也有 `COMPETITION_SERVER_URL`，環境變數優先。
+請先複製 `.env.example` 為 `.env`，再依本機環境修改 IP、protocol 與 port。`.env`、`settings.json`、`profile.json`、`records.json` 與隨機賽道輸出皆為本機執行期資料，不納入版本控制。登入畫面不允許使用者修改此位址；若作業系統環境變數中也有 `COMPETITION_SERVER_URL`，環境變數優先。
 
 `main.py` 保留為訓練用 simulator。競賽提交請使用符合 v2 `client_result` 契約的
 competition client；repository 內提供 `competition_main.py` 作為人工訓練與測試提交入口。
