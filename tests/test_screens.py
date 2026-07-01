@@ -102,7 +102,8 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
             pygame.MOUSEBUTTONDOWN,
             {"button": 1, "pos": (100, 360)},
         ),
-        pygame.event.Event(pygame.TEXTINPUT, {"text": "apollo"}),
+        pygame.event.Event(pygame.TEXTEDITING, {"text": "ㄨ"}),
+        pygame.event.Event(pygame.TEXTINPUT, {"text": "吳榮恆"}),
         pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
             {"button": 1, "pos": (100, 450)},
@@ -122,7 +123,7 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
     )
 
     assert profile.group_id == "1"
-    assert profile.username == "apollo"
+    assert profile.username == "吳榮恆"
     assert profile.server_url == "http://192.168.1.20:8000"
 
 

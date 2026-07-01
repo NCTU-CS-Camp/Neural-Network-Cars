@@ -16,7 +16,7 @@ from game_engine.backend.assets import GameAssets, load_game_assets
 from game_engine.backend.car import Car
 from game_engine.backend.competition_track import CompetitionRunTracker
 from game_engine.backend.serialization import apply_weight_payload
-from game_engine.backend.settings import FPS, SCREEN_SIZE
+from game_engine.backend.settings import FONT_PATH, FPS, SCREEN_SIZE
 from server.competition_config import (
     FRAME_LIMIT,
     PHASE_ONE_REPLAY_LIMIT,
@@ -976,6 +976,7 @@ def _fonts() -> dict[str, pygame.font.Font]:
 def _font_path_candidates(*, bold: bool) -> list[str]:
     configured = os.environ.get("COMPETITION_REPLAY_FONT_PATH")
     candidates = [
+        str(FONT_PATH),
         "/System/Library/Fonts/Hiragino Sans GB.ttc",
         "/System/Library/Fonts/STHeiti Medium.ttc",
         "/System/Library/Fonts/STHeiti Light.ttc",
