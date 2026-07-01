@@ -26,6 +26,8 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 
 ## Public Contract
 
+Current implemented submission payload shape:
+
 Model payload shape:
 
 ```json
@@ -47,6 +49,25 @@ Submission adds `client_result`:
   "ticks_to_max_progress": 840
 }
 ```
+
+Spec_v2 pending payload additions:
+
+```json
+{
+  "skin_id": 3,
+  "maxSpeed": 10.0,
+  "client_result": {
+    "survival_rate": 0.467
+  },
+  "training_strategy": {
+    "strategy_id": "progress_first_v2",
+    "base_preset_id": "progress-first",
+    "fitness_config": {}
+  }
+}
+```
+
+Current implementation does not yet accept or persist `skin_id`, `maxSpeed`, or `client_result.survival_rate`. `training_strategy` appears in the spec_v2 export format and should not be treated as a required submission field unless the server contract is explicitly changed. When implementing alignment, prefer accepting the new fields as optional metadata first; ranking must remain based on `completed`, `lap_ticks`, `max_progress`, and `ticks_to_max_progress`.
 
 Validation rules:
 
@@ -97,6 +118,34 @@ POST /v2/admin/reset-all
 ```
 
 Current implementation uses `POST` eligibility endpoints and expects both `group_id` and `username`, including Final eligibility. If spec text says GET or group-only Final eligibility, treat that as an alignment gap rather than silently changing behavior.
+
+## Spec_v2 Server Delta
+
+The latest spec_v2 reinforces the server-first boundary:
+
+- Server receives only one locally selected winner model plus `client_result`.
+- Client owns parent training, 20-candidate generation, local evaluation, and local winner selection.
+- Server validates, rate-limits, queues, persists, ranks, and feeds replay/leaderboard.
+- Server must not breed, mutate, select candidates, or overwrite official metrics by re-running scoring.
+
+New or sharpened server-facing requirements:
+
+- Submission/export metadata now mentions `skin_id` and `maxSpeed`.
+- `client_result` now mentions optional-looking `survival_rate`; it is not part of the stated ranking tuple.
+- Eligibility responses should expose `next_submission_at`, current stage, and `competition_config_version`.
+- Submission responses should expose `submission_id`, `status`, `submitted_at`, `next_submission_at`, and `competition_config_version`.
+- Phase 1 spec language says 5-minute replay/leaderboard cadence; current implementation supports admin-configurable 1/2/5 minute intervals and defaults to 1 minute for classroom/demo use.
+- Dashboard/leaderboard should show rank, group id, username, submission id, status, result, replay completed time, and next submission time.
+- Replay batch should retain included submission IDs, deferred submission IDs, leaderboard snapshot, replay status, termination reason, map/config versions, and optional deterministic tick/state logs.
+
+Current alignment gaps:
+
+- `skin_id`, `maxSpeed`, and `survival_rate` are not in `shared/contracts.py`, storage, public responses, or replay payloads.
+- `running` is currently transitional inside one storage transaction, not a long-lived replay-processing state.
+- No persistent deferred-submission list or deferred notification exists.
+- No persistent replay playback/audit record exists beyond `batches.snapshot_json`.
+- Public leaderboard does not yet expose every spec-listed field consistently.
+- Candidate tie-breaker `candidate_index` is client-only because the server receives only the selected winner; server tie-breaks remaining equality by accepted time and submission ID.
 
 ## Batching Process
 
@@ -210,13 +259,15 @@ Default local admin/replay token is `admin`, overridden by `COMPETITION_ADMIN_TO
    - Consider persisting replay-loop status now shown client-side only.
 
 2. API Spec Alignment
+   - Add optional server support for `skin_id`, `maxSpeed`, and `client_result.survival_rate`, including validation, persistence, public/admin response policy, and replay payload policy.
    - Decide whether eligibility should remain `POST` or move to spec-mentioned `GET`.
    - Align response field names across docs and code.
    - Decide whether Final eligibility should require `username` or only `group_id`.
+   - Decide whether the official Phase 1 interval should be fixed at 5 minutes during real competition while keeping 1/2/5 minute admin control for demos.
    - Keep docs/api-spec.md and AGENTS.md updated together.
 
 3. Leaderboard And Replay Completeness
-   - Expose submission status, completed time, next submission time, rank, and audit/replay references consistently.
+   - Expose submission ID, status, completed/replay time, next submission time, rank, and audit/replay references consistently.
    - Preserve top-15 protected replay payload behavior while improving public leaderboard detail.
    - Add clear handling for empty windows, deferred submissions, and replay restart semantics.
 
