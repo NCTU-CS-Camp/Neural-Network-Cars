@@ -31,10 +31,21 @@ from game_engine.backend.fitness_preset_store import FitnessPresetStore
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import apply_weight_payload, export_weight_payload
 from game_engine.backend.settings import (
-    BLACK,
+    BG,
+    CARBON,
+    CYAN,
+    DIM,
+    F1_GREEN,
+    F1_RED,
+    FIELD,
     FONT_PATH,
     FPS,
+    HEAD_FONT_PATH,
+    INK,
+    LINE,
     MAX_SPEED,
+    MONO_FONT_PATH,
+    SELECT_BG,
     TRACK_BACK_PATH,
     TRACK_FRONT_PATH,
     TRACK_METADATA_PATH,
@@ -42,6 +53,7 @@ from game_engine.backend.settings import (
     VALIDATION_DIFFICULTY_MAPS,
     VALIDATION_FRAME_LIMIT,
     WHITE,
+    YELLOW,
 )
 from game_engine.backend.track_generator import generate_random_map
 from game_engine.backend.track_layout import (
@@ -104,7 +116,7 @@ SUBMISSION_POPULATION_SIZE = 100
 # generalization, so it mutates more aggressively than the upload resubmit path.
 VALIDATION_MUTATION_RATE = 15
 VALIDATION_POPULATION_SIZE = 100
-VALID_FITNESS_INPUT_COLOR = (90, 90, 90)
+VALID_FITNESS_INPUT_COLOR = LINE
 INVALID_FITNESS_INPUT_COLOR = (255, 90, 90)
 UTC_PLUS_8 = timezone(timedelta(hours=8))
 
@@ -139,6 +151,14 @@ def _font(size: int = 22) -> pygame.font.Font:
     return pygame.font.Font(str(FONT_PATH), size)
 
 
+def _head_font(size: int = 22) -> pygame.font.Font:
+    return pygame.font.Font(str(HEAD_FONT_PATH), size)
+
+
+def _mono_font(size: int = 18) -> pygame.font.Font:
+    return pygame.font.Font(str(MONO_FONT_PATH), size)
+
+
 def _check_quit(event: pygame.event.Event) -> None:
     if event.type == pygame.QUIT:
         raise AppQuit()
@@ -156,7 +176,7 @@ def _ellipsize(font: pygame.font.Font, text: str, max_width: int) -> str:
 def format_ticks_as_seconds(ticks: int | None, fps: int = FPS) -> str:
     if ticks is None:
         return "--"
-    return f"{ticks / fps:.1f} 秒"
+    return f"{ticks / fps:.1f}s"
 
 
 def _parse_timestamp_utc8(timestamp: str) -> datetime | None:
@@ -203,167 +223,215 @@ def _match_preset_name(
     """Return the preset name whose weights exactly match `current_weights`,
     or CUSTOM_PRESET_LABEL if the values don't match any known preset. Runs
     every frame so the dropdown always reflects reality instead of the last
-    thing the user clicked."""
-    for name in fitness_strategy_names():
-        if get_fitness_strategy(name).config.weights == current_weights:
-            return name
+    thing the user clicked. Custom presets are checked before built-ins so a
+    user-saved preset always wins when weights happen to match a built-in."""
     for preset in custom_presets:
         if preset.fitness_config.weights == current_weights:
             return preset.preset_name
+    for name in fitness_strategy_names():
+        if get_fitness_strategy(name).config.weights == current_weights:
+            return name
     return CUSTOM_PRESET_LABEL
 
 
 def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(36)
-
-    group_buttons = [
-        Button(str(group_id), pygame.Rect(60 + (group_id - 1) * 70, 220, 56, 56))
-        for group_id in range(1, GROUP_COUNT + 1)
-    ]
     selected_group: str | None = None
-    name_input = TextInput(pygame.Rect(60, 340, 360, 48))
-    register_button = Button("註冊", pygame.Rect(60, 430, 160, 52))
     error_message = ""
+    name_text = ""
 
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            name_input.handle_event(event)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                for button in group_buttons:
-                    if button.contains(event.pos):
-                        selected_group = button.text
-                if register_button.contains(event.pos):
-                    username = name_input.text.strip()
-                    if selected_group is None or not username:
-                        error_message = "請選擇組別並輸入名字"
-                    else:
-                        profile = LoginProfile(
-                            group_id=selected_group, username=username, server_url=server_url
-                        )
-                        save_login_profile(profile)
-                        return profile
+    while True:  # outer: rebuild on VIDEORESIZE
+        W, H = screen.get_size()
+        font = _font(max(16, H // 40))
+        head40 = _head_font(max(28, H // 20))
+        mono14 = _mono_font(max(12, H // 55))
+        M = max(40, W // 30)
+        btn_y = H * 32 // 100
+        group_btn_w = max(44, (W - M * 2) // 12)
+        group_btn_h = max(44, H // 16)
+        group_buttons = [
+            Button(str(group_id), pygame.Rect(M + (group_id - 1) * (group_btn_w + 8), btn_y, group_btn_w, group_btn_h))
+            for group_id in range(1, GROUP_COUNT + 1)
+        ]
+        inp_y = H * 55 // 100
+        name_input = TextInput(pygame.Rect(M, inp_y, min(400, W - M * 2), max(40, H // 18)), text=name_text)
+        reg_y = H * 70 // 100
+        register_button = Button("註冊", pygame.Rect(M, reg_y, max(120, W // 8), max(44, H // 18)))
 
-        mouse_pos = pygame.mouse.get_pos()
-        for button in group_buttons:
-            button.update_hover(mouse_pos)
-            button.fill_color = (60, 120, 200) if button.text == selected_group else (30, 30, 30)
-        register_button.update_hover(mouse_pos)
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    name_text = name_input.text
+                    resize = True
+                    break
+                name_input.handle_event(event)
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    for button in group_buttons:
+                        if button.contains(event.pos):
+                            selected_group = button.text
+                    if register_button.contains(event.pos):
+                        username = name_input.text.strip()
+                        if selected_group is None or not username:
+                            error_message = "請選擇組別並輸入名字"
+                        else:
+                            profile = LoginProfile(
+                                group_id=selected_group, username=username, server_url=server_url
+                            )
+                            save_login_profile(profile)
+                            return profile
+            if resize:
+                break
 
-        screen.fill(BLACK)
-        screen.blit(title_font.render("登入", True, WHITE), (60, 140))
-        screen.blit(font.render("選擇組別 (1-10)", True, WHITE), (60, 190))
-        for button in group_buttons:
-            button.draw(screen, font)
-        screen.blit(font.render("輸入名字", True, WHITE), (60, 312))
-        name_input.draw(screen, font)
-        register_button.draw(screen, font)
-        if error_message:
-            screen.blit(font.render(error_message, True, (255, 90, 90)), (60, 500))
+            mouse_pos = pygame.mouse.get_pos()
+            for button in group_buttons:
+                button.update_hover(mouse_pos)
+                button.fill_color = F1_RED if button.text == selected_group else CARBON
+            register_button.fill_color = F1_RED
+            register_button.update_hover(mouse_pos)
 
-        pygame.display.update()
-        clock.tick(30)
+            screen.fill(BG)
+            screen.blit(head40.render("DRIVER SIGN-IN", True, INK), (M, H * 12 // 100))
+            screen.blit(mono14.render("NEURAL NETWORK CARS", True, DIM), (M, H * 20 // 100))
+            screen.blit(font.render("選擇組別 (1-10)", True, DIM), (M, btn_y - font.get_height() - 6))
+            for button in group_buttons:
+                button.draw(screen, font)
+            screen.blit(font.render("輸入名字", True, DIM), (M, inp_y - font.get_height() - 6))
+            name_input.draw(screen, font)
+            register_button.draw(screen, font)
+            if error_message:
+                screen.blit(font.render(error_message, True, (255, 90, 90)), (M, reg_y + register_button.rect.height + 16))
+
+            pygame.display.update()
+            clock.tick(30)
 
 
 def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuChoice:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(36)
-    width, height = screen.get_size()
 
-    training_button = Button(
-        "Training", pygame.Rect(width // 2 - 360, height // 2 - 100, 320, 200)
-    )
-    validation_button = Button(
-        "Validation", pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200)
-    )
-    clear_user_button = Button(
-        "清除使用者資料",
-        pygame.Rect(width // 2 - 160, height // 2 + 140, 320, 56),
-        fill_color=(100, 30, 30),
-        hover_color=(145, 40, 40),
-        border_color=(190, 70, 70),
-    )
-
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if training_button.contains(event.pos):
-                    return "training"
-                if validation_button.contains(event.pos):
-                    return "validation"
-                if clear_user_button.contains(event.pos):
-                    return "clear_user"
-
-        mouse_pos = pygame.mouse.get_pos()
-        training_button.update_hover(mouse_pos)
-        validation_button.update_hover(mouse_pos)
-        clear_user_button.update_hover(mouse_pos)
-
-        screen.fill(BLACK)
-        screen.blit(
-            title_font.render(f"歡迎, {profile.username} (組 {profile.group_id})", True, WHITE),
-            (60, 60),
+    while True:  # outer: rebuild on VIDEORESIZE
+        font = _font()
+        head22 = _head_font(22)
+        width, height = screen.get_size()
+        training_button = Button(
+            "TRAINING", pygame.Rect(width // 2 - 360, height // 2 - 100, 320, 200)
         )
-        training_button.draw(screen, font)
-        validation_button.draw(screen, font)
-        clear_user_button.draw(screen, font)
+        validation_button = Button(
+            "VALIDATION", pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200)
+        )
+        clear_user_button = Button(
+            "清除使用者資料",
+            pygame.Rect(width // 2 - 160, height // 2 + 140, 320, 56),
+            fill_color=F1_RED,
+            hover_color=(200, 30, 22),
+            border_color=F1_RED,
+        )
 
-        pygame.display.update()
-        clock.tick(30)
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    resize = True
+                    break
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if training_button.contains(event.pos):
+                        return "training"
+                    if validation_button.contains(event.pos):
+                        return "validation"
+                    if clear_user_button.contains(event.pos):
+                        return "clear_user"
+            if resize:
+                break
+
+            mouse_pos = pygame.mouse.get_pos()
+            training_button.update_hover(mouse_pos)
+            validation_button.update_hover(mouse_pos)
+            clear_user_button.update_hover(mouse_pos)
+
+            screen.fill(BG)
+            name_surf = font.render(profile.username, True, INK)
+            screen.blit(name_surf, (60, 52))
+            group_surf = head22.render(f" Group {profile.group_id} ", True, INK)
+            group_bg = pygame.Rect(
+                60 + name_surf.get_width() + 12,
+                52, group_surf.get_width() + 2, group_surf.get_height()
+            )
+            pygame.draw.rect(screen, F1_RED, group_bg)
+            screen.blit(group_surf, group_bg.topleft)
+            for btn, accent in ((training_button, F1_RED), (validation_button, CYAN)):
+                pygame.draw.rect(screen, CARBON, btn.rect)
+                pygame.draw.rect(screen, LINE, btn.rect, 1)
+                pygame.draw.rect(screen, accent, pygame.Rect(btn.rect.x, btn.rect.y, btn.rect.width, 4))
+            training_button.draw(screen, head22)
+            validation_button.draw(screen, head22)
+            clear_user_button.draw(screen, font)
+
+            pygame.display.update()
+            clock.tick(30)
 
 
 def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(32)
-    width, height = screen.get_size()
 
-    confirm_button = Button(
-        "確認清除",
-        pygame.Rect(width // 2 - 180, height // 2 + 60, 160, 56),
-        fill_color=(110, 30, 30),
-        hover_color=(155, 40, 40),
-        border_color=(200, 70, 70),
-    )
-    cancel_button = Button(
-        "取消",
-        pygame.Rect(width // 2 + 20, height // 2 + 60, 160, 56),
-    )
-
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                if confirm_button.contains(event.pos):
-                    return True
-                if cancel_button.contains(event.pos):
-                    return False
-
-        mouse_pos = pygame.mouse.get_pos()
-        confirm_button.update_hover(mouse_pos)
-        cancel_button.update_hover(mouse_pos)
-
-        screen.fill(BLACK)
-        title = title_font.render("確定要清除使用者資料？", True, WHITE)
-        warning = font.render(
-            "profile 與所有本機訓練紀錄都會刪除，且無法復原。",
-            True,
-            (255, 120, 120),
+    while True:  # outer: rebuild on VIDEORESIZE
+        font = _font()
+        title_font = _font(32)
+        width, height = screen.get_size()
+        confirm_button = Button(
+            "確認清除",
+            pygame.Rect(width // 2 - 180, height // 2 + 60, 160, 56),
+            fill_color=F1_RED,
+            hover_color=(200, 30, 22),
+            border_color=F1_RED,
         )
-        screen.blit(title, title.get_rect(center=(width // 2, height // 2 - 50)))
-        screen.blit(
-            warning,
-            warning.get_rect(center=(width // 2, height // 2)),
+        cancel_button = Button(
+            "取消",
+            pygame.Rect(width // 2 + 20, height // 2 + 60, 160, 56),
         )
-        confirm_button.draw(screen, font)
-        cancel_button.draw(screen, font)
 
-        pygame.display.update()
-        clock.tick(30)
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    resize = True
+                    break
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if confirm_button.contains(event.pos):
+                        return True
+                    if cancel_button.contains(event.pos):
+                        return False
+            if resize:
+                break
+
+            mouse_pos = pygame.mouse.get_pos()
+            confirm_button.update_hover(mouse_pos)
+            cancel_button.update_hover(mouse_pos)
+
+            screen.fill(BG)
+            panel_w, panel_h = 560, 240
+            panel = pygame.Rect((width - panel_w) // 2, (height - panel_h) // 2, panel_w, panel_h)
+            pygame.draw.rect(screen, CARBON, panel)
+            pygame.draw.rect(screen, LINE, panel, 1)
+            pygame.draw.rect(screen, F1_RED, pygame.Rect(panel.x, panel.y, panel_w, 4))
+            title = title_font.render("確定要清除使用者資料？", True, INK)
+            warning = font.render(
+                "profile 與所有本機訓練紀錄都會刪除，且無法復原。",
+                True,
+                F1_RED,
+            )
+            screen.blit(title, title.get_rect(center=(width // 2, height // 2 - 50)))
+            screen.blit(
+                warning,
+                warning.get_rect(center=(width // 2, height // 2)),
+            )
+            confirm_button.draw(screen, font)
+            cancel_button.draw(screen, font)
+
+            pygame.display.update()
+            clock.tick(30)
 
 
 def run_training_config_screen(
@@ -372,523 +440,526 @@ def run_training_config_screen(
     default_auto_breed_seconds: int = 40,
 ) -> TrainingConfigResult | None:
     clock = pygame.time.Clock()
-    W, H = screen.get_size()
+    BLUE = F1_RED
+    DARK = CARBON
+    GRAY = (38, 40, 48)
 
-    font = _font(max(14, H // 50))
-    title_font = _font(max(16, H // 40))
-    subtitle_font = _font(max(15, H // 45))
-
-    M = max(16, W // 100)          # base margin
-    left_w = W * 2 // 3            # left 2/3
-    right_x = left_w               # right block starts
-    right_w = W - right_x          # right 1/3
-    map_bottom = H * 2 // 5        # top 2/5 → map cards
-    record_y = map_bottom           # bottom 3/5 → record section
-
-    back_button = Button("← 返回", pygame.Rect(M, M, max(100, W // 14), max(36, H // 24)))
-    speed_field_w = max(64, W // 24)
-    speed_label_w = font.size("Max Speed (5–30)")[0]
-    max_speed_input = TextInput(
-        pygame.Rect(left_w - M - speed_field_w, M, speed_field_w, back_button.rect.height),
-        text=str(max(5, min(30, default_max_speed))),
-        max_length=2,
-        allowed_characters="0123456789",
-        clear_on_focus=True,
-    )
-    auto_breed_input = TextInput(
-        pygame.Rect(
-            max_speed_input.rect.left - M - speed_label_w - M - speed_field_w,
-            M,
-            speed_field_w,
-            back_button.rect.height,
-        ),
-        text=str(max(30, min(90, default_auto_breed_seconds))),
-        max_length=2,
-        allowed_characters="0123456789",
-        clear_on_focus=True,
-    )
-
-    # Map cards (left 2/3, top 2/5)
-    card_area_top = back_button.rect.bottom + M
-    card_area_h = map_bottom - card_area_top - M
-    CARD_W = (left_w - M * 4) // 3
-    CARD_H = card_area_h
-    THUMB_W = CARD_W - M * 2
-    THUMB_H = THUMB_W * 9 // 16
-    easy_thumb = pygame.transform.scale(
-        pygame.image.load(str(TRAINING_DIFFICULTY_MAPS[1][0])), (THUMB_W, THUMB_H)
-    )
-    hard_thumb = pygame.transform.scale(
-        pygame.image.load(str(TRAINING_DIFFICULTY_MAPS[2][0])), (THUMB_W, THUMB_H)
-    )
-    map_cards: list[tuple[int, str, pygame.Surface | None, pygame.Rect]] = [
-        (1, "Easy",   easy_thumb, pygame.Rect(M + i * (CARD_W + M), card_area_top, CARD_W, CARD_H))
-        for i in range(3)
-    ][0:1] + [
-        (2, "Hard",   hard_thumb, pygame.Rect(M + 1 * (CARD_W + M), card_area_top, CARD_W, CARD_H)),
-        (3, "隨機",   None,       pygame.Rect(M + 2 * (CARD_W + M), card_area_top, CARD_W, CARD_H)),
-    ]
-    map_cards = [
-        (1, "Easy",   easy_thumb, pygame.Rect(M,                   card_area_top, CARD_W, CARD_H)),
-        (2, "Hard",   hard_thumb, pygame.Rect(M * 2 + CARD_W,     card_area_top, CARD_W, CARD_H)),
-        (3, "隨機",   None,       pygame.Rect(M * 3 + CARD_W * 2, card_area_top, CARD_W, CARD_H)),
-    ]
+    # Mutable state that survives VIDEORESIZE rebuilds
     selected_difficulty: int = 1
-
-    # Fitness preset, sliders, and numeric inputs (right 1/3, full height)
-    slider_label_x = right_x + M
-    slider_label_w = max(100, right_w // 5)
-    value_input_w = max(56, right_w // 10)
-    control_gap = max(10, M // 2)
-    slider_x = slider_label_x + slider_label_w
-    slider_right = W - M - value_input_w - control_gap
-    slider_w = max(80, slider_right - slider_x)
-    fitness_top = back_button.rect.bottom + M
-    fitness_bottom = H - M
-    dropdown_h = max(34, H // 26)
-    selected_strategy = BeginnerMix.copy()
+    start_mode: str = "fresh"
+    selected_record: TrainingRecord | None = None
+    last_valid_max_speed = str(max(5, min(30, default_max_speed)))
+    last_valid_auto_breed = str(max(30, min(90, default_auto_breed_seconds)))
+    saved_slider_values: dict[str, int] = {}
     custom_presets = FitnessPresetStore().list_presets()
-    delete_preset_btn_w = max(70, right_w // 6)
-    preset_dropdown = Dropdown(
-        pygame.Rect(
-            right_x + M,
-            fitness_top,
-            right_w - M * 3 - delete_preset_btn_w,
-            dropdown_h,
-        ),
-        fitness_strategy_names() + tuple(preset.preset_name for preset in custom_presets),
-        placeholder="載入 Fitness preset",
-        selected=selected_strategy.name,
-    )
-    delete_preset_button = Button(
-        "刪除",
-        pygame.Rect(preset_dropdown.rect.right + M, fitness_top, delete_preset_btn_w, dropdown_h),
-    )
+    selected_strategy = BeginnerMix.copy()
     pending_delete_preset = False
-    sliders_top = preset_dropdown.rect.bottom + M // 2
-    fitness_step = (fitness_bottom - sliders_top) // 10
-    slider_track_height = max(12, min(18, fitness_step // 4))
-    slider_handle_radius = max(16, min(20, fitness_step // 3))
-    value_input_h = max(30, min(38, fitness_step - 8))
 
-    def slider_for_row(row: int, value: int) -> Slider:
-        center_y = sliders_top + row * fitness_step + fitness_step // 2
-        return Slider(
-            pygame.Rect(
-                slider_x,
-                center_y - slider_track_height // 2,
-                slider_w,
-                slider_track_height,
-            ),
-            0,
-            100,
-            value,
-            handle_radius=slider_handle_radius,
-            show_value=False,
-        )
+    while True:  # outer: rebuild on VIDEORESIZE
+        W, H = screen.get_size()
+        font = _font(max(14, H // 50))
+        title_font = _font(max(16, H // 40))
+        subtitle_font = _font(max(15, H // 45))
+        head_title = _head_font(max(14, H // 42))
+        head_fitness = _head_font(max(13, H // 56))
+        mono_speed = _mono_font(max(14, H // 50))
+        mono_value = _mono_font(max(13, H // 56))
 
-    bonus_sliders = {
-        name: slider_for_row(i, int(selected_strategy.config.get_weight(name)))
-        for i, name in enumerate(BONUS_FITNESS_PLACEHOLDERS)
-    }
-    penalty_sliders = {
-        name: slider_for_row(
-            5 + i,
-            int(selected_strategy.config.get_weight(name)),
-        )
-        for i, name in enumerate(PENALTY_FITNESS_PLACEHOLDERS)
-    }
-    all_sliders = {**bonus_sliders, **penalty_sliders}
-    value_inputs = {
-        name: TextInput(
-            pygame.Rect(
-                slider.rect.right + control_gap,
-                slider.rect.centery - value_input_h // 2,
-                value_input_w,
-                value_input_h,
-            ),
-            text=str(slider.value),
-            max_length=3,
+        M = max(16, W // 100)
+        left_w = W * 2 // 3
+        right_x = left_w
+        right_w = W - right_x
+        map_bottom = H * 2 // 5
+        record_y = map_bottom
+
+        back_button = Button("← 返回", pygame.Rect(M, M, max(100, W // 14), max(36, H // 24)))
+        speed_field_w = max(64, W // 24)
+        speed_label_w = font.size("Max Speed (5–30)")[0]
+        max_speed_input = TextInput(
+            pygame.Rect(left_w - M - speed_field_w, M, speed_field_w, back_button.rect.height),
+            text=last_valid_max_speed,
+            max_length=2,
             allowed_characters="0123456789",
             clear_on_focus=True,
         )
-        for name, slider in all_sliders.items()
-    }
-
-    # Record section (left 2/3, bottom 3/5). First row is always a synthetic
-    # "random training" entry so the user never has to choose a mode before
-    # picking GO; the rest are the user's saved records.
-    records = RecordStore().list_records()
-    record_title_y = record_y + M
-    rec_btn_y = record_title_y + title_font.size("A")[1] + M // 2
-    rec_row_h = max(30, H // 28)
-    btn_h = max(36, H // 24)
-    action_y = H - M - btn_h
-    available_record_h = max(0, action_y - M - rec_btn_y)
-    max_visible_rows = max(1, available_record_h // (rec_row_h + 4))
-    max_records = max(0, min(len(records), max_visible_rows - 1))
-    record_rows: list[TrainingRecord | None] = [None, *records[:max_records]]
-    record_buttons: list[tuple[TrainingRecord | None, Button]] = [
-        (
-            row,
-            Button(
-                "隨機訓練（不套用舊紀錄）"
-                if row is None
-                else f"{row.record_name}  |  {format_timestamp_utc8(row.saved_at)}",
-                pygame.Rect(M, rec_btn_y + i * (rec_row_h + 4), left_w - M * 2, rec_row_h),
+        auto_breed_input = TextInput(
+            pygame.Rect(
+                max_speed_input.rect.left - M - speed_label_w - M - speed_field_w,
+                M,
+                speed_field_w,
+                back_button.rect.height,
             ),
-        )
-        for i, row in enumerate(record_rows)
-    ]
-    go_button = Button("GO", pygame.Rect(M, action_y, left_w - M * 2, btn_h))
-
-    start_mode: str = "fresh"
-    selected_record: TrainingRecord | None = None
-
-    def go_enabled() -> bool:
-        if start_mode == "record" and selected_record is None:
-            return False
-        fitness_values_are_valid = all(
-            input_value.text.isdigit()
-            and 0 <= int(input_value.text) <= 100
-            for input_value in value_inputs.values()
-        )
-        max_speed_is_valid = (
-            max_speed_input.text.isdigit()
-            and 5 <= int(max_speed_input.text) <= 30
-        )
-        auto_breed_is_valid = (
-            auto_breed_input.text.isdigit()
-            and 30 <= int(auto_breed_input.text) <= 90
-        )
-        return fitness_values_are_valid and max_speed_is_valid and auto_breed_is_valid
-
-    BLUE = (60, 120, 200)
-    DARK = (30, 30, 30)
-    GRAY = (50, 50, 50)
-    current_custom_preset: CustomFitnessPreset | None = None
-
-    while True:
-        current_weights = {name: slider.value for name, slider in all_sliders.items()}
-        preset_dropdown.selected = _match_preset_name(current_weights, custom_presets)
-        current_custom_preset = next(
-            (preset for preset in custom_presets if preset.preset_name == preset_dropdown.selected),
-            None,
+            text=last_valid_auto_breed,
+            max_length=2,
+            allowed_characters="0123456789",
+            clear_on_focus=True,
         )
 
-        for event in pygame.event.get():
-            _check_quit(event)
+        # Map cards
+        card_area_top = back_button.rect.bottom + M
+        card_area_h = map_bottom - card_area_top - M
+        CARD_W = (left_w - M * 4) // 3
+        CARD_H = card_area_h
+        THUMB_W = CARD_W - M * 2
+        THUMB_H = THUMB_W * 9 // 16
+        easy_thumb = pygame.transform.scale(
+            pygame.image.load(str(TRAINING_DIFFICULTY_MAPS[1][0])), (THUMB_W, THUMB_H)
+        )
+        hard_thumb = pygame.transform.scale(
+            pygame.image.load(str(TRAINING_DIFFICULTY_MAPS[2][0])), (THUMB_W, THUMB_H)
+        )
+        map_cards: list[tuple[int, str, pygame.Surface | None, pygame.Rect]] = [
+            (1, "Easy",   easy_thumb, pygame.Rect(M,                   card_area_top, CARD_W, CARD_H)),
+            (2, "Hard",   hard_thumb, pygame.Rect(M * 2 + CARD_W,     card_area_top, CARD_W, CARD_H)),
+            (3, "隨機",   None,       pygame.Rect(M * 3 + CARD_W * 2, card_area_top, CARD_W, CARD_H)),
+        ]
 
-            dropdown_was_open = preset_dropdown.is_open
-            dropdown_captured_click = (
-                event.type == pygame.MOUSEBUTTONDOWN
-                and event.button == 1
-                and preset_dropdown.contains(
-                    event.pos,
-                    include_options=dropdown_was_open,
-                )
+        # Fitness sliders
+        slider_label_x = right_x + M
+        slider_label_w = max(100, right_w // 5)
+        value_input_w = max(56, right_w // 10)
+        control_gap = max(10, M // 2)
+        slider_x = slider_label_x + slider_label_w
+        slider_right = W - M - value_input_w - control_gap
+        slider_w = max(80, slider_right - slider_x)
+        fitness_top = back_button.rect.bottom + M
+        fitness_bottom = H - M
+        dropdown_h = max(34, H // 26)
+        custom_presets = FitnessPresetStore().list_presets()
+        delete_preset_btn_w = max(70, right_w // 6)
+        preset_dropdown = Dropdown(
+            pygame.Rect(right_x + M, fitness_top, right_w - M * 3 - delete_preset_btn_w, dropdown_h),
+            fitness_strategy_names() + tuple(preset.preset_name for preset in custom_presets),
+            placeholder="載入 Fitness preset",
+            selected=selected_strategy.name,
+        )
+        delete_preset_button = Button(
+            "刪除",
+            pygame.Rect(preset_dropdown.rect.right + M, fitness_top, delete_preset_btn_w, dropdown_h),
+        )
+        sliders_top = preset_dropdown.rect.bottom + M // 2
+        fitness_step = (fitness_bottom - sliders_top) // 10
+        slider_track_height = max(12, min(18, fitness_step // 4))
+        slider_handle_radius = max(16, min(20, fitness_step // 3))
+        value_input_h = max(30, min(38, fitness_step - 8))
+
+        def slider_for_row(row: int, value: int) -> Slider:
+            center_y = sliders_top + row * fitness_step + fitness_step // 2
+            return Slider(
+                pygame.Rect(slider_x, center_y - slider_track_height // 2, slider_w, slider_track_height),
+                0, 100, value, handle_radius=slider_handle_radius, show_value=False,
             )
-            selected_strategy_name = preset_dropdown.handle_event(event)
-            if selected_strategy_name is not None:
-                matched_custom = next(
-                    (
-                        preset
-                        for preset in custom_presets
-                        if preset.preset_name == selected_strategy_name
-                    ),
-                    None,
+
+        # Restore or initialise slider values
+        init_values = saved_slider_values if saved_slider_values else {
+            name: int(selected_strategy.config.get_weight(name))
+            for name in list(BONUS_FITNESS_PLACEHOLDERS) + list(PENALTY_FITNESS_PLACEHOLDERS)
+        }
+        bonus_sliders = {
+            name: slider_for_row(i, init_values.get(name, int(selected_strategy.config.get_weight(name))))
+            for i, name in enumerate(BONUS_FITNESS_PLACEHOLDERS)
+        }
+        penalty_sliders = {
+            name: slider_for_row(5 + i, init_values.get(name, int(selected_strategy.config.get_weight(name))))
+            for i, name in enumerate(PENALTY_FITNESS_PLACEHOLDERS)
+        }
+        all_sliders = {**bonus_sliders, **penalty_sliders}
+        value_inputs = {
+            name: TextInput(
+                pygame.Rect(
+                    slider.rect.right + control_gap,
+                    slider.rect.centery - value_input_h // 2,
+                    value_input_w,
+                    value_input_h,
+                ),
+                text=str(slider.value),
+                max_length=3,
+                allowed_characters="0123456789",
+                clear_on_focus=True,
+            )
+            for name, slider in all_sliders.items()
+        }
+
+        # Record section
+        records = RecordStore().list_records()
+        record_title_y = record_y + M
+        rec_btn_y = record_title_y + title_font.size("A")[1] + M // 2
+        rec_row_h = max(30, H // 28)
+        btn_h = max(36, H // 24)
+        action_y = H - M - btn_h
+        available_record_h = max(0, action_y - M - rec_btn_y)
+        max_visible_rows = max(1, available_record_h // (rec_row_h + 4))
+        max_records = max(0, min(len(records), max_visible_rows - 1))
+        record_rows: list[TrainingRecord | None] = [None, *records[:max_records]]
+        record_buttons: list[tuple[TrainingRecord | None, Button]] = [
+            (
+                row,
+                Button(
+                    "隨機訓練（不套用舊紀錄）"
+                    if row is None
+                    else f"{row.record_name}  |  {format_timestamp_utc8(row.saved_at)}",
+                    pygame.Rect(M + M // 2, rec_btn_y + i * (rec_row_h + 4), left_w - M * 3, rec_row_h),
+                ),
+            )
+            for i, row in enumerate(record_rows)
+        ]
+        go_button = Button("GO", pygame.Rect(M + M // 2, action_y, left_w - M * 3, btn_h))
+        current_custom_preset: CustomFitnessPreset | None = None
+
+        def go_enabled() -> bool:
+            if start_mode == "record" and selected_record is None:
+                return False
+            return (
+                all(
+                    vi.text.isdigit() and 0 <= int(vi.text) <= 100
+                    for vi in value_inputs.values()
                 )
-                if matched_custom is not None:
-                    selected_strategy = FitnessStrategy(
-                        name=matched_custom.preset_name,
-                        config=matched_custom.fitness_config.copy(),
+                and max_speed_input.text.isdigit() and 5 <= int(max_speed_input.text) <= 30
+                and auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90
+            )
+
+        resize = False
+        while not resize:
+            current_weights = {name: slider.value for name, slider in all_sliders.items()}
+            preset_dropdown.selected = _match_preset_name(current_weights, custom_presets)
+            current_custom_preset = next(
+                (p for p in custom_presets if p.preset_name == preset_dropdown.selected), None
+            )
+
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    saved_slider_values = {n: s.value for n, s in all_sliders.items()}
+                    if max_speed_input.text.isdigit() and 5 <= int(max_speed_input.text) <= 30:
+                        last_valid_max_speed = max_speed_input.text
+                    if auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90:
+                        last_valid_auto_breed = auto_breed_input.text
+                    resize = True
+                    break
+
+                dropdown_was_open = preset_dropdown.is_open
+                dropdown_captured_click = (
+                    event.type == pygame.MOUSEBUTTONDOWN
+                    and event.button == 1
+                    and preset_dropdown.contains(event.pos, include_options=dropdown_was_open)
+                )
+                selected_strategy_name = preset_dropdown.handle_event(event)
+                if selected_strategy_name is not None:
+                    matched_custom = next(
+                        (p for p in custom_presets if p.preset_name == selected_strategy_name), None
                     )
-                elif selected_strategy_name in fitness_strategy_names():
-                    selected_strategy = get_fitness_strategy(selected_strategy_name)
-                for name, slider in all_sliders.items():
-                    slider.value = int(selected_strategy.config.get_weight(name))
-                    value_inputs[name].text = str(slider.value)
-
-            input_captured_click = (
-                event.type == pygame.MOUSEBUTTONDOWN
-                and event.button == 1
-                and any(
-                    input_value.rect.collidepoint(event.pos)
-                    for input_value in value_inputs.values()
-                )
-            )
-            for name, input_value in value_inputs.items():
-                if input_value.handle_event(event):
-                    text = input_value.text
-                    if text.isdigit() and 0 <= int(text) <= 100:
-                        all_sliders[name].value = int(text)
-            max_speed_input.handle_event(event)
-            auto_breed_input.handle_event(event)
-
-            if not dropdown_captured_click and not input_captured_click:
-                for name, slider in all_sliders.items():
-                    if slider.handle_event(event):
+                    if matched_custom is not None:
+                        selected_strategy = FitnessStrategy(
+                            name=matched_custom.preset_name,
+                            config=matched_custom.fitness_config.copy(),
+                        )
+                    elif selected_strategy_name in fitness_strategy_names():
+                        selected_strategy = get_fitness_strategy(selected_strategy_name)
+                    for name, slider in all_sliders.items():
+                        slider.value = int(selected_strategy.config.get_weight(name))
                         value_inputs[name].text = str(slider.value)
 
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                pos = event.pos
-                pending_delete_preset = (
-                    delete_preset_button.contains(pos) and current_custom_preset is not None
+                input_captured_click = (
+                    event.type == pygame.MOUSEBUTTONDOWN
+                    and event.button == 1
+                    and any(vi.rect.collidepoint(event.pos) for vi in value_inputs.values())
                 )
+                for name, input_value in value_inputs.items():
+                    if input_value.handle_event(event):
+                        text = input_value.text
+                        if text.isdigit() and 0 <= int(text) <= 100:
+                            all_sliders[name].value = int(text)
+                max_speed_input.handle_event(event)
+                auto_breed_input.handle_event(event)
 
-                if back_button.contains(pos):
-                    return None
+                if not max_speed_input.active:
+                    if max_speed_input.text.isdigit() and 5 <= int(max_speed_input.text) <= 30:
+                        last_valid_max_speed = max_speed_input.text
+                    else:
+                        max_speed_input.text = last_valid_max_speed
+                if not auto_breed_input.active:
+                    if auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90:
+                        last_valid_auto_breed = auto_breed_input.text
+                    else:
+                        auto_breed_input.text = last_valid_auto_breed
 
-                for diff_id, _, _, card_rect in map_cards:
-                    if card_rect.collidepoint(pos):
-                        selected_difficulty = diff_id
+                if not dropdown_captured_click and not input_captured_click:
+                    for name, slider in all_sliders.items():
+                        if slider.handle_event(event):
+                            value_inputs[name].text = str(slider.value)
 
-                for row, btn in record_buttons:
-                    if btn.contains(pos):
-                        if row is None:
-                            start_mode = "fresh"
-                            selected_record = None
-                        else:
-                            start_mode = "record"
-                            selected_record = row
-                            for name, slider in all_sliders.items():
-                                slider.value = int(row.fitness_config.get_weight(name))
-                                value_inputs[name].text = str(slider.value)
-                            max_speed_input.text = str(max(5, min(30, row.max_speed)))
-                        break
-
-                if go_button.contains(pos) and go_enabled():
-                    weights = {name: s.value for name, s in all_sliders.items()}
-                    selected_strategy.config.update_weights(weights)
-                    return (
-                        selected_strategy,
-                        selected_difficulty,
-                        selected_record,
-                        int(max_speed_input.text),
-                        int(auto_breed_input.text),
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    pos = event.pos
+                    pending_delete_preset = (
+                        delete_preset_button.contains(pos) and current_custom_preset is not None
                     )
+                    if back_button.contains(pos):
+                        return None
+                    for diff_id, _, _, card_rect in map_cards:
+                        if card_rect.collidepoint(pos):
+                            selected_difficulty = diff_id
+                    for row, btn in record_buttons:
+                        if btn.contains(pos):
+                            if row is None:
+                                start_mode = "fresh"
+                                selected_record = None
+                            else:
+                                start_mode = "record"
+                                selected_record = row
+                                for name, slider in all_sliders.items():
+                                    slider.value = int(row.fitness_config.get_weight(name))
+                                    value_inputs[name].text = str(slider.value)
+                                max_speed_input.text = str(max(5, min(30, row.max_speed)))
+                            break
+                    if go_button.contains(pos) and go_enabled():
+                        weights = {name: s.value for name, s in all_sliders.items()}
+                        selected_strategy.config.update_weights(weights)
+                        return (
+                            selected_strategy,
+                            selected_difficulty,
+                            selected_record,
+                            int(max_speed_input.text),
+                            int(auto_breed_input.text),
+                        )
 
-            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                if (
-                    pending_delete_preset
-                    and delete_preset_button.contains(event.pos)
-                    and current_custom_preset is not None
-                ):
-                    FitnessPresetStore().delete_preset(current_custom_preset.preset_id)
-                    custom_presets = FitnessPresetStore().list_presets()
-                    preset_dropdown.options = fitness_strategy_names() + tuple(
-                        preset.preset_name for preset in custom_presets
-                    )
-                pending_delete_preset = False
+                if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    if (
+                        pending_delete_preset
+                        and delete_preset_button.contains(event.pos)
+                        and current_custom_preset is not None
+                    ):
+                        FitnessPresetStore().delete_preset(current_custom_preset.preset_id)
+                        custom_presets = FitnessPresetStore().list_presets()
+                        preset_dropdown.options = fitness_strategy_names() + tuple(
+                            p.preset_name for p in custom_presets
+                        )
+                        preset_dropdown.selected = _match_preset_name(
+                            {n: s.value for n, s in all_sliders.items()},
+                            custom_presets,
+                        )
+                        preset_dropdown.is_open = False
+                    pending_delete_preset = False
 
-        mouse_pos = pygame.mouse.get_pos()
-        back_button.update_hover(mouse_pos)
-        go_button.update_hover(mouse_pos)
-        delete_preset_button.update_hover(mouse_pos)
-        for _, btn in record_buttons:
-            btn.update_hover(mouse_pos)
-        for input_value in value_inputs.values():
-            is_valid = (
-                input_value.text.isdigit()
-                and 0 <= int(input_value.text) <= 100
-            )
-            border_color = (
-                VALID_FITNESS_INPUT_COLOR
-                if is_valid
-                else INVALID_FITNESS_INPUT_COLOR
-            )
-            input_value.border_color = border_color
-            input_value.active_border_color = (
-                (120, 170, 255) if is_valid else INVALID_FITNESS_INPUT_COLOR
-            )
-        max_speed_is_valid = (
-            max_speed_input.text.isdigit()
-            and 5 <= int(max_speed_input.text) <= 30
-        )
-        max_speed_input.border_color = (
-            VALID_FITNESS_INPUT_COLOR
-            if max_speed_is_valid
-            else INVALID_FITNESS_INPUT_COLOR
-        )
-        max_speed_input.active_border_color = (
-            (120, 170, 255)
-            if max_speed_is_valid
-            else INVALID_FITNESS_INPUT_COLOR
-        )
-        auto_breed_is_valid = (
-            auto_breed_input.text.isdigit()
-            and 30 <= int(auto_breed_input.text) <= 90
-        )
-        auto_breed_input.border_color = (
-            VALID_FITNESS_INPUT_COLOR
-            if auto_breed_is_valid
-            else INVALID_FITNESS_INPUT_COLOR
-        )
-        auto_breed_input.active_border_color = (
-            (120, 170, 255)
-            if auto_breed_is_valid
-            else INVALID_FITNESS_INPUT_COLOR
-        )
+            if resize:
+                break
 
-        go_button.fill_color = BLUE if go_enabled() else GRAY
-        delete_preset_button.fill_color = (
-            (150, 60, 60) if current_custom_preset is not None else GRAY
-        )
+            mouse_pos = pygame.mouse.get_pos()
+            back_button.update_hover(mouse_pos)
+            go_button.update_hover(mouse_pos)
+            delete_preset_button.update_hover(mouse_pos)
+            for _, btn in record_buttons:
+                btn.update_hover(mouse_pos)
+            for input_value in value_inputs.values():
+                is_valid = input_value.text.isdigit() and 0 <= int(input_value.text) <= 100
+                input_value.border_color = VALID_FITNESS_INPUT_COLOR if is_valid else INVALID_FITNESS_INPUT_COLOR
+                input_value.active_border_color = CYAN if is_valid else INVALID_FITNESS_INPUT_COLOR
+            max_speed_is_valid = max_speed_input.text.isdigit() and 5 <= int(max_speed_input.text) <= 30
+            max_speed_input.border_color = VALID_FITNESS_INPUT_COLOR if max_speed_is_valid else INVALID_FITNESS_INPUT_COLOR
+            max_speed_input.active_border_color = CYAN if max_speed_is_valid else INVALID_FITNESS_INPUT_COLOR
+            auto_breed_is_valid = auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90
+            auto_breed_input.border_color = VALID_FITNESS_INPUT_COLOR if auto_breed_is_valid else INVALID_FITNESS_INPUT_COLOR
+            auto_breed_input.active_border_color = CYAN if auto_breed_is_valid else INVALID_FITNESS_INPUT_COLOR
 
-        screen.fill(BLACK)
-        back_button.draw(screen, font)
+            go_button.fill_color = BLUE if go_enabled() else GRAY
+            delete_preset_button.fill_color = F1_RED if current_custom_preset is not None else GRAY
 
-        # Left-top: map cards
-        map_title = title_font.render("選擇地圖", True, WHITE)
-        screen.blit(
-            map_title,
-            map_title.get_rect(
-                midleft=(back_button.rect.right + M, back_button.rect.centery)
-            ),
-        )
-        speed_label = font.render("Max Speed (5–30)", True, WHITE)
-        screen.blit(
-            speed_label,
-            speed_label.get_rect(
-                midright=(max_speed_input.rect.left - M // 2, max_speed_input.rect.centery)
-            ),
-        )
-        max_speed_input.draw(screen, font)
-        auto_breed_label = font.render("Auto Breed (30–90s)", True, WHITE)
-        screen.blit(
-            auto_breed_label,
-            auto_breed_label.get_rect(
-                midright=(auto_breed_input.rect.left - M // 2, auto_breed_input.rect.centery)
-            ),
-        )
-        auto_breed_input.draw(screen, font)
-        for diff_id, label, thumb, card_rect in map_cards:
-            selected = diff_id == selected_difficulty
-            hovered = card_rect.collidepoint(mouse_pos)
-            border_color = BLUE if selected else ((110, 110, 110) if hovered else (55, 55, 55))
-            fill_color = (25, 35, 60) if selected else ((28, 28, 28) if hovered else (18, 18, 18))
-            border_w = 3 if selected else 1
-            pygame.draw.rect(screen, fill_color, card_rect, border_radius=10)
-            pygame.draw.rect(screen, border_color, card_rect, border_w, border_radius=10)
-            img_rect = pygame.Rect(card_rect.x + M // 2, card_rect.y + M // 2, THUMB_W, THUMB_H)
-            if thumb is not None:
-                screen.blit(thumb, img_rect)
-                pygame.draw.rect(screen, (50, 50, 50), img_rect, 1)
-            else:
-                pygame.draw.rect(screen, (22, 22, 32), img_rect, border_radius=4)
-                rng_surf = subtitle_font.render("隨機生成", True, (140, 140, 200))
-                screen.blit(rng_surf, rng_surf.get_rect(center=img_rect.center))
-            label_color = WHITE if selected else (180, 180, 180)
-            label_surf = font.render(label, True, label_color)
-            screen.blit(label_surf, label_surf.get_rect(centerx=card_rect.centerx, y=img_rect.bottom + M // 2))
+            screen.fill(BG)
+            back_button.draw(screen, font)
 
-        # Left-bottom: record section
-        screen.blit(title_font.render("選擇紀錄", True, WHITE), (M, record_title_y))
-        for row, btn in record_buttons:
-            is_current = (row is None and start_mode == "fresh") or (
-                row is not None and row is selected_record
-            )
-            btn.fill_color = BLUE if is_current else DARK
-            btn.draw(screen, font)
+            # Left-top: map cards
+            map_title = head_title.render("CAR SETUP", True, INK)
+            screen.blit(map_title, map_title.get_rect(midleft=(back_button.rect.right + M, back_button.rect.centery)))
+            speed_label = font.render("Max Speed (5–30)", True, DIM)
+            screen.blit(speed_label, speed_label.get_rect(midright=(max_speed_input.rect.left - M // 2, max_speed_input.rect.centery)))
+            max_speed_input.draw(screen, mono_speed)
+            auto_breed_label = font.render("Auto Breed (30–90s)", True, DIM)
+            screen.blit(auto_breed_label, auto_breed_label.get_rect(midright=(auto_breed_input.rect.left - M // 2, auto_breed_input.rect.centery)))
+            auto_breed_input.draw(screen, mono_speed)
+            for diff_id, label, thumb, card_rect in map_cards:
+                selected = diff_id == selected_difficulty
+                hovered = card_rect.collidepoint(mouse_pos)
+                border_color = F1_RED if selected else (LINE if hovered else (30, 32, 40))
+                fill_color = SELECT_BG if selected else (CARBON if hovered else (15, 16, 20))
+                border_w = 2 if selected else 1
+                pygame.draw.rect(screen, fill_color, card_rect)
+                pygame.draw.rect(screen, border_color, card_rect, border_w)
+                img_rect = pygame.Rect(card_rect.x + M // 2, card_rect.y + M // 2, THUMB_W, THUMB_H)
+                if thumb is not None:
+                    screen.blit(thumb, img_rect)
+                    pygame.draw.rect(screen, LINE, img_rect, 1)
+                else:
+                    pygame.draw.rect(screen, FIELD, img_rect)
+                    rng_surf = subtitle_font.render("隨機生成", True, DIM)
+                    screen.blit(rng_surf, rng_surf.get_rect(center=img_rect.center))
+                label_color = INK if selected else DIM
+                label_surf = font.render(label, True, label_color)
+                screen.blit(label_surf, label_surf.get_rect(centerx=card_rect.centerx, y=img_rect.bottom + M // 2))
 
-        # Right: fitness sliders
-        screen.blit(title_font.render("Fitness 函數設定", True, WHITE),
-                    (right_x + M, back_button.rect.bottom - title_font.size("A")[1] - M // 2))
-        for name, slider in all_sliders.items():
-            is_bonus = name in BONUS_FITNESS_PLACEHOLDERS
-            label_color = (100, 220, 100) if is_bonus else (220, 100, 100)
-            label_y = slider.rect.centery - font.size(name)[1] // 2
-            screen.blit(font.render(name, True, label_color), (slider_label_x, label_y))
-            slider.draw(screen, font)
-            value_inputs[name].draw(screen, font)
+            # Left-bottom: record section
+            rec_panel = pygame.Rect(M, record_title_y, left_w - M * 2, H - record_title_y - M)
+            pygame.draw.rect(screen, CARBON, rec_panel)
+            pygame.draw.rect(screen, LINE, rec_panel, 1)
+            pygame.draw.rect(screen, F1_RED, pygame.Rect(rec_panel.x, rec_panel.y, 3, rec_panel.height))
+            screen.blit(title_font.render("選擇紀錄", True, INK), (M + 10, record_title_y + M // 2))
+            for row, btn in record_buttons:
+                is_current = (row is None and start_mode == "fresh") or (row is not None and row is selected_record)
+                btn.fill_color = F1_RED if is_current else DARK
+                btn.draw(screen, font)
 
-        go_button.draw(screen, font)
-        preset_dropdown.draw(screen, font)
-        delete_preset_button.draw(screen, font)
-        pygame.display.update()
-        clock.tick(30)
+            # Right: fitness sliders
+            fit_panel = pygame.Rect(right_x, back_button.rect.bottom, right_w, H - back_button.rect.bottom - M)
+            pygame.draw.rect(screen, CARBON, fit_panel)
+            pygame.draw.rect(screen, LINE, fit_panel, 1)
+            pygame.draw.rect(screen, CYAN, pygame.Rect(fit_panel.x, fit_panel.y, 3, fit_panel.height))
+            screen.blit(head_fitness.render("FITNESS TELEMETRY", True, CYAN),
+                        (right_x + M + 4, sliders_top - head_fitness.get_height() - M // 4))
+            for name, slider in all_sliders.items():
+                is_bonus = name in BONUS_FITNESS_PLACEHOLDERS
+                label_color = F1_GREEN if is_bonus else F1_RED
+                slider.handle_color = CYAN if is_bonus else F1_RED
+                label_y = slider.rect.centery - font.size(name)[1] // 2
+                screen.blit(font.render(name, True, label_color), (slider_label_x, label_y))
+                slider.draw(screen, font)
+                value_inputs[name].draw(screen, mono_value)
+
+            go_button.draw(screen, font)
+            preset_dropdown.draw(screen, font)
+            delete_preset_button.draw(screen, font)
+            pygame.display.update()
+            clock.tick(30)
 
 
-def run_save_confirm_screen(screen: pygame.Surface) -> tuple[bool, bool]:
-    """Returns (save_record, save_as_preset). save_as_preset is only ever True
-    alongside save_record."""
+def run_save_confirm_screen(screen: pygame.Surface) -> tuple[bool, bool] | None:
+    """Returns (save_record, save_as_preset), or None if the user cancels (stay
+    in training). save_as_preset is only ever True alongside save_record."""
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(32)
-    width, height = screen.get_size()
+    preset_checked = False  # survive resize
 
-    yes_button = Button("存檔", pygame.Rect(width // 2 - 180, height // 2, 160, 60))
-    no_button = Button("不存", pygame.Rect(width // 2 + 20, height // 2, 160, 60))
-    save_as_preset_checkbox = Checkbox(
-        pygame.Rect(width // 2 - 180, height // 2 + 90, 28, 28),
-        label="另存為 Fitness 預選組合",
-    )
+    while True:  # outer: rebuild on VIDEORESIZE
+        width, height = screen.get_size()
+        font = _font()
+        title_font = _font(32)
 
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            save_as_preset_checkbox.handle_event(event)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if yes_button.contains(event.pos):
-                    return True, save_as_preset_checkbox.checked
-                if no_button.contains(event.pos):
-                    return False, False
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return False, False
-
-        mouse_pos = pygame.mouse.get_pos()
-        yes_button.update_hover(mouse_pos)
-        no_button.update_hover(mouse_pos)
-
-        screen.fill(BLACK)
-        screen.blit(
-            title_font.render("要儲存這次訓練結果嗎？", True, WHITE),
-            (width // 2 - 260, height // 2 - 80),
+        yes_button = Button("存檔", pygame.Rect(width // 2 - 260, height // 2, 160, 56))
+        no_button = Button("不存", pygame.Rect(width // 2 - 90, height // 2, 160, 56))
+        cancel_button = Button("取消", pygame.Rect(width // 2 + 80, height // 2, 160, 56))
+        save_as_preset_checkbox = Checkbox(
+            pygame.Rect(width // 2 - 260, height // 2 + 80, 28, 28),
+            label="另存為 Fitness 預選組合",
+            checked=preset_checked,
         )
-        yes_button.draw(screen, font)
-        no_button.draw(screen, font)
-        save_as_preset_checkbox.draw(screen, font)
 
-        pygame.display.update()
-        clock.tick(30)
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    resize = True
+                    break
+                save_as_preset_checkbox.handle_event(event)
+                preset_checked = save_as_preset_checkbox.checked
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if yes_button.contains(event.pos):
+                        return True, save_as_preset_checkbox.checked
+                    if no_button.contains(event.pos):
+                        return False, False
+                    if cancel_button.contains(event.pos):
+                        return None
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    return None
+            if resize:
+                break
+
+            mouse_pos = pygame.mouse.get_pos()
+            yes_button.update_hover(mouse_pos)
+            no_button.update_hover(mouse_pos)
+            cancel_button.update_hover(mouse_pos)
+
+            screen.fill(BG)
+            panel_w, panel_h = 640, 260
+            panel = pygame.Rect((width - panel_w) // 2, (height - panel_h) // 2, panel_w, panel_h)
+            pygame.draw.rect(screen, CARBON, panel)
+            pygame.draw.rect(screen, LINE, panel, 1)
+            pygame.draw.rect(screen, F1_RED, pygame.Rect(panel.x, panel.y, panel_w, 4))
+            screen.blit(
+                title_font.render("要儲存這次訓練結果嗎？", True, INK),
+                (width // 2 - 300, height // 2 - 80),
+            )
+            yes_button.fill_color = F1_RED
+            yes_button.draw(screen, font)
+            no_button.draw(screen, font)
+            cancel_button.draw(screen, font)
+            save_as_preset_checkbox.draw(screen, font)
+
+            pygame.display.update()
+            clock.tick(30)
 
 
 def run_record_name_screen(
     screen: pygame.Surface, title: str = "幫這筆紀錄命名"
-) -> str:
+) -> str | None:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(32)
-    width, height = screen.get_size()
+    name_text = ""
+    focused = True
 
-    name_input = TextInput(pygame.Rect(width // 2 - 200, height // 2, 400, 48))
-    name_input.focus()
-    confirm_button = Button("確認", pygame.Rect(width // 2 - 80, height // 2 + 80, 160, 56))
+    while True:  # outer: rebuild on VIDEORESIZE
+        width, height = screen.get_size()
+        font = _font()
+        title_font = _font(28)
+        name_input = TextInput(pygame.Rect(width // 2 - 200, height // 2 - 10, 400, 48), text=name_text)
+        if focused:
+            name_input.focus()
+        confirm_button = Button("確認", pygame.Rect(width // 2 - 90, height // 2 + 60, 160, 48))
+        cancel_button = Button("取消", pygame.Rect(width // 2 + 80, height // 2 + 60, 100, 48))
 
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            name_input.handle_event(event)
-            if event.type == pygame.MOUSEBUTTONDOWN and confirm_button.contains(event.pos):
-                if name_input.text.strip():
-                    return name_input.text.strip()
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
-                if name_input.text.strip():
-                    name_input.blur()
-                    return name_input.text.strip()
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    name_text = name_input.text
+                    focused = name_input.active
+                    resize = True
+                    break
+                name_input.handle_event(event)
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if confirm_button.contains(event.pos):
+                        if name_input.text.strip():
+                            name_input.blur()
+                            return name_input.text.strip()
+                    if cancel_button.contains(event.pos):
+                        name_input.blur()
+                        return None
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_RETURN and name_input.text.strip():
+                        name_input.blur()
+                        return name_input.text.strip()
+                    if event.key == pygame.K_ESCAPE:
+                        name_input.blur()
+                        return None
+            if resize:
+                break
 
-        mouse_pos = pygame.mouse.get_pos()
-        confirm_button.update_hover(mouse_pos)
+            mouse_pos = pygame.mouse.get_pos()
+            confirm_button.update_hover(mouse_pos)
+            cancel_button.update_hover(mouse_pos)
 
-        screen.fill(BLACK)
-        screen.blit(
-            title_font.render(title, True, WHITE), (width // 2 - 200, height // 2 - 80)
-        )
-        name_input.draw(screen, font)
-        confirm_button.draw(screen, font)
+            screen.fill(BG)
+            panel_w, panel_h = 520, 220
+            panel = pygame.Rect((width - panel_w) // 2, (height - panel_h) // 2, panel_w, panel_h)
+            pygame.draw.rect(screen, CARBON, panel)
+            pygame.draw.rect(screen, LINE, panel, 1)
+            pygame.draw.rect(screen, F1_RED, pygame.Rect(panel.x, panel.y, panel_w, 4))
+            screen.blit(
+                title_font.render(title, True, INK), (width // 2 - 200, height // 2 - 72)
+            )
+            name_input.draw(screen, font)
+            confirm_button.fill_color = F1_RED
+            confirm_button.draw(screen, font)
+            cancel_button.draw(screen, font)
 
-        pygame.display.update()
-        clock.tick(30)
+            pygame.display.update()
+            clock.tick(30)
 
 
 def run_loading_screen(
@@ -900,9 +971,6 @@ def run_loading_screen(
     flourish, not tied to actual asset-loading progress."""
     clock = pygame.time.Clock()
     font = _font(28)
-    width, height = screen.get_size()
-    center = (width // 2, height // 2)
-    radius = max(24, height // 18)
 
     elapsed = 0.0
     while elapsed < duration_seconds:
@@ -911,15 +979,18 @@ def run_loading_screen(
         dt = clock.tick(30) / 1000.0
         elapsed += dt
 
-        screen.fill(BLACK)
+        width, height = screen.get_size()
+        center = (width // 2, height // 2)
+        radius = max(24, height // 18)
+        screen.fill(BG)
         angle = (elapsed / duration_seconds) * 720
         arc_rect = pygame.Rect(0, 0, radius * 2, radius * 2)
         arc_rect.center = center
         pygame.draw.arc(
-            screen, (120, 170, 255), arc_rect,
+            screen, F1_RED, arc_rect,
             math.radians(angle), math.radians(angle + 270), width=6,
         )
-        label = font.render(message, True, WHITE)
+        label = font.render(message, True, INK)
         screen.blit(label, label.get_rect(center=(center[0], center[1] + radius + 40)))
         pygame.display.update()
 
@@ -1004,242 +1075,238 @@ def _last_upload_line(record: TrainingRecord) -> str | None:
 
 def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
     clock = pygame.time.Clock()
-    font = _font(18)
-    detail_font = _font(16)
-    title_font = _font(32)
-    width, height = screen.get_size()
     store = RecordStore()
-
-    margin = 40
-    scrollbar_width = 14
-    scrollbar_gap = 10
-    back_button = Button("返回", pygame.Rect(margin, margin, 120, 48))
-    row_height = 160
-    row_gap = 10
-    list_top = back_button.rect.bottom + margin
-    list_bottom = height - margin
-    max_visible_records = max(
-        1,
-        (list_bottom - list_top) // (row_height + row_gap),
-    )
-    content_right = width - margin - scrollbar_width - scrollbar_gap
     message = ""
     pending_delete_record_id: str | None = None
-    scrollbar = VerticalScrollbar(
-        pygame.Rect(width - margin - scrollbar_width, list_top, scrollbar_width, list_bottom - list_top),
-        total_items=0,
-        visible_items=max_visible_records,
-    )
+    scroll_offset = 0
 
-    while True:
-        all_records = store.list_records()
-        scrollbar.total_items = len(all_records)
-        scrollbar.clamp()
-        records = all_records[scrollbar.offset : scrollbar.offset + max_visible_records]
-
-        mouse_pos = pygame.mouse.get_pos()
-        back_button.update_hover(mouse_pos)
-
-        rows = []
-        for index, record in enumerate(records):
-            row_y = list_top + index * (row_height + row_gap)
-            button_y = row_y + (row_height - 44) // 2
-            validate_button = Button(
-                "Validate",
-                pygame.Rect(content_right - 380, button_y, 110, 44),
-            )
-            upload_button = Button(
-                "Upload",
-                pygame.Rect(content_right - 260, button_y, 110, 44),
-            )
-            delete_button = Button(
-                "Delete",
-                pygame.Rect(content_right - 140, button_y, 110, 44),
-            )
-            validate_button.update_hover(mouse_pos)
-            upload_button.update_hover(mouse_pos)
-            delete_button.update_hover(mouse_pos)
-            card_rect = pygame.Rect(
-                margin,
-                row_y,
-                content_right - margin,
-                row_height,
-            )
-            rows.append(
-                (
-                    record,
-                    card_rect,
-                    validate_button,
-                    upload_button,
-                    delete_button,
-                )
-            )
-
-        for event in pygame.event.get():
-            _check_quit(event)
-            if scrollbar.handle_event(event):
-                continue
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                pending_delete_record_id = None
-                if back_button.contains(event.pos):
-                    return
-                for record, _, validate_button, upload_button, delete_button in rows:
-                    if validate_button.contains(event.pos):
-                        _run_record_validation_screen(screen, record)
-                        break
-                    if upload_button.contains(event.pos):
-                        _run_record_submission_screen(screen, server_url, record)
-                        break
-                    if delete_button.contains(event.pos):
-                        pending_delete_record_id = record.record_id
-                        break
-
-            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                for record, _, _, _, delete_button in rows:
-                    if (
-                        pending_delete_record_id == record.record_id
-                        and delete_button.contains(event.pos)
-                    ):
-                        store.delete_record(record.record_id)
-                        message = f"已刪除 {record.record_name}"
-                        break
-                pending_delete_record_id = None
-
-        screen.fill(BLACK)
-        title = title_font.render("Validation", True, WHITE)
-        screen.blit(
-            title,
-            title.get_rect(
-                midleft=(back_button.rect.right + margin, back_button.rect.centery)
-            ),
+    while True:  # outer: rebuild on VIDEORESIZE
+        font = _font(18)
+        detail_font = _font(16)
+        head32 = _head_font(32)
+        head28 = _head_font(28)
+        mono16 = _mono_font(16)
+        width, height = screen.get_size()
+        margin = 40
+        scrollbar_width = 14
+        scrollbar_gap = 10
+        back_button = Button("返回", pygame.Rect(margin, margin, 120, 48))
+        row_height = 160
+        row_gap = 10
+        list_top = back_button.rect.bottom + margin
+        list_bottom = height - margin
+        max_visible_records = max(1, (list_bottom - list_top) // (row_height + row_gap))
+        content_right = width - margin - scrollbar_width - scrollbar_gap
+        scrollbar = VerticalScrollbar(
+            pygame.Rect(width - margin - scrollbar_width, list_top, scrollbar_width, list_bottom - list_top),
+            total_items=0,
+            visible_items=max_visible_records,
+            offset=scroll_offset,
         )
-        back_button.draw(screen, font)
-        for record, card_rect, validate_button, upload_button, delete_button in rows:
-            pygame.draw.rect(
-                screen,
-                (18, 18, 18),
-                card_rect,
-                border_radius=8,
-            )
-            pygame.draw.rect(
-                screen,
-                (65, 65, 65),
-                card_rect,
-                1,
-                border_radius=8,
-            )
-            performance = (
-                f"{record.best_fitness_score:.1f}"
-                if record.best_fitness_score is not None
-                else "N/A"
-            )
-            metadata = (
-                f"{record.record_name}  |  "
-                f"{format_timestamp_utc8(record.saved_at)}  |  "
-                f"NN Seed: {record.mlp_init_seed}  |  "
-                f"Best Fitness: {performance}  |  "
-                f"Max Speed: {record.max_speed}"
-            )
-            content_width = validate_button.rect.left - margin * 2
-            metadata = _ellipsize(font, metadata, content_width)
-            penalty_line, reward_line = _fitness_parameter_lines(
-                record.fitness_config
-            )
-            screen.blit(
-                font.render(metadata, True, WHITE),
-                (card_rect.x + 12, card_rect.y + 12),
-            )
-            screen.blit(
-                detail_font.render(penalty_line, True, (235, 125, 125)),
-                (card_rect.x + 12, card_rect.y + 50),
-            )
-            screen.blit(
-                detail_font.render(reward_line, True, (125, 220, 135)),
-                (card_rect.x + 12, card_rect.y + 82),
-            )
-            upload_line = _last_upload_line(record) or "尚未上傳"
-            upload_line = _ellipsize(detail_font, upload_line, content_width)
-            screen.blit(
-                detail_font.render(upload_line, True, (150, 190, 230)),
-                (card_rect.x + 12, card_rect.y + 114),
-            )
-            validate_button.draw(screen, font)
-            upload_button.draw(screen, font)
-            delete_button.draw(screen, font)
-        scrollbar.draw(screen, font)
-        if message:
-            screen.blit(font.render(message, True, (120, 220, 120)), (60, height - 60))
 
-        pygame.display.update()
-        clock.tick(30)
+        resize = False
+        while not resize:
+            all_records = store.list_records()
+            scrollbar.total_items = len(all_records)
+            scrollbar.clamp()
+            records = all_records[scrollbar.offset : scrollbar.offset + max_visible_records]
+
+            mouse_pos = pygame.mouse.get_pos()
+            back_button.update_hover(mouse_pos)
+
+            rows = []
+            for index, record in enumerate(records):
+                row_y = list_top + index * (row_height + row_gap)
+                button_y = row_y + (row_height - 44) // 2
+                validate_button = Button(
+                    "Validate",
+                    pygame.Rect(content_right - 380, button_y, 110, 44),
+                )
+                upload_button = Button(
+                    "Upload",
+                    pygame.Rect(content_right - 260, button_y, 110, 44),
+                )
+                delete_button = Button(
+                    "Delete",
+                    pygame.Rect(content_right - 140, button_y, 110, 44),
+                )
+                validate_button.update_hover(mouse_pos)
+                upload_button.update_hover(mouse_pos)
+                delete_button.update_hover(mouse_pos)
+                card_rect = pygame.Rect(
+                    margin,
+                    row_y,
+                    content_right - margin,
+                    row_height,
+                )
+                rows.append((record, card_rect, validate_button, upload_button, delete_button))
+
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    scroll_offset = scrollbar.offset
+                    resize = True
+                    break
+                if scrollbar.handle_event(event):
+                    continue
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    pending_delete_record_id = None
+                    if back_button.contains(event.pos):
+                        return
+                    for record, _, validate_button, upload_button, delete_button in rows:
+                        if validate_button.contains(event.pos):
+                            _run_record_validation_screen(screen, record)
+                            break
+                        if upload_button.contains(event.pos):
+                            _run_record_submission_screen(screen, server_url, record)
+                            break
+                        if delete_button.contains(event.pos):
+                            pending_delete_record_id = record.record_id
+                            break
+                if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    for record, _, _, _, delete_button in rows:
+                        if (
+                            pending_delete_record_id == record.record_id
+                            and delete_button.contains(event.pos)
+                        ):
+                            store.delete_record(record.record_id)
+                            message = f"已刪除 {record.record_name}"
+                            break
+                    pending_delete_record_id = None
+
+            if resize:
+                break
+
+            screen.fill(BG)
+            title = head32.render("RESULTS · VALIDATION", True, INK)
+            screen.blit(title, title.get_rect(midleft=(back_button.rect.right + margin, back_button.rect.centery)))
+            back_button.draw(screen, font)
+            for idx, (record, card_rect, validate_button, upload_button, delete_button) in enumerate(rows):
+                rank = scrollbar.offset + idx + 1
+                pygame.draw.rect(screen, CARBON, card_rect)
+                pygame.draw.rect(screen, LINE, card_rect, 1)
+                rank_colors = {1: F1_RED, 2: CYAN, 3: YELLOW}
+                rank_color = rank_colors.get(rank, DIM)
+                pygame.draw.rect(screen, rank_color, pygame.Rect(card_rect.x, card_rect.y, 3, card_rect.height))
+                rank_surf = head28.render(f"P{rank}", True, rank_color)
+                screen.blit(rank_surf, rank_surf.get_rect(midleft=(card_rect.x + 12, card_rect.centery)))
+                text_x = card_rect.x + 56
+                performance = (
+                    f"{record.best_fitness_score:.1f}"
+                    if record.best_fitness_score is not None
+                    else "N/A"
+                )
+                metadata = (
+                    f"{record.record_name}  |  "
+                    f"{format_timestamp_utc8(record.saved_at)}  |  "
+                    f"NN Seed: {record.mlp_init_seed}  |  "
+                    f"Max Speed: {record.max_speed}"
+                )
+                content_width = validate_button.rect.left - text_x - margin
+                metadata = _ellipsize(font, metadata, content_width)
+                penalty_line, reward_line = _fitness_parameter_lines(record.fitness_config)
+                screen.blit(font.render(metadata, True, INK), (text_x, card_rect.y + 10))
+                fitness_surf = mono16.render(f"Best Fitness: {performance}", True, CYAN)
+                screen.blit(fitness_surf, (text_x, card_rect.y + 10 + font.get_height()))
+                screen.blit(
+                    detail_font.render(penalty_line, True, F1_RED),
+                    (text_x, card_rect.y + 10 + font.get_height() + fitness_surf.get_height()),
+                )
+                screen.blit(
+                    detail_font.render(reward_line, True, F1_GREEN),
+                    (text_x, card_rect.y + 10 + font.get_height() + fitness_surf.get_height() + detail_font.get_height()),
+                )
+                upload_line = _last_upload_line(record) or "尚未上傳"
+                upload_line = _ellipsize(detail_font, upload_line, content_width)
+                screen.blit(
+                    detail_font.render(upload_line, True, DIM),
+                    (text_x, card_rect.y + 10 + font.get_height() + fitness_surf.get_height() + detail_font.get_height() * 2),
+                )
+                validate_button.draw(screen, font)
+                upload_button.fill_color = CYAN
+                upload_button.text_color = (10, 11, 14)
+                upload_button.draw(screen, font)
+                delete_button.fill_color = F1_RED
+                delete_button.draw(screen, font)
+            scrollbar.draw(screen, font)
+            if message:
+                screen.blit(font.render(message, True, F1_GREEN), (60, height - 60))
+
+            pygame.display.update()
+            clock.tick(30)
 
 
 def _pick_validation_map_screen(screen: pygame.Surface) -> str | None:
     """Easy / Hard / Random picker with map previews, mirroring the submission
     competition picker and the training-config map cards."""
     clock = pygame.time.Clock()
-    W, H = screen.get_size()
-    font = _font(max(16, H // 40))
-    title_font = _font(max(20, H // 30))
-    M = max(16, W // 100)
 
-    back_button = Button("← 返回", pygame.Rect(M, M, max(100, W // 14), max(36, H // 24)))
+    while True:  # outer: rebuild on VIDEORESIZE
+        W, H = screen.get_size()
+        font = _font(max(16, H // 40))
+        M = max(16, W // 100)
+        back_button = Button("← 返回", pygame.Rect(M, M, max(100, W // 14), max(36, H // 24)))
+        card_area_top = back_button.rect.bottom + M * 3
+        CARD_W = (W - M * 4) // 3
+        CARD_H = min(H // 2, CARD_W)
+        THUMB_W = CARD_W - M * 2
+        THUMB_H = THUMB_W * 9 // 16
+        easy_thumb = pygame.transform.scale(
+            pygame.image.load(str(VALIDATION_DIFFICULTY_MAPS["easy"][0])), (THUMB_W, THUMB_H)
+        )
+        hard_thumb = pygame.transform.scale(
+            pygame.image.load(str(VALIDATION_DIFFICULTY_MAPS["hard"][0])), (THUMB_W, THUMB_H)
+        )
+        cards: list[tuple[str, str, pygame.Surface | None, pygame.Rect]] = [
+            ("easy", "Easy", easy_thumb, pygame.Rect(M, card_area_top, CARD_W, CARD_H)),
+            ("hard", "Hard", hard_thumb, pygame.Rect(M * 2 + CARD_W, card_area_top, CARD_W, CARD_H)),
+            ("random", "隨機", None, pygame.Rect(M * 3 + CARD_W * 2, card_area_top, CARD_W, CARD_H)),
+        ]
 
-    card_area_top = back_button.rect.bottom + M * 3
-    CARD_W = (W - M * 4) // 3
-    CARD_H = min(H // 2, CARD_W)
-    THUMB_W = CARD_W - M * 2
-    THUMB_H = THUMB_W * 9 // 16
-    easy_thumb = pygame.transform.scale(
-        pygame.image.load(str(VALIDATION_DIFFICULTY_MAPS["easy"][0])), (THUMB_W, THUMB_H)
-    )
-    hard_thumb = pygame.transform.scale(
-        pygame.image.load(str(VALIDATION_DIFFICULTY_MAPS["hard"][0])), (THUMB_W, THUMB_H)
-    )
-    cards: list[tuple[str, str, pygame.Surface | None, pygame.Rect]] = [
-        ("easy", "Easy", easy_thumb, pygame.Rect(M, card_area_top, CARD_W, CARD_H)),
-        ("hard", "Hard", hard_thumb, pygame.Rect(M * 2 + CARD_W, card_area_top, CARD_W, CARD_H)),
-        ("random", "隨機", None, pygame.Rect(M * 3 + CARD_W * 2, card_area_top, CARD_W, CARD_H)),
-    ]
-
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if back_button.contains(event.pos):
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    resize = True
+                    break
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if back_button.contains(event.pos):
+                        return None
+                    for map_id, _, _, rect in cards:
+                        if rect.collidepoint(event.pos):
+                            return map_id
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     return None
-                for map_id, _, _, rect in cards:
-                    if rect.collidepoint(event.pos):
-                        return map_id
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return None
+            if resize:
+                break
 
-        mouse_pos = pygame.mouse.get_pos()
-        back_button.update_hover(mouse_pos)
+            mouse_pos = pygame.mouse.get_pos()
+            back_button.update_hover(mouse_pos)
 
-        screen.fill(BLACK)
-        back_button.draw(screen, font)
-        screen.blit(title_font.render("選擇 Validation 地圖", True, WHITE),
-                    (M, back_button.rect.bottom + M))
-        for map_id, label, thumb, rect in cards:
-            hovered = rect.collidepoint(mouse_pos)
-            border_color = (110, 110, 110) if hovered else (55, 55, 55)
-            fill_color = (28, 28, 28) if hovered else (18, 18, 18)
-            pygame.draw.rect(screen, fill_color, rect, border_radius=10)
-            pygame.draw.rect(screen, border_color, rect, 2, border_radius=10)
-            img_rect = pygame.Rect(rect.x + M, rect.y + M, THUMB_W, THUMB_H)
-            if thumb is not None:
-                screen.blit(thumb, img_rect)
-                pygame.draw.rect(screen, (50, 50, 50), img_rect, 1)
-            else:
-                pygame.draw.rect(screen, (22, 22, 32), img_rect, border_radius=4)
-                rng_surf = font.render("隨機生成", True, (140, 140, 200))
-                screen.blit(rng_surf, rng_surf.get_rect(center=img_rect.center))
-            label_surf = font.render(label, True, WHITE)
-            screen.blit(label_surf, label_surf.get_rect(centerx=rect.centerx, y=img_rect.bottom + M))
+            screen.fill(BG)
+            back_button.draw(screen, font)
+            screen.blit(font.render("選擇 Validation 地圖", True, INK),
+                        (M, back_button.rect.bottom + M))
+            for map_id, label, thumb, rect in cards:
+                hovered = rect.collidepoint(mouse_pos)
+                border_color = LINE if hovered else (30, 32, 40)
+                fill_color = CARBON if hovered else (15, 16, 20)
+                pygame.draw.rect(screen, fill_color, rect)
+                pygame.draw.rect(screen, border_color, rect, 1)
+                img_rect = pygame.Rect(rect.x + M, rect.y + M, THUMB_W, THUMB_H)
+                if thumb is not None:
+                    screen.blit(thumb, img_rect)
+                    pygame.draw.rect(screen, LINE, img_rect, 1)
+                else:
+                    pygame.draw.rect(screen, FIELD, img_rect)
+                    rng_surf = font.render("隨機生成", True, DIM)
+                    screen.blit(rng_surf, rng_surf.get_rect(center=img_rect.center))
+                label_surf = font.render(label, True, INK)
+                screen.blit(label_surf, label_surf.get_rect(centerx=rect.centerx, y=img_rect.bottom + M))
 
-        pygame.display.update()
-        clock.tick(30)
+            pygame.display.update()
+            clock.tick(30)
 
 
 def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord) -> None:
@@ -1340,95 +1407,107 @@ def _build_candidates(
 
 def _pick_competition_screen(screen: pygame.Surface) -> str | None:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(32)
-    width, height = screen.get_size()
 
-    back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
-    options = [("Easy", "easy"), ("Hard", "hard"), ("Final", "final")]
-    buttons = [
-        (competition_id, Button(label, pygame.Rect(width // 2 - 480 + i * 340, height // 2 - 80, 300, 160)))
-        for i, (label, competition_id) in enumerate(options)
-    ]
+    while True:  # outer: rebuild on VIDEORESIZE
+        font = _font()
+        width, height = screen.get_size()
+        back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
+        options = [("Easy", "easy"), ("Hard", "hard"), ("Final", "final")]
+        buttons = [
+            (competition_id, Button(label, pygame.Rect(width // 2 - 480 + i * 340, height // 2 - 80, 300, 160)))
+            for i, (label, competition_id) in enumerate(options)
+        ]
 
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if back_button.contains(event.pos):
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    resize = True
+                    break
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if back_button.contains(event.pos):
+                        return None
+                    for competition_id, button in buttons:
+                        if button.contains(event.pos):
+                            return competition_id
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     return None
-                for competition_id, button in buttons:
-                    if button.contains(event.pos):
-                        return competition_id
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return None
+            if resize:
+                break
 
-        mouse_pos = pygame.mouse.get_pos()
-        back_button.update_hover(mouse_pos)
-        for _, button in buttons:
-            button.update_hover(mouse_pos)
+            mouse_pos = pygame.mouse.get_pos()
+            back_button.update_hover(mouse_pos)
+            for _, button in buttons:
+                button.update_hover(mouse_pos)
 
-        screen.fill(BLACK)
-        screen.blit(title_font.render("選擇要提交的競賽", True, WHITE), (60, 140))
-        back_button.draw(screen, font)
-        for _, button in buttons:
-            button.draw(screen, font)
+            screen.fill(BG)
+            screen.blit(font.render("選擇要提交的競賽", True, INK), (60, 140))
+            back_button.draw(screen, font)
+            for _, button in buttons:
+                button.draw(screen, font)
 
-        pygame.display.update()
-        clock.tick(30)
+            pygame.display.update()
+            clock.tick(30)
 
 
 def _check_eligibility_screen(
     screen: pygame.Surface, server_url: str, competition_id: str, group_id: str, username: str
 ) -> bool:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(32)
-    width, height = screen.get_size()
-
     result = check_eligibility(server_url, competition_id, group_id, username)
-
-    back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
-    start_button = Button("開始評測", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
     can_start = isinstance(result, EligibilityResult) and result.eligible
 
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if back_button.contains(event.pos):
+    while True:  # outer: rebuild on VIDEORESIZE
+        font = _font()
+        width, height = screen.get_size()
+        back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
+        start_button = Button("開始評測", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
+
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    resize = True
+                    break
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if back_button.contains(event.pos):
+                        return False
+                    if can_start and start_button.contains(event.pos):
+                        return True
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     return False
-                if can_start and start_button.contains(event.pos):
-                    return True
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return False
+            if resize:
+                break
 
-        mouse_pos = pygame.mouse.get_pos()
-        back_button.update_hover(mouse_pos)
-        if can_start:
-            start_button.update_hover(mouse_pos)
+            mouse_pos = pygame.mouse.get_pos()
+            back_button.update_hover(mouse_pos)
+            if can_start:
+                start_button.update_hover(mouse_pos)
 
-        screen.fill(BLACK)
-        screen.blit(title_font.render(f"資格檢查：{competition_id}", True, WHITE), (60, 140))
-        back_button.draw(screen, font)
+            screen.fill(BG)
+            screen.blit(font.render(f"資格檢查：{competition_id}", True, INK), (60, 140))
+            back_button.draw(screen, font)
 
-        if isinstance(result, NetworkError):
-            screen.blit(font.render(f"連線失敗：{result.message}", True, (255, 90, 90)), (60, 220))
-        elif result.eligible:
-            screen.blit(font.render(
-                f"可以提交。stage={result.stage}，version={result.competition_config_version}",
-                True, (120, 220, 120),
-            ), (60, 220))
-            start_button.draw(screen, font)
-        else:
-            reason_text = _REASON_MESSAGES.get(result.reason or "", result.reason or "未知原因")
-            screen.blit(font.render(f"目前無法提交：{reason_text}", True, (255, 90, 90)), (60, 220))
-            screen.blit(font.render(
-                f"下次可提交時間：{format_full_timestamp_utc8(result.next_submission_at)}", True, WHITE
-            ), (60, 256))
+            if isinstance(result, NetworkError):
+                screen.blit(font.render(f"連線失敗：{result.message}", True, F1_RED), (60, 220))
+            elif result.eligible:
+                screen.blit(font.render(
+                    f"可以提交。stage={result.stage}，version={result.competition_config_version}",
+                    True, F1_GREEN,
+                ), (60, 220))
+                start_button.fill_color = F1_RED
+                start_button.draw(screen, font)
+            else:
+                reason_text = _REASON_MESSAGES.get(result.reason or "", result.reason or "未知原因")
+                screen.blit(font.render(f"目前無法提交：{reason_text}", True, F1_RED), (60, 220))
+                screen.blit(font.render(
+                    f"下次可提交時間：{format_full_timestamp_utc8(result.next_submission_at)}", True, DIM
+                ), (60, 256))
 
-        pygame.display.update()
-        clock.tick(30)
+            pygame.display.update()
+            clock.tick(30)
 
 
 @dataclass(slots=True)
@@ -1459,15 +1538,15 @@ def _draw_progress_screen(
         value=tick,
         max_value=frame_limit,
     )
-    screen.fill(BLACK)
-    title_surface = font.render(title, True, WHITE)
+    screen.fill(BG)
+    title_surface = font.render(title, True, INK)
     screen.blit(title_surface, title_surface.get_rect(center=(width // 2, height // 2 - 80)))
     bar.draw(screen, font)
     status = font.render(
         f"{format_ticks_as_seconds(tick)} / {format_ticks_as_seconds(frame_limit)}"
         f"  存活中：{active_count}/{total}",
         True,
-        WHITE,
+        CYAN,
     )
     screen.blit(status, status.get_rect(center=(width // 2, height // 2 + 50)))
     pygame.display.update()
@@ -1517,12 +1596,17 @@ def _simulate_candidates(
     dst_x, dst_y = (SCR_W - dst_w) // 2, (SCR_H - dst_h) // 2
     canvas = pygame.Surface((MAP_W, MAP_H)) if render_live else None
 
+    esc_button = Button("← 返回 (ESC)", pygame.Rect(SCR_W - 200, 16, 180, 40)) if render_live else None
+
     tick = 0
     while tick < frame_limit and any(active):
         for event in pygame.event.get():
             _check_quit(event)
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 return None
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                if esc_button is not None and esc_button.contains(event.pos):
+                    return None
 
         tick += 1
         completed_this_tick = False
@@ -1569,8 +1653,11 @@ def _simulate_candidates(
                 ),
                 (20, 20),
             )
-            screen.fill(BLACK)
+            screen.fill(BG)
             screen.blit(pygame.transform.scale(canvas, (dst_w, dst_h)), (dst_x, dst_y))
+            if esc_button is not None:
+                esc_button.update_hover(pygame.mouse.get_pos())
+                esc_button.draw(screen, font)
             pygame.display.update()
         else:
             _draw_progress_screen(
@@ -1720,45 +1807,63 @@ def _validation_result_screen(
     survival_ticks: int,
 ) -> None:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(32)
-    width, height = screen.get_size()
-
-    back_button = Button("返回列表", pygame.Rect(60, 40, 160, 48))
 
     if client_result is not None:
-        lines = [
-            f"completed: {client_result.completed}",
-            f"完賽時間: {format_ticks_as_seconds(client_result.lap_ticks)}",
-            f"max_progress: {client_result.max_progress:.1f} px",
-            "到達最遠進度時間: "
-            f"{format_ticks_as_seconds(client_result.ticks_to_max_progress)}",
+        rows = [
+            ("completed",       str(client_result.completed),                           False),
+            ("完賽時間",          format_ticks_as_seconds(client_result.lap_ticks),       True),
+            ("max_progress",    f"{client_result.max_progress:.1f} px",                 False),
+            ("到達最遠進度時間", format_ticks_as_seconds(client_result.ticks_to_max_progress), True),
         ]
         note = ""
     else:
-        lines = [f"存活時間: {format_ticks_as_seconds(survival_ticks)}"]
+        rows = [("存活時間", format_ticks_as_seconds(survival_ticks), True)]
         note = "此地圖尚無 checkpoint，progress／完賽指標暫不適用"
 
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return
-            if event.type == pygame.MOUSEBUTTONDOWN and back_button.contains(event.pos):
-                return
+    while True:  # outer: rebuild on VIDEORESIZE
+        font = _font()
+        mono = _mono_font(18)
+        head32 = _head_font(32)
+        width, height = screen.get_size()
+        back_button = Button("← 返回列表", pygame.Rect(60, 40, 180, 48))
 
-        back_button.update_hover(pygame.mouse.get_pos())
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    resize = True
+                    break
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    return
+                if event.type == pygame.MOUSEBUTTONDOWN and back_button.contains(event.pos):
+                    return
+            if resize:
+                break
 
-        screen.fill(BLACK)
-        screen.blit(title_font.render(f"Validation 成績：{map_id}", True, WHITE), (60, 120))
-        for i, line in enumerate(lines):
-            screen.blit(font.render(line, True, WHITE), (60, 200 + i * 44))
-        if note:
-            screen.blit(font.render(note, True, (220, 200, 120)), (60, 200 + len(lines) * 44 + 16))
-        back_button.draw(screen, font)
+            back_button.update_hover(pygame.mouse.get_pos())
 
-        pygame.display.update()
-        clock.tick(30)
+            screen.fill(BG)
+            x_title = 60
+            head_surf = head32.render("VALIDATION ", True, INK)
+            screen.blit(head_surf, (x_title, 110))
+            screen.blit(font.render(f"成績：{map_id}", True, DIM), (x_title + head_surf.get_width(), 116))
+            panel_x, panel_y = 60, 180
+            panel_w, panel_h = max(500, width // 3), len(rows) * 52 + 24
+            pygame.draw.rect(screen, CARBON, pygame.Rect(panel_x, panel_y, panel_w, panel_h))
+            pygame.draw.rect(screen, LINE, pygame.Rect(panel_x, panel_y, panel_w, panel_h), 1)
+            pygame.draw.rect(screen, CYAN, pygame.Rect(panel_x, panel_y, 3, panel_h))
+            for i, (label, value, is_cjk_label) in enumerate(rows):
+                y = panel_y + 12 + i * 52
+                lbl_font = font if is_cjk_label else mono
+                screen.blit(lbl_font.render(label, True, DIM), (panel_x + 12, y))
+                screen.blit(mono.render(value, True, CYAN), (panel_x + 12, y + 24))
+            if note:
+                screen.blit(font.render(note, True, YELLOW), (60, panel_y + panel_h + 20))
+            back_button.draw(screen, font)
+
+            pygame.display.update()
+            clock.tick(30)
 
 
 def _submit_result_screen(
@@ -1774,105 +1879,110 @@ def _submit_result_screen(
     record: TrainingRecord,
 ) -> None:
     clock = pygame.time.Clock()
-    font = _font()
-    title_font = _font(32)
-    width, height = screen.get_size()
-
-    back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
-    submit_button = Button("送出", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
     submitted = False
     response: SubmissionAccepted | SubmissionRejected | NetworkError | None = None
 
     completed_text = "賽道完成：是" if client_result.completed else "賽道完成：否"
-    if client_result.completed:
-        summary = (
-            "完賽！耗時 "
-            f"{format_ticks_as_seconds(client_result.lap_ticks)}"
-        )
-    else:
-        summary = (
+    summary = (
+        f"完賽！耗時 {format_ticks_as_seconds(client_result.lap_ticks)}"
+        if client_result.completed
+        else (
             f"未完賽，最遠進度 {client_result.max_progress:.1f}px"
             f"（{format_ticks_as_seconds(client_result.ticks_to_max_progress)} 達到）"
         )
+    )
     survival_text = f"存活率：{survival_rate:.0%}"
 
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if back_button.contains(event.pos):
+    while True:  # outer: rebuild on VIDEORESIZE
+        font = _font()
+        head32 = _head_font(32)
+        width, height = screen.get_size()
+        back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
+        submit_button = Button("送出", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
+
+        resize = False
+        while not resize:
+            for event in pygame.event.get():
+                _check_quit(event)
+                if event.type == pygame.VIDEORESIZE:
+                    resize = True
+                    break
+                if event.type == pygame.MOUSEBUTTONDOWN:
+                    if back_button.contains(event.pos):
+                        return
+                    if not submitted and submit_button.contains(event.pos):
+                        weight_payload = export_weight_payload(
+                            winner_car,
+                            generation=0,
+                            track_id=f"competition-{competition_id}",
+                            track_seed=0,
+                            nickname=username,
+                        )
+                        payload = SubmissionPayload(
+                            group_id=group_id,
+                            username=username,
+                            weights=weight_payload.weights,
+                            biases=weight_payload.biases,
+                        )
+                        response = submit_to_competition_server(
+                            server_url, competition_id, payload, client_result
+                        )
+                        submitted = True
+                        if isinstance(response, SubmissionAccepted):
+                            upload_status = response.body.get("status", "queued")
+                        elif isinstance(response, SubmissionRejected):
+                            upload_status = f"rejected:{response.error}"
+                        else:
+                            upload_status = "network_error"
+                        record.last_upload_completed = client_result.completed
+                        record.last_upload_lap_ticks = client_result.lap_ticks
+                        record.last_upload_max_progress = client_result.max_progress
+                        record.last_upload_survival_rate = survival_rate
+                        record.last_upload_status = upload_status
+                        record.last_upload_at = datetime.now(UTC_PLUS_8).isoformat(timespec="seconds")
+                        RecordStore().update_record(record)
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     return
-                if not submitted and submit_button.contains(event.pos):
-                    weight_payload = export_weight_payload(
-                        winner_car,
-                        generation=0,
-                        track_id=f"competition-{competition_id}",
-                        track_seed=0,
-                        nickname=username,
+            if resize:
+                break
+
+            mouse_pos = pygame.mouse.get_pos()
+            back_button.update_hover(mouse_pos)
+            if not submitted:
+                submit_button.update_hover(mouse_pos)
+
+            screen.fill(BG)
+            screen.blit(head32.render(f"Local Winner：{competition_id}", True, INK), (60, 140))
+            screen.blit(font.render(completed_text, True, INK), (60, 200))
+            screen.blit(font.render(summary, True, CYAN), (60, 236))
+            screen.blit(font.render(survival_text, True, DIM), (60, 272))
+            back_button.draw(screen, font)
+            if not submitted:
+                submit_button.fill_color = F1_RED
+                submit_button.draw(screen, font)
+
+            if isinstance(response, SubmissionAccepted):
+                status = response.body.get("status", "queued")
+                submission_id = response.body.get("submission_id", "")
+                screen.blit(font.render(
+                    f"已送出！submission_id={submission_id}，狀態：{status}", True, F1_GREEN
+                ), (60, 320))
+            elif isinstance(response, SubmissionRejected):
+                reason_text = _REASON_MESSAGES.get(response.error, response.error)
+                screen.blit(font.render(f"送出被拒絕：{reason_text}", True, (255, 90, 90)), (60, 320))
+                if response.next_submission_at:
+                    screen.blit(
+                        font.render(
+                            f"下次可提交時間：{format_full_timestamp_utc8(response.next_submission_at)}",
+                            True, WHITE,
+                        ),
+                        (60, 356),
                     )
-                    payload = SubmissionPayload(
-                        group_id=group_id,
-                        username=username,
-                        weights=weight_payload.weights,
-                        biases=weight_payload.biases,
-                    )
-                    response = submit_to_competition_server(
-                        server_url, competition_id, payload, client_result
-                    )
-                    submitted = True
+            elif isinstance(response, NetworkError):
+                screen.blit(font.render(f"連線失敗：{response.message}", True, (255, 90, 90)), (60, 320))
 
-                    if isinstance(response, SubmissionAccepted):
-                        upload_status = response.body.get("status", "queued")
-                    elif isinstance(response, SubmissionRejected):
-                        upload_status = f"rejected:{response.error}"
-                    else:
-                        upload_status = "network_error"
-                    record.last_upload_completed = client_result.completed
-                    record.last_upload_lap_ticks = client_result.lap_ticks
-                    record.last_upload_max_progress = client_result.max_progress
-                    record.last_upload_survival_rate = survival_rate
-                    record.last_upload_status = upload_status
-                    record.last_upload_at = datetime.now(UTC_PLUS_8).isoformat(timespec="seconds")
-                    RecordStore().update_record(record)
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                return
-
-        mouse_pos = pygame.mouse.get_pos()
-        back_button.update_hover(mouse_pos)
-        if not submitted:
-            submit_button.update_hover(mouse_pos)
-
-        screen.fill(BLACK)
-        screen.blit(title_font.render(f"Local Winner：{competition_id}", True, WHITE), (60, 140))
-        screen.blit(font.render(completed_text, True, WHITE), (60, 200))
-        screen.blit(font.render(summary, True, WHITE), (60, 236))
-        screen.blit(font.render(survival_text, True, WHITE), (60, 272))
-        back_button.draw(screen, font)
-        if not submitted:
-            submit_button.draw(screen, font)
-
-        if isinstance(response, SubmissionAccepted):
-            status = response.body.get("status", "queued")
-            submission_id = response.body.get("submission_id", "")
-            screen.blit(font.render(
-                f"已送出！submission_id={submission_id}，狀態：{status}", True, (120, 220, 120)
-            ), (60, 320))
-        elif isinstance(response, SubmissionRejected):
-            reason_text = _REASON_MESSAGES.get(response.error, response.error)
-            screen.blit(font.render(f"送出被拒絕：{reason_text}", True, (255, 90, 90)), (60, 320))
-            if response.next_submission_at:
-                screen.blit(
-                    font.render(
-                        f"下次可提交時間：{format_full_timestamp_utc8(response.next_submission_at)}",
-                        True, WHITE,
-                    ),
-                    (60, 356),
-                )
-        elif isinstance(response, NetworkError):
-            screen.blit(font.render(f"連線失敗：{response.message}", True, (255, 90, 90)), (60, 320))
-
-        pygame.display.update()
-        clock.tick(30)
+            pygame.display.update()
+            clock.tick(30)
 
 
 def run_submission_screen(

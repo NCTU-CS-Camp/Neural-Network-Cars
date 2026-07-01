@@ -20,16 +20,26 @@ from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import export_weight_payload
 from game_engine.backend.simulator import Simulator
 from game_engine.backend.settings import (
+    BG,
+    CARBON,
+    CYAN,
+    DIM,
+    F1_GREEN,
+    F1_RED,
     FONT_PATH,
+    HEAD_FONT_PATH,
     HIDDEN_LAYER,
+    INK,
     INPUT_LAYER,
+    LINE,
+    MONO_FONT_PATH,
     OUTPUT_LAYER,
     TRACK_BACK_PATH,
     TRACK_FRONT_PATH,
     TRACK_HALF_WIDTH,
     TRACK_METADATA_PATH,
     TRAINING_DIFFICULTY_MAPS,
-    WHITE,
+    YELLOW,
 )
 from game_engine.backend.track import TrackGeometry
 from game_engine.backend.track_generator import generate_random_map
@@ -85,10 +95,11 @@ def _car_from_flat_weights(
 
 def run():
     pygame.init()
+    pygame.scrap.init()
     info = pygame.display.Info()
     win_w = int(info.current_w * 0.9)
     win_h = int(info.current_h * 0.9)
-    screen = pygame.display.set_mode((win_w, win_h))
+    screen = pygame.display.set_mode((win_w, win_h), pygame.RESIZABLE)
 
     try:
         settings = load_runtime_settings()
@@ -206,39 +217,57 @@ def run_training_loop(
         nn_cars = session.breed_population(nn_cars, aux_car, Car, layer_sizes, assets)
         session.generation = 1
 
-    W, H = screen.get_size()
-    back_button = Button("Back", pygame.Rect(W - 200, 16, 180, 44))
-    new_map_button = Button("新地圖", pygame.Rect(W - 200, 70, 180, 44)) if map_difficulty == 3 else None
-    next_gen_button_y = 124 if new_map_button is not None else 70
-    next_gen_button = Button(
-        "下一代 (Next Gen)",
-        pygame.Rect(W - 200, next_gen_button_y, 180, 44),
-    )
-    restart_button = Button(
-        "Restart",
-        pygame.Rect(W - 200, next_gen_button.rect.bottom + 10, 180, 44),
-    )
-
     # Virtual canvas at the map's native resolution; rendered then scaled to the
     # physical window. This keeps car coordinates correct (they live in 1600×900
     # space) while the window can be any size.
     MAP_W, MAP_H = bg.get_size()
     map_canvas = pygame.Surface((MAP_W, MAP_H))
-    _map_scale = min(W / MAP_W, H / MAP_H)
-    _map_dst_w = int(MAP_W * _map_scale)
-    _map_dst_h = int(MAP_H * _map_scale)
-    _map_dst_x = (W - _map_dst_w) // 2
-    _map_dst_y = (H - _map_dst_h) // 2
+
+    W, H = screen.get_size()
+    _map_scale = 1.0
+    _map_dst_w = MAP_W
+    _map_dst_h = MAP_H
+    _map_dst_x = 0
+    _map_dst_y = 0
+    back_button = Button("Back", pygame.Rect(0, 0, 180, 44))
+    new_map_button = Button("新地圖", pygame.Rect(0, 0, 180, 44)) if map_difficulty == 3 else None
+    next_gen_button = Button("下一代 (Next Gen)", pygame.Rect(0, 0, 180, 44))
+    restart_button = Button("Restart", pygame.Rect(0, 0, 180, 44))
+
+    def recalculate_layout() -> None:
+        nonlocal W, H, _map_scale, _map_dst_w, _map_dst_h, _map_dst_x, _map_dst_y
+        W, H = game_display.get_size()
+        _map_scale = min(W / MAP_W, H / MAP_H)
+        _map_dst_w = int(MAP_W * _map_scale)
+        _map_dst_h = int(MAP_H * _map_scale)
+        _map_dst_x = (W - _map_dst_w) // 2
+        _map_dst_y = (H - _map_dst_h) // 2
+        back_button.rect = pygame.Rect(W - 200, 16, 180, 44)
+        if new_map_button is not None:
+            new_map_button.rect = pygame.Rect(W - 200, 70, 180, 44)
+        _ngy = 124 if new_map_button is not None else 70
+        next_gen_button.rect = pygame.Rect(W - 200, _ngy, 180, 44)
+        restart_button.rect = pygame.Rect(W - 200, next_gen_button.rect.bottom + 10, 180, 44)
+
+    recalculate_layout()
 
     def map_position(screen_position):
         screen_x, screen_y = screen_position
+        dst_w = _map_dst_w or 1
+        dst_h = _map_dst_h or 1
         return (
-            (screen_x - _map_dst_x) * MAP_W / _map_dst_w,
-            (screen_y - _map_dst_y) * MAP_H / _map_dst_h,
+            (screen_x - _map_dst_x) * MAP_W / dst_w,
+            (screen_y - _map_dst_y) * MAP_H / dst_h,
         )
 
     font = pygame.font.Font(str(FONT_PATH), 18)
-    speed_text = font.render(f"Max Speed: {settings.max_speed}", True, WHITE)
+    _bar_head = pygame.font.Font(str(HEAD_FONT_PATH), 14)
+    _bar_mono = pygame.font.Font(str(MONO_FONT_PATH), 14)
+    _next_gen_mono = pygame.font.Font(str(MONO_FONT_PATH), 18)
+    _info_font = pygame.font.Font(str(MONO_FONT_PATH), 13)
+    _badge_font = pygame.font.Font(str(HEAD_FONT_PATH), 14)
+    _tower_font = pygame.font.Font(str(MONO_FONT_PATH), 14)
+    _tower_head = pygame.font.Font(str(HEAD_FONT_PATH), 14)
 
     def persist_settings():
         settings.mutation_rate = session.mutation_rate
@@ -274,74 +303,34 @@ def run_training_loop(
         simulator.reset_population(nn_cars)
         session.alive_count = len(nn_cars)
 
+    _mono = pygame.font.Font(str(MONO_FONT_PATH), 15)
+    _head = pygame.font.Font(str(HEAD_FONT_PATH), 15)
+
     def display_texts():
-        info_text_x = 20
-        info_text_y = 600
-        info_text1 = font.render(f"Gen {session.generation}", True, WHITE)
-        info_text2 = font.render(f"Cars: {session.population_size}", True, WHITE)
-        info_text3 = font.render(f"Alive: {session.alive_count}", True, WHITE)
-        info_text4 = font.render(
-            f"Selected: {len(session.selected_cars)}", True, WHITE
-        )
-        info_text5 = font.render(
-            "Lines ON" if session.show_sensor_lines else "Lines OFF", True, WHITE
-        )
-        info_text6 = font.render(
-            "Player ON" if session.show_player else "Player OFF", True, WHITE
-        )
-        info_text7 = font.render(
-            f"Scene: {shell.current_scene.name}", True, WHITE
-        )
-        info_text8 = font.render(
-            f"Fitness: {fitness_strategy.name}", True, WHITE
-        )
         remaining_seconds = max(
             0.0,
             session.generation_duration_seconds - generation_elapsed_seconds(),
         )
-        info_text9 = font.render(
-            f"Next generation: {remaining_seconds:.1f}s", True, WHITE
-        )
-        info_text10 = font.render(submit_status, True, WHITE)
-        info_text1_rect = info_text1.get_rect().move(info_text_x, info_text_y)
-        info_text2_rect = info_text2.get_rect().move(
-            info_text_x, info_text_y + info_text1_rect.height
-        )
-        info_text3_rect = info_text3.get_rect().move(
-            info_text_x, info_text_y + 2 * info_text1_rect.height
-        )
-        info_text4_rect = info_text4.get_rect().move(
-            info_text_x, info_text_y + 3 * info_text1_rect.height
-        )
-        info_text5_rect = info_text5.get_rect().move(
-            info_text_x, info_text_y + 4 * info_text1_rect.height
-        )
-        info_text6_rect = info_text6.get_rect().move(
-            info_text_x, info_text_y + 5 * info_text1_rect.height
-        )
-        info_text7_rect = info_text7.get_rect().move(
-            info_text_x, info_text_y + 6 * info_text1_rect.height
-        )
-        info_text8_rect = info_text8.get_rect().move(
-            info_text_x, info_text_y + 7 * info_text1_rect.height
-        )
-        info_text9_rect = info_text9.get_rect().move(
-            info_text_x, info_text_y + 8 * info_text1_rect.height
-        )
-        info_text10_rect = info_text10.get_rect().move(
-            info_text_x, info_text_y + 9 * info_text1_rect.height
-        )
-
-        game_display.blit(info_text1, info_text1_rect)
-        game_display.blit(info_text2, info_text2_rect)
-        game_display.blit(info_text3, info_text3_rect)
-        game_display.blit(info_text4, info_text4_rect)
-        game_display.blit(info_text5, info_text5_rect)
-        game_display.blit(info_text6, info_text6_rect)
-        game_display.blit(info_text7, info_text7_rect)
-        game_display.blit(info_text8, info_text8_rect)
-        game_display.blit(info_text9, info_text9_rect)
-        game_display.blit(info_text10, info_text10_rect)
+        rows = [
+            ("GEN",      str(session.generation),          INK),
+            ("CARS",     str(session.population_size),     INK),
+            ("ALIVE",    str(session.alive_count),         F1_GREEN),
+            ("FITNESS",  fitness_strategy.name,            INK),
+            ("NEXT GEN", f"{remaining_seconds:.3f}s",      YELLOW),
+        ]
+        panel_w = 220
+        panel_h = len(rows) * 22 + 16
+        panel_x, panel_y = 16, H - panel_h - 16
+        panel_rect = pygame.Rect(panel_x, panel_y, panel_w, panel_h)
+        pygame.draw.rect(game_display, CARBON, panel_rect)
+        pygame.draw.rect(game_display, LINE, panel_rect, 1)
+        pygame.draw.rect(game_display, CYAN, pygame.Rect(panel_x, panel_y, 3, panel_h))
+        for i, (label, value, val_color) in enumerate(rows):
+            y = panel_y + 8 + i * 22
+            lbl_surf = _mono.render(label, True, DIM)
+            game_display.blit(lbl_surf, (panel_x + 8, y))
+            val_surf = _mono.render(value, True, val_color)
+            game_display.blit(val_surf, val_surf.get_rect(right=panel_x + panel_w - 8, y=y))
 
     def breed_selected():
         nonlocal nn_cars
@@ -381,38 +370,40 @@ def run_training_loop(
         apply_track_spawn(reset_player=True, reset_images=True)
         restart_generation_timer()
 
+    _leader_colors = (F1_RED, CYAN)
+    _leader_labels = ("P1", "P2")
+
     def draw_fitness_leaders(target):
         if not nn_cars:
             return
 
-        leader_colors = ((255, 215, 0), (80, 200, 255))
         leaders = select_best_cars(
             nn_cars,
             count=min(2, len(nn_cars)),
         )
-        for rank, (leader, color) in enumerate(
-            zip(leaders, leader_colors, strict=False),
-            start=1,
-        ):
+        # 反轉繪製順序讓 P1 蓋在最上層
+        for rank_idx, (leader, color, p_label) in reversed(list(enumerate(
+            zip(leaders, _leader_colors, _leader_labels, strict=False)
+        ))):
             center = (round(leader.x), round(leader.y))
             radius = round(max(leader.width, leader.height) / 2) + 10
-            pygame.draw.circle(target, color, center, radius, width=4)
+            pygame.draw.circle(target, color, center, radius, width=3)
 
-            label = font.render(
-                f"TOP {rank}  Fitness: {leader.fitness_score:.1f}",
-                True,
-                color,
-            )
-            label_rect = label.get_rect(
-                midbottom=(center[0], center[1] - radius - 5)
-            )
-            pygame.draw.rect(
-                target,
-                (0, 0, 0),
-                label_rect.inflate(8, 4),
-                border_radius=4,
-            )
-            target.blit(label, label_rect)
+            label_text = f"{p_label}  {leader.fitness_score:.1f}"
+            label = _badge_font.render(label_text, True, INK)
+            badge_w = label.get_width() + 16
+            badge_h = label.get_height() + 6
+            badge_rect = pygame.Rect(center[0] - badge_w // 2, center[1] - radius - badge_h - 6, badge_w, badge_h)
+            badge_pts = [
+                (badge_rect.left + 6, badge_rect.top),
+                (badge_rect.right, badge_rect.top),
+                (badge_rect.right, badge_rect.bottom - 6),
+                (badge_rect.right - 6, badge_rect.bottom),
+                (badge_rect.left, badge_rect.bottom),
+                (badge_rect.left, badge_rect.top + 6),
+            ]
+            pygame.draw.polygon(target, color, badge_pts)
+            target.blit(label, label.get_rect(center=badge_rect.center))
 
     def submit_best_car():
         nonlocal submit_status
@@ -456,10 +447,8 @@ def run_training_loop(
 
         draw_fitness_leaders(map_canvas)
 
-        shell.current_scene.render_overlay(map_canvas, font)
-
         # Scale the game canvas to the physical window, then draw UI on top.
-        game_display.fill((0, 0, 0))
+        game_display.fill(BG)
         game_display.blit(
             pygame.transform.scale(map_canvas, (_map_dst_w, _map_dst_h)),
             (_map_dst_x, _map_dst_y),
@@ -467,9 +456,26 @@ def run_training_loop(
         if session.show_debug_overlay:
             display_texts()
 
+        # --- 頂部狀態條 ---
+        bar_h = 36
+        pygame.draw.rect(game_display, (8, 9, 12, 210), pygame.Rect(0, 0, W, bar_h))
+        pygame.draw.line(game_display, LINE, (0, bar_h), (W, bar_h))
+        training_surf = _bar_head.render("TRAINING", True, F1_RED)
+        game_display.blit(training_surf, training_surf.get_rect(midleft=(12, bar_h // 2)))
+        player_surf = _bar_mono.render(f"{profile.username}  Group {profile.group_id}", True, DIM)
+        game_display.blit(player_surf, player_surf.get_rect(midleft=(training_surf.get_width() + 24, bar_h // 2)))
+        remaining_seconds = max(0.0, session.generation_duration_seconds - generation_elapsed_seconds())
+        next_gen_label = _bar_mono.render("NEXT GEN", True, DIM)
+        next_gen_val = _next_gen_mono.render(f"{remaining_seconds:.3f}s", True, YELLOW)
+        _ng_right = back_button.rect.left - 12
+        game_display.blit(next_gen_val, next_gen_val.get_rect(midright=(_ng_right, bar_h // 2)))
+        game_display.blit(next_gen_label, next_gen_label.get_rect(midright=(_ng_right - next_gen_val.get_width() - 8, bar_h // 2)))
+
+        # --- 右上按鈕 ---
         mouse_pos = pygame.mouse.get_pos()
         back_button.update_hover(mouse_pos)
         back_button.draw(game_display, font)
+        next_gen_button.fill_color = F1_RED
         next_gen_button.update_hover(mouse_pos)
         next_gen_button.draw(game_display, font)
         restart_button.update_hover(mouse_pos)
@@ -477,19 +483,35 @@ def run_training_loop(
         if new_map_button is not None:
             new_map_button.update_hover(mouse_pos)
             new_map_button.draw(game_display, font)
-        seed_text = font.render(
-            f"NN Seed: {session.evolution_seed}",
-            True,
-            WHITE,
-        )
-        game_display.blit(
-            seed_text,
-            seed_text.get_rect(topright=(W - 20, restart_button.rect.bottom + 12)),
-        )
-        game_display.blit(
-            speed_text,
-            speed_text.get_rect(topright=(W - 20, restart_button.rect.bottom + 34)),
-        )
+
+        # --- NN Seed / Max Speed ---
+        info_font = _info_font
+        seed_lbl = info_font.render("NN SEED", True, DIM)
+        seed_val = info_font.render(str(session.evolution_seed), True, CYAN)
+        spd_lbl = info_font.render("MAX SPD", True, DIM)
+        spd_val = info_font.render(str(settings.max_speed), True, CYAN)
+        seed_y = restart_button.rect.bottom + 12
+        game_display.blit(seed_lbl, seed_lbl.get_rect(right=W - 20, y=seed_y))
+        game_display.blit(seed_val, seed_val.get_rect(right=W - 20, y=seed_y + seed_lbl.get_height()))
+        game_display.blit(spd_lbl, spd_lbl.get_rect(right=W - 20, y=seed_y + seed_lbl.get_height() * 2 + 4))
+        game_display.blit(spd_val, spd_val.get_rect(right=W - 20, y=seed_y + seed_lbl.get_height() * 3 + 4))
+
+        # --- 計時塔（左上，依 draw_fitness_leaders 的 leader 列出 P1/P2 fitness）---
+        if nn_cars:
+            tower_leaders = select_best_cars(nn_cars, count=min(2, len(nn_cars)))
+            tower_x, tower_y = 16, bar_h + 8
+            tower_w = 180
+            tower_colors = (F1_RED, CYAN)
+            tower_labels = ("P1", "P2")
+            for ti, (ldr, tc, tl) in enumerate(zip(tower_leaders, tower_colors, tower_labels, strict=False)):
+                row_rect = pygame.Rect(tower_x, tower_y + ti * 30, tower_w, 26)
+                pygame.draw.rect(game_display, CARBON, row_rect)
+                pygame.draw.rect(game_display, LINE, row_rect, 1)
+                pygame.draw.rect(game_display, tc, pygame.Rect(row_rect.x, row_rect.y, 3, row_rect.height))
+                p_surf = _tower_head.render(tl, True, tc)
+                game_display.blit(p_surf, p_surf.get_rect(midleft=(row_rect.x + 8, row_rect.centery)))
+                fit_surf = _tower_font.render(f"{ldr.fitness_score:.1f}", True, INK)
+                game_display.blit(fit_surf, fit_surf.get_rect(midright=(row_rect.right - 8, row_rect.centery)))
 
         pygame.display.update()
 
@@ -509,7 +531,7 @@ def run_training_loop(
         apply_track_spawn(reset_player=True)
         restart_generation_timer()
 
-    def save_training_record():
+    def save_training_record(record_name: str) -> None:
         top2 = select_best_cars(nn_cars, count=2)
         parent_a = top2[0]
         parent_b = top2[1] if len(top2) >= 2 else top2[0]
@@ -524,7 +546,6 @@ def run_training_loop(
         mlp_init_rng_state, mutation_rng_state = (
             session.snapshot_evolution_rngs()
         )
-        record_name = run_record_name_screen(screen)
         record = TrainingRecord(
             record_id="",
             record_name=record_name,
@@ -564,6 +585,9 @@ def run_training_loop(
             if event.type == pygame.QUIT:
                 persist_settings()
                 raise AppQuit()
+
+            if event.type == pygame.VIDEORESIZE:
+                recalculate_layout()
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_u:
                 submit_best_car()
@@ -605,15 +629,23 @@ def run_training_loop(
 
         if leave_requested:
             persist_settings()
-            save_record, save_as_preset = run_save_confirm_screen(screen)
-            if save_record:
-                save_training_record()
-            if save_as_preset:
-                preset_name = run_record_name_screen(
-                    screen, title="幫這組 Fitness 參數命名"
-                )
-                FitnessPresetStore().save_preset(preset_name, fitness_config)
-            return
+            while True:  # loop so cancelling naming returns to save confirm
+                confirm_result = run_save_confirm_screen(screen)
+                if confirm_result is None:
+                    break  # user pressed 取消 → stay in training
+                save_record, save_as_preset = confirm_result
+                if save_record:
+                    record_name = run_record_name_screen(screen)
+                    if record_name is None:
+                        continue  # go back to save confirm
+                    save_training_record(record_name)
+                if save_as_preset:
+                    preset_name = run_record_name_screen(
+                        screen, title="幫這組 Fitness 參數命名"
+                    )
+                    if preset_name is not None:
+                        FitnessPresetStore().save_preset(preset_name, fitness_config)
+                return
 
         redraw_game_window()
         if session.should_end_generation(generation_elapsed_seconds()):

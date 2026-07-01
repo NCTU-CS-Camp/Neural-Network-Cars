@@ -5,11 +5,38 @@ from dataclasses import dataclass
 import pygame
 
 
+# --- F1 Broadcast palette ---
+BG       = (10, 11, 14)
+CARBON   = (20, 22, 28)
+CARBON2  = (27, 30, 38)
+FIELD    = (12, 14, 18)
+LINE     = (42, 46, 57)
+INK      = (238, 241, 246)
+DIM      = (138, 146, 163)
+RED      = (255, 43, 33)
+CYAN     = (24, 223, 230)
+YELLOW   = (255, 214, 10)
+GREEN    = (58, 224, 110)
+SELECT_BG = (28, 17, 20)
+
+CHAMFER = 10
+
+
+def _chamfer_points(rect: pygame.Rect, cut: int) -> list[tuple[int, int]]:
+    """左上 + 右下切角的多邊形頂點，做出 F1 稜角感。"""
+    x, y, r, b = rect.left, rect.top, rect.right, rect.bottom
+    c = min(cut, rect.width // 2, rect.height // 2)
+    return [
+        (x + c, y), (r, y), (r, b - c),
+        (r - c, b), (x, b), (x, y + c),
+    ]
+
+
 @dataclass(slots=True)
 class Label:
     text: str
     position: tuple[int, int]
-    color: tuple[int, int, int] = (255, 255, 255)
+    color: tuple[int, int, int] = INK
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
         rendered = font.render(self.text, True, self.color)
@@ -20,11 +47,11 @@ class Label:
 class Button:
     text: str
     rect: pygame.Rect
-    fill_color: tuple[int, int, int] = (30, 30, 30)
-    hover_color: tuple[int, int, int] = (55, 55, 55)
-    text_color: tuple[int, int, int] = (255, 255, 255)
-    border_color: tuple[int, int, int] = (90, 90, 90)
-    shadow_color: tuple[int, int, int] = (12, 12, 12)
+    fill_color: tuple[int, int, int] = CARBON       # CTA 請設 RED
+    hover_color: tuple[int, int, int] = CARBON2
+    text_color: tuple[int, int, int] = INK
+    border_color: tuple[int, int, int] = LINE
+    shadow_color: tuple[int, int, int] = (0, 0, 0)
     press_offset: int = 3
     hovered: bool = False
 
@@ -35,18 +62,19 @@ class Button:
             face_rect.y += self.press_offset
 
         fill = self.hover_color if self.hovered else self.fill_color
-        pygame.draw.rect(surface, self.shadow_color, self.rect, border_radius=4)
-        pygame.draw.rect(surface, fill, face_rect, border_radius=4)
-        pygame.draw.rect(
-            surface,
-            self.border_color,
-            face_rect,
-            2,
-            border_radius=4,
+        pygame.draw.polygon(
+            surface, self.shadow_color,
+            _chamfer_points(face_rect.move(0, self.press_offset), CHAMFER),
         )
+        pygame.draw.polygon(surface, fill, _chamfer_points(face_rect, CHAMFER))
+        # 深色一般鈕畫 1px 框；實心彩色 CTA 不畫框
+        if fill in (CARBON, CARBON2):
+            pygame.draw.lines(
+                surface, self.border_color, True,
+                _chamfer_points(face_rect, CHAMFER), 1,
+            )
         rendered = font.render(self.text, True, self.text_color)
-        text_rect = rendered.get_rect(center=face_rect.center)
-        surface.blit(rendered, text_rect)
+        surface.blit(rendered, rendered.get_rect(center=face_rect.center))
 
     def contains(self, position: tuple[int, int]) -> bool:
         return self.rect.collidepoint(position)
@@ -60,10 +88,10 @@ class Checkbox:
     rect: pygame.Rect
     label: str = ""
     checked: bool = False
-    box_color: tuple[int, int, int] = (30, 30, 30)
-    border_color: tuple[int, int, int] = (90, 90, 90)
-    check_color: tuple[int, int, int] = (120, 220, 120)
-    text_color: tuple[int, int, int] = (255, 255, 255)
+    box_color: tuple[int, int, int] = FIELD
+    border_color: tuple[int, int, int] = LINE
+    check_color: tuple[int, int, int] = CYAN
+    text_color: tuple[int, int, int] = INK
 
     def contains(self, position: tuple[int, int]) -> bool:
         return self.rect.collidepoint(position)
@@ -79,11 +107,12 @@ class Checkbox:
         return False
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
-        pygame.draw.rect(surface, self.box_color, self.rect, border_radius=4)
-        pygame.draw.rect(surface, self.border_color, self.rect, 2, border_radius=4)
+        pygame.draw.rect(surface, self.box_color, self.rect)
+        border = self.check_color if self.checked else self.border_color
+        pygame.draw.rect(surface, border, self.rect, 1)
         if self.checked:
             inset = self.rect.inflate(-self.rect.width // 3, -self.rect.height // 3)
-            pygame.draw.rect(surface, self.check_color, inset, border_radius=2)
+            pygame.draw.rect(surface, self.check_color, inset)
         if self.label:
             label_surface = font.render(self.label, True, self.text_color)
             surface.blit(
@@ -101,10 +130,10 @@ class Dropdown:
     placeholder: str = "Select"
     selected: str | None = None
     is_open: bool = False
-    fill_color: tuple[int, int, int] = (30, 30, 30)
-    hover_color: tuple[int, int, int] = (55, 55, 55)
-    text_color: tuple[int, int, int] = (255, 255, 255)
-    border_color: tuple[int, int, int] = (90, 90, 90)
+    fill_color: tuple[int, int, int] = CARBON
+    hover_color: tuple[int, int, int] = CARBON2
+    text_color: tuple[int, int, int] = INK
+    border_color: tuple[int, int, int] = LINE
 
     def _option_rect(self, index: int) -> pygame.Rect:
         return pygame.Rect(
@@ -152,7 +181,7 @@ class Dropdown:
             self.hover_color if self.rect.collidepoint(mouse_pos) else self.fill_color
         )
         pygame.draw.rect(surface, fill, self.rect)
-        pygame.draw.rect(surface, self.border_color, self.rect, 2)
+        pygame.draw.rect(surface, self.border_color, self.rect, 1)
 
         text = self.selected or self.placeholder
         rendered = font.render(text, True, self.text_color)
@@ -175,7 +204,7 @@ class Dropdown:
                 (arrow_x, arrow_y - 4),
             )
         )
-        pygame.draw.polygon(surface, self.text_color, arrow_points)
+        pygame.draw.polygon(surface, CYAN, arrow_points)
 
         if not self.is_open:
             return
@@ -205,11 +234,11 @@ class TextInput:
     active: bool = False
     composing: str = ""
     max_length: int = 24
-    fill_color: tuple[int, int, int] = (30, 30, 30)
-    text_color: tuple[int, int, int] = (255, 255, 255)
-    border_color: tuple[int, int, int] = (90, 90, 90)
-    active_border_color: tuple[int, int, int] = (120, 170, 255)
-    composing_color: tuple[int, int, int] = (255, 220, 0)
+    fill_color: tuple[int, int, int] = FIELD
+    text_color: tuple[int, int, int] = INK
+    border_color: tuple[int, int, int] = LINE
+    active_border_color: tuple[int, int, int] = CYAN
+    composing_color: tuple[int, int, int] = CYAN
     allowed_characters: str | None = None
     clear_on_focus: bool = False
 
@@ -258,19 +287,33 @@ class TextInput:
                 self.text += entered_text[:available]
             return True
 
-        if event.type == pygame.KEYDOWN and event.key == pygame.K_BACKSPACE:
-            if self.composing:
-                self.composing = ""
-            else:
-                self.text = self.text[:-1]
-            return True
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_BACKSPACE:
+                if self.composing:
+                    self.composing = ""
+                else:
+                    self.text = self.text[:-1]
+                return True
+            if event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL):
+                try:
+                    raw = pygame.scrap.get(pygame.SCRAP_TEXT)
+                    if raw:
+                        pasted = raw.decode("utf-8", errors="ignore").replace("\x00", "").replace("\r", "")
+                        if self.allowed_characters is not None:
+                            pasted = "".join(c for c in pasted if c in self.allowed_characters)
+                        available = self.max_length - len(self.text)
+                        if available > 0:
+                            self.text += pasted[:available]
+                except Exception:
+                    pass
+                return True
 
         return False
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
         pygame.draw.rect(surface, self.fill_color, self.rect)
         border = self.active_border_color if self.active else self.border_color
-        pygame.draw.rect(surface, border, self.rect, 2)
+        pygame.draw.rect(surface, border, self.rect, 1)
 
         committed_surf = font.render(self.text, True, self.text_color)
         committed_rect = committed_surf.get_rect(midleft=(self.rect.x + 8, self.rect.centery))
@@ -291,9 +334,9 @@ class ProgressBar:
     rect: pygame.Rect
     value: float = 0.0
     max_value: float = 1.0
-    track_color: tuple[int, int, int] = (40, 40, 40)
-    fill_color: tuple[int, int, int] = (90, 170, 255)
-    border_color: tuple[int, int, int] = (90, 90, 90)
+    track_color: tuple[int, int, int] = FIELD
+    fill_color: tuple[int, int, int] = CYAN
+    border_color: tuple[int, int, int] = LINE
 
     def ratio(self) -> float:
         if self.max_value <= 0:
@@ -301,12 +344,12 @@ class ProgressBar:
         return max(0.0, min(1.0, self.value / self.max_value))
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
-        pygame.draw.rect(surface, self.track_color, self.rect, border_radius=6)
+        pygame.draw.rect(surface, self.track_color, self.rect)
         fill_width = int(self.rect.width * self.ratio())
         if fill_width > 0:
             fill_rect = pygame.Rect(self.rect.x, self.rect.y, fill_width, self.rect.height)
-            pygame.draw.rect(surface, self.fill_color, fill_rect, border_radius=6)
-        pygame.draw.rect(surface, self.border_color, self.rect, 2, border_radius=6)
+            pygame.draw.rect(surface, self.fill_color, fill_rect)
+        pygame.draw.rect(surface, self.border_color, self.rect, 1)
         del font
 
 
@@ -318,9 +361,9 @@ class VerticalScrollbar:
     offset: int = 0
     dragging: bool = False
     drag_grab_offset: int = 0
-    track_color: tuple[int, int, int] = (30, 30, 30)
-    thumb_color: tuple[int, int, int] = (100, 100, 100)
-    hover_thumb_color: tuple[int, int, int] = (140, 140, 140)
+    track_color: tuple[int, int, int] = CARBON
+    thumb_color: tuple[int, int, int] = (74, 80, 94)
+    hover_thumb_color: tuple[int, int, int] = CYAN
 
     def max_offset(self) -> int:
         return max(0, self.total_items - self.visible_items)
@@ -377,7 +420,7 @@ class VerticalScrollbar:
         del font
         if not self.is_needed():
             return
-        pygame.draw.rect(surface, self.track_color, self.rect, border_radius=4)
+        pygame.draw.rect(surface, self.track_color, self.rect)
         thumb_rect = self._thumb_rect()
         mouse_pos = pygame.mouse.get_pos()
         color = (
@@ -385,7 +428,7 @@ class VerticalScrollbar:
             if self.dragging or thumb_rect.collidepoint(mouse_pos)
             else self.thumb_color
         )
-        pygame.draw.rect(surface, color, thumb_rect, border_radius=4)
+        pygame.draw.rect(surface, color, thumb_rect)
 
 
 @dataclass(slots=True)
@@ -395,8 +438,8 @@ class Slider:
     max_value: int = 100
     value: int = 0
     dragging: bool = False
-    track_color: tuple[int, int, int] = (90, 90, 90)
-    handle_color: tuple[int, int, int] = (200, 200, 200)
+    track_color: tuple[int, int, int] = LINE
+    handle_color: tuple[int, int, int] = CYAN   # 懲罰滑桿在呼叫端設 handle_color=RED
     handle_radius: int | None = None
     show_value: bool = True
 
@@ -436,14 +479,23 @@ class Slider:
         return False
 
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
-        pygame.draw.rect(surface, self.track_color, self.rect, border_radius=4)
+        # 遙測軌道：暗底 + 細框
+        pygame.draw.rect(surface, FIELD, self.rect)
+        pygame.draw.rect(surface, self.track_color, self.rect, 1)
         handle_x = self._value_to_x()
-        pygame.draw.circle(
-            surface,
-            self.handle_color,
-            (handle_x, self.rect.centery),
-            self._handle_radius(),
-        )
+        # 已填滿：主色
+        filled = pygame.Rect(self.rect.x, self.rect.y, max(0, handle_x - self.rect.x), self.rect.height)
+        if filled.width > 0:
+            pygame.draw.rect(surface, self.handle_color, filled)
+        # 把手：雪佛龍/菱形
+        cy = self.rect.centery
+        h = self._handle_radius()
+        chevron = [
+            (handle_x - 5, cy - h), (handle_x + 5, cy - h),
+            (handle_x + 5, cy + h - 4), (handle_x, cy + h),
+            (handle_x - 5, cy + h - 4),
+        ]
+        pygame.draw.polygon(surface, self.handle_color, chevron)
         if self.show_value:
-            rendered = font.render(str(self.value), True, (255, 255, 255))
+            rendered = font.render(str(self.value), True, INK)
             surface.blit(rendered, (self.rect.right + 12, self.rect.y))

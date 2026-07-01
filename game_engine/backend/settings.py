@@ -11,6 +11,11 @@ OFFICIAL_TRACKS_DIR = IMAGES_DIR / "OfficialTracks"
 
 FONT_PATH = PROJECT_ROOT / "fonts" / "GenSenRounded-R.ttc"
 
+FONTS_DIR = PROJECT_ROOT / "fonts"
+HEAD_FONT_PATH = FONTS_DIR / "ChakraPetch-Bold.ttf"
+BODY_FONT_PATH = FONTS_DIR / "Rajdhani-SemiBold.ttf"
+MONO_FONT_PATH = FONTS_DIR / "SpaceMono-Bold.ttf"
+
 MAPS_DIR = PROJECT_ROOT / "maps"
 TRAIN_MAPS_DIR = MAPS_DIR / "train_maps"
 VALID_MAPS_DIR = MAPS_DIR / "valid_maps"
@@ -37,6 +42,20 @@ GREEN = (0, 255, 0)
 BLUE = (0, 0, 128)
 BLACK = (0, 0, 0)
 COLOR_LINE = (255, 0, 0)
+
+# --- F1 Broadcast palette ---
+BG       = (10, 11, 14)      # 深黑底
+CARBON   = (20, 22, 28)      # 面板 / 一般按鈕
+CARBON2  = (27, 30, 38)      # hover / 次層
+FIELD    = (12, 14, 18)      # 輸入框底
+LINE     = (42, 46, 57)      # 邊框線
+INK      = (238, 241, 246)   # 主要文字
+DIM      = (138, 146, 163)   # 次要文字
+F1_RED   = (255, 43, 33)     # 主色 / CTA / 懲罰 / 選取高亮
+CYAN     = (24, 223, 230)    # 資料 / 獎勵 / 焦點
+YELLOW   = (255, 214, 10)    # 訊號
+F1_GREEN = (58, 224, 110)    # 正向數值
+SELECT_BG = (28, 17, 20)     # 被選中列底（帶紅調）
 
 INPUT_LAYER = 6
 HIDDEN_LAYER = 6

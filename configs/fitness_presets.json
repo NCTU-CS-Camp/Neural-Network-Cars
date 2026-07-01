@@ -1,4 +1,23 @@
 {
   "schema_version": 1,
-  "presets": []
+  "presets": [
+    {
+      "preset_id": "preset_de16d62c",
+      "preset_name": "j3ij",
+      "fitness_config": {
+        "weights": {
+          "speed": 25,
+          "progress": 10,
+          "centered": 35,
+          "alignment": 40,
+          "safety": 25,
+          "stall": 20,
+          "spin": 15,
+          "wrong_way": 40,
+          "time": 5,
+          "crash": 50
+        }
+      }
+    }
+  ]
 }
