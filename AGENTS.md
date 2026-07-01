@@ -16,6 +16,7 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 - Final is group-based and locks one accepted model per `group_id`.
 - Public browser leaderboard is served at `/leaderboard`.
 - Admin page is served at `/admin`.
+- Admin UI initially shows only the token form; protected content is revealed after `GET /v2/admin/state` succeeds.
 - Protected replay payload is served by `GET /v2/admin/replay`.
 - Pygame big-screen replay is launched with `uv run python replay.py`.
 - Manual training/submission test client is launched with `uv run python competition_main.py`.
@@ -86,8 +87,10 @@ Protected admin/replay, all requiring `X-Admin-Token`:
 
 ```text
 GET  /v2/admin/submissions
+GET  /v2/admin/state
 GET  /v2/admin/replay
 POST /v2/admin/stage
+POST /v2/admin/config
 POST /v2/admin/batches/run-now
 POST /v2/admin/replay/restart
 POST /v2/admin/reset-all
@@ -123,8 +126,12 @@ Known batching gaps:
 - Local scoring and Pygame replay use sequential boundary checkpoint crossing to detect first-lap completion.
 - A replay car stops updating after first lap completion, collision, or stagnation.
 - Finished replay cars stay visible, dimmed, and labeled `FINISHED` with finish time.
-- Once all replay cars are finished/crashed/stalled, the replay holds for 3 seconds and then restarts the same payload until a new replay generation or snapshot is fetched.
+- The Pygame replay client fetches the protected replay payload every 5 seconds and compares stage, replay generation, and leaderboard signatures to detect new data without changing API shape.
+- New snapshots and admin stage changes are adopted only at a safe replay boundary, after the current replay cycle finishes.
+- The first replay cycle for a newly seen leaderboard hides that competition's leaderboard, then reveals it after the corresponding Easy/Hard/Final session stops; later cycles for the same snapshot show the leaderboard normally.
+- Once all replay cars are finished/crashed/stalled, the replay holds for 3 seconds and then either adopts pending replay data or restarts the current payload.
 - Browser leaderboard displays a live countdown to the next Phase 1 snapshot and last update time.
+- Replay header uses large status/timing text for projection. `COMPETITION_REPLAY_FONT_PATH` can force a CJK-capable font if the OS fallback is insufficient.
 - The server still trusts submitted `client_result`; replay completion never overwrites ranking metrics.
 
 ## Server Ownership Rules
@@ -136,6 +143,7 @@ Known batching gaps:
 - Publish update events after stage changes, Final acceptance, reset, replay restart, and completed batch work.
 - Reset should clear submissions, batches, snapshots, cooldown history, and replay data while preserving current stage/configuration.
 - Do not make server-side GA decisions. The submitted winner model and `client_result` are authoritative.
+- Keep admin UI state and controls behind token validation; public `/v2/state` remains available for public leaderboard/replay countdown behavior.
 
 ## Server-Facing Integration Boundaries
 
@@ -171,6 +179,18 @@ uv run python replay.py
 uv run pytest
 uv run ruff check .
 uv run mypy game_engine GA server shared
+```
+
+For classroom LAN deployment, bind FastAPI to all interfaces:
+
+```bash
+uv run uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
+
+If replay cannot render CJK status text on a lab machine, provide an installed font path:
+
+```bash
+COMPETITION_REPLAY_FONT_PATH=/path/to/NotoSansCJK-Regular.ttc uv run python replay.py
 ```
 
 Useful local URLs:

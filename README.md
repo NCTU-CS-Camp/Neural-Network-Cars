@@ -103,6 +103,12 @@ uv run python server/app.py
 
 此指令會在 `http://127.0.0.1:8000` 啟動本地 server。排行榜頁面位於 `http://127.0.0.1:8000/leaderboard`，助教管理頁面位於 `http://127.0.0.1:8000/admin`。預設 admin token 是 `admin`，正式活動可用 `COMPETITION_ADMIN_TOKEN` 環境變數覆蓋。
 
+若要讓同 subnet 的學生電腦連進來，請改用：
+
+```bash
+uv run uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
+
 ### 產生 mock submissions
 
 ```bash
@@ -142,7 +148,7 @@ export COMPETITION_SERVER_URL=http://127.0.0.1:8000
 
 ### 1. Admin：設定賽程與建立 snapshot
 
-開啟 `http://127.0.0.1:8000/admin`，輸入 admin token。開發環境預設為 `admin`。
+開啟 `http://127.0.0.1:8000/admin`，輸入 admin token。開發環境預設為 `admin`。後台內容會在 token 驗證成功後才顯示。
 
 1. 將 stage 設為 `phase_one`，開放個人 Easy 與 Hard submission。
 2. 將 stage 設為 `final`，關閉 Easy/Hard，開放每個 `group_id` 一筆 Final submission。
@@ -191,6 +197,14 @@ uv run python replay.py
 ```
 
 Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛。Phase 1 同時呈現 Easy 與 Hard 各自的排行榜 Top 15；Final 會自動改為單一賽道與 group leaderboard。每一輪動畫結束才重新抓取資料，因此 snapshot 更新不會中斷正在播放的車輛。車輛完成第一圈會標為 `FINISHED` 並停止，連續 180 ticks 未離開最後有效位置 24px 時會標為 `STALLED` 並停止；所有車輛完成、撞毀或停滯後，replay 會暫停 3 秒再抓取目前 replay payload，若沒有新 snapshot 則重播同一批資料。Replay header 會顯示目前狀態、本輪 elapsed time、下一輪 replay 倒數與下一次 snapshot 倒數。
+
+Replay 目前採 safe-reveal 流程：新 snapshot 或 stage change 抵達時不會中斷目前畫面，而是在本輪 replay 結束後才採用。第一次播放新 leaderboard 時會先隱藏排行榜，等該 Easy/Hard/Final session 結束後再揭示；同一批 snapshot 的後續 replay 會直接顯示排行榜。
+
+若教室電腦的 Pygame 無法正確顯示中文狀態文字，可以指定 CJK 字型：
+
+```bash
+COMPETITION_REPLAY_FONT_PATH=/path/to/NotoSansCJK-Regular.ttc uv run python replay.py
+```
 
 ## 開發指令
 
