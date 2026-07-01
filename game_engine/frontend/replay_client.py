@@ -687,7 +687,7 @@ def _draw_final(
         screen,
         session,
         pygame.Rect(24, 136, 1032, 540),
-        "FINAL HARD MAP",
+        "FINAL",
         FINAL_ACCENT,
         fonts,
     )
@@ -771,7 +771,7 @@ def _draw_map_panel(
     border_color = accent if panel_status == "RUNNING" else BORDER
     border_width = 3 if panel_status == "RUNNING" else 1
     pygame.draw.rect(screen, border_color, rect, border_width)
-    pygame.draw.rect(screen, BACKGROUND, (rect.x, rect.y, 134, 30))
+    pygame.draw.rect(screen, BACKGROUND, (rect.x, rect.y, 70, 30))
     pygame.draw.rect(screen, accent, (rect.x, rect.y, 4, 30))
     screen.blit(fonts["panel"].render(title, True, TEXT), (rect.x + 12, rect.y + 6))
     _draw_panel_badge(screen, rect, panel_status, accent, fonts)
