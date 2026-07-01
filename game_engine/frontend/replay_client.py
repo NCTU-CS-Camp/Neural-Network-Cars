@@ -448,9 +448,8 @@ def _waiting_status_text(state: dict[str, Any]) -> ReplayStatus:
 
 
 def _snapshot_countdown_text(state: dict[str, Any]) -> str:
-    if state.get("stage") == "final":
-        return "-"
-    target = state.get("config", {}).get("next_phase_one_batch_at")
+    config = state.get("config", {})
+    target = config.get("next_snapshot_at") or config.get("next_phase_one_batch_at")
     if not target:
         return "-"
     try:

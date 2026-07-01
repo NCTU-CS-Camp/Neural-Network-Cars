@@ -79,7 +79,7 @@ def test_batch_worker_retries_after_transient_failure(caplog):
     class FlakyStorage:
         calls = 0
 
-        def seal_phase_one_batches(self, *, now=None, force=False):
+        def seal_due_batches(self, *, now=None, force=False):
             self.calls += 1
             if self.calls == 1:
                 raise RuntimeError("temporary database failure")
@@ -96,7 +96,7 @@ def test_batch_worker_retries_after_transient_failure(caplog):
         worker.stop()
 
     assert storage.calls >= 2
-    assert "retrying after poll interval" in caplog.text
+    assert "Snapshot batch processing failed; retrying after poll interval" in caplog.text
 
 
 def test_phase_one_submission_is_queued_and_cooldown_is_per_competition(tmp_path):
@@ -137,6 +137,11 @@ def test_default_phase_one_interval_is_one_minute_and_admin_can_update(tmp_path)
             headers={"X-Admin-Token": "secret"},
             json={"phase_one_batch_minutes": 2},
         )
+        renamed = client.post(
+            "/v2/admin/config",
+            headers={"X-Admin-Token": "secret"},
+            json={"snapshot_interval_minutes": 5},
+        )
         invalid = client.post(
             "/v2/admin/config",
             headers={"X-Admin-Token": "secret"},
@@ -144,10 +149,17 @@ def test_default_phase_one_interval_is_one_minute_and_admin_can_update(tmp_path)
         )
 
     assert initial["config"]["phase_one_batch_minutes"] == 1
+    assert initial["config"]["snapshot_interval_minutes"] == 1
     assert initial["config"]["next_phase_one_batch_at"].endswith("10:02:00+00:00")
+    assert initial["config"]["next_snapshot_at"].endswith("10:02:00+00:00")
     assert updated.status_code == 200
     assert updated.json()["config"]["phase_one_batch_minutes"] == 2
+    assert updated.json()["config"]["snapshot_interval_minutes"] == 2
     assert updated.json()["config"]["next_phase_one_batch_at"].endswith("10:02:00+00:00")
+    assert updated.json()["config"]["next_snapshot_at"].endswith("10:02:00+00:00")
+    assert renamed.status_code == 200
+    assert renamed.json()["config"]["snapshot_interval_minutes"] == 5
+    assert renamed.json()["config"]["next_snapshot_at"].endswith("10:05:00+00:00")
     assert invalid.status_code == 400
     assert "phase_one_batch_minutes" in invalid.json()["detail"]
 
@@ -177,7 +189,8 @@ def test_admin_page_gates_content_behind_session_token(tmp_path):
     assert '/v2/admin/state' in html
     assert '/v2/state' not in html
     assert 'sessionStorage' in html
-    assert 'next phase 1 snapshot' not in html
+    assert 'Phase 1 Timing' not in html
+    assert 'Snapshot Timing' in html
     assert 'id="admin-content" class="hidden"' in html
 
 
@@ -275,7 +288,7 @@ def test_ranking_prefers_completion_then_lap_ticks_then_progress_then_time(tmp_p
     ]
 
 
-def test_final_stage_gates_submissions_and_locks_one_model_per_group(tmp_path):
+def test_final_stage_queues_submissions_and_uses_group_cooldown(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
         closed = client.post("/v2/finals/submissions", json=make_payload(group_id="1", username="ada"))
@@ -288,7 +301,7 @@ def test_final_stage_gates_submissions_and_locks_one_model_per_group(tmp_path):
             "/v2/finals/submissions",
             json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=520),
         )
-        duplicate = client.post(
+        cooldown = client.post(
             "/v2/finals/submissions",
             json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
         )
@@ -296,16 +309,34 @@ def test_final_stage_gates_submissions_and_locks_one_model_per_group(tmp_path):
             "/v2/finals/submissions",
             json=make_payload(group_id="2", username="cy", completed=True, lap_ticks=480),
         )
+        queued_leaderboard = client.get("/v2/competitions/final/leaderboard").json()
+        processed = process_now(client)
+        first_leaderboard = client.get("/v2/competitions/final/leaderboard").json()
+
+        clock.advance(minutes=1)
+        better = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
+        )
+        processed_better = process_now(client)
         leaderboard = client.get("/v2/competitions/final/leaderboard").json()
 
     assert closed.status_code == 409
     assert stage.json()["stage"] == "final"
     assert first.status_code == 201
-    assert first.json()["status"] == "completed"
-    assert duplicate.status_code == 409
-    assert duplicate.json()["error"] == "final_locked"
+    assert first.json()["status"] == "queued"
+    assert first.json()["next_submission_at"].endswith("10:02:00+00:00")
+    assert cooldown.status_code == 429
+    assert cooldown.json()["error"] == "submission_cooldown"
     assert other.status_code == 201
-    assert [row["group_id"] for row in leaderboard] == ["2", "1"]
+    assert queued_leaderboard == []
+    assert processed == 2
+    assert [row["group_id"] for row in first_leaderboard] == ["2", "1"]
+    assert better.status_code == 201
+    assert better.json()["status"] == "queued"
+    assert processed_better == 1
+    assert [row["group_id"] for row in leaderboard] == ["1", "2"]
+    assert leaderboard[0]["submission_id"] == better.json()["submission_id"]
 
 
 def test_final_eligibility_keeps_current_group_and_username_schema(tmp_path):
@@ -638,7 +669,7 @@ def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
     assert page.status_code == 200
     assert "data-competition=\"easy\"" in page.text
     assert admin.status_code == 200
-    assert "Create Demo Snapshot" in admin.text
+    assert "Run Snapshot Now" in admin.text
     assert event["type"] == "competition_snapshot_updated"
     assert event["leaderboards"]["easy"][0]["username"] == "ada"
     assert event["config"]["phase_one_batch_minutes"] == 1

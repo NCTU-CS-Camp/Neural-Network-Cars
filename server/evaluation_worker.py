@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class BatchWorker:
-    """Seals trusted client-result submissions at Phase 1 replay boundaries."""
+    """Seals trusted client-result submissions at snapshot boundaries."""
 
     def __init__(
         self,
@@ -40,13 +40,13 @@ class BatchWorker:
             self._thread.join(timeout=2.0)
 
     def process_due(self, now: datetime | None = None) -> int:
-        processed = self.storage.seal_phase_one_batches(now=now)
+        processed = self.storage.seal_due_batches(now=now)
         if processed:
             self._publish_update()
         return processed
 
     def process_now(self, now: datetime | None = None) -> int:
-        processed = self.storage.seal_phase_one_batches(now=now, force=True)
+        processed = self.storage.seal_due_batches(now=now, force=True)
         if processed:
             self._publish_update()
         return processed
@@ -61,7 +61,7 @@ class BatchWorker:
                 self.process_due()
             except Exception:
                 logger.exception(
-                    "Phase-one batch processing failed; retrying after poll interval"
+                    "Snapshot batch processing failed; retrying after poll interval"
                 )
             self._stop_event.wait(self.poll_interval)
 

@@ -68,7 +68,17 @@ class AdminStageRequest(BaseModel):
 class AdminConfigRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    phase_one_batch_minutes: int
+    phase_one_batch_minutes: int | None = None
+    snapshot_interval_minutes: int | None = None
 
     def clean_phase_one_batch_minutes(self) -> int:
-        return validate_phase_one_batch_minutes(self.phase_one_batch_minutes)
+        values = [
+            value
+            for value in (self.phase_one_batch_minutes, self.snapshot_interval_minutes)
+            if value is not None
+        ]
+        if not values:
+            raise ValueError("snapshot_interval_minutes is required")
+        if len(set(values)) > 1:
+            raise ValueError("snapshot interval fields must match")
+        return validate_phase_one_batch_minutes(values[0])

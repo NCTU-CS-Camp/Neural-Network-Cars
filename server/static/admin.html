@@ -33,11 +33,11 @@
         <div class="row"><div><label for="stage">Active stage</label><select id="stage"><option value="phase_one">Phase 1: Easy + Hard</option><option value="final">Final: Group</option></select></div><button id="set-stage">Set Stage</button></div>
       </section>
       <section>
-        <h2>Phase 1 Timing</h2>
-        <div class="row"><div><label for="interval">Batch and cooldown interval</label><select id="interval"><option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option></select></div><button id="set-config">Set Interval</button></div>
+        <h2>Snapshot Timing</h2>
+        <div class="row"><div><label for="interval">Snapshot and cooldown interval</label><select id="interval"><option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option></select></div><button id="set-config">Set Interval</button></div>
       </section>
       <section><h2>Competition Maps</h2><div class="maps" id="maps"></div></section>
-      <section><h2>Operations</h2><div class="actions"><button id="run-batch">Create Demo Snapshot</button><button class="secondary" id="restart-replay">Restart Replay</button><button class="danger" id="reset">Reset Competition Data</button></div></section>
+      <section><h2>Operations</h2><div class="actions"><button id="run-batch">Run Snapshot Now</button><button class="secondary" id="restart-replay">Restart Replay</button><button class="danger" id="reset">Reset Competition Data</button></div></section>
       <section><pre id="output">Ready</pre></section>
     </div>
   </main>
@@ -46,14 +46,14 @@
     function headers() { return {"Content-Type":"application/json", "X-Admin-Token":token.value}; }
     function setLoginStatus(message, isError=false) { loginStatus.textContent = message; loginStatus.classList.toggle("error", isError); }
     async function call(url, options) { const response = await fetch(url, options); const text = await response.text(); output.textContent = `${response.status} ${response.statusText}\n${text}`; await load(); }
-    function renderState(data) { stage.value = data.stage; interval.value = String(data.config.phase_one_batch_minutes); stateEl.innerHTML = `<div class="metric"><strong>${data.stage.replace("_", " ")}</strong><span>active stage</span></div><div class="metric"><strong>${data.config.version}</strong><span>configuration</span></div><div class="metric"><strong>${data.config.phase_one_batch_minutes} min</strong><span>phase 1 interval</span></div>`; mapsEl.innerHTML = data.competitions.map((map) => `<article class="map"><header>${map.competition_id.toUpperCase()} · ${map.map_id}</header><img alt="${map.name}" src="/v2/maps/${map.competition_id}/preview"></article>`).join(""); }
+    function renderState(data) { const snapshotInterval = data.config.snapshot_interval_minutes || data.config.phase_one_batch_minutes; stage.value = data.stage; interval.value = String(snapshotInterval); stateEl.innerHTML = `<div class="metric"><strong>${data.stage.replace("_", " ")}</strong><span>active stage</span></div><div class="metric"><strong>${data.config.version}</strong><span>configuration</span></div><div class="metric"><strong>${snapshotInterval} min</strong><span>snapshot interval</span></div>`; mapsEl.innerHTML = data.competitions.map((map) => `<article class="map"><header>${map.competition_id.toUpperCase()} · ${map.map_id}</header><img alt="${map.name}" src="/v2/maps/${map.competition_id}/preview"></article>`).join(""); }
     async function load() { const response = await fetch("/v2/admin/state", {cache:"no-store", headers:headers()}); if (!response.ok) throw new Error(`${response.status} ${response.statusText}`); renderState(await response.json()); }
     async function unlockAdmin() { try { await load(); sessionStorage.setItem("competitionAdminToken", token.value); adminContent.classList.remove("hidden"); setLoginStatus("Admin unlocked."); } catch (error) { adminContent.classList.add("hidden"); sessionStorage.removeItem("competitionAdminToken"); setLoginStatus(`Invalid admin token: ${error}`, true); } }
     token.value = sessionStorage.getItem("competitionAdminToken") || "";
     document.getElementById("login-button").addEventListener("click", unlockAdmin);
     token.addEventListener("keydown", (event) => { if (event.key === "Enter") unlockAdmin(); });
     document.getElementById("set-stage").addEventListener("click", () => call("/v2/admin/stage", {method:"POST", headers:headers(), body:JSON.stringify({stage:stage.value})}));
-    document.getElementById("set-config").addEventListener("click", () => call("/v2/admin/config", {method:"POST", headers:headers(), body:JSON.stringify({phase_one_batch_minutes:Number(interval.value)})}));
+    document.getElementById("set-config").addEventListener("click", () => call("/v2/admin/config", {method:"POST", headers:headers(), body:JSON.stringify({snapshot_interval_minutes:Number(interval.value)})}));
     document.getElementById("run-batch").addEventListener("click", () => call("/v2/admin/batches/run-now", {method:"POST", headers:headers()}));
     document.getElementById("restart-replay").addEventListener("click", () => call("/v2/admin/replay/restart", {method:"POST", headers:headers()}));
     document.getElementById("reset").addEventListener("click", () => { if (confirm("Delete all submissions, cooldowns, and snapshots?")) call("/v2/admin/reset-all", {method:"POST", headers:headers()}); });

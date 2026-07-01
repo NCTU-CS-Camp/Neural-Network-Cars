@@ -321,16 +321,22 @@ class CompetitionStorage:
 
         row = connection.execute(
             """
-            SELECT submission_id FROM submissions
+            SELECT submitted_at FROM submissions
             WHERE competition_id = ? AND group_id = ? AND status != ?
+            ORDER BY submitted_at DESC
             LIMIT 1
             """,
             (CompetitionId.FINAL.value, group_id, SubmissionStatus.FAILED.value),
         ).fetchone()
         if row is not None:
-            result["reason"] = "final_locked"
-            result["locked_submission_id"] = row["submission_id"]
-            return result
+            last_submission = _parse_timestamp(row["submitted_at"])
+            next_allowed = last_submission + timedelta(
+                minutes=phase_one_batch_minutes,
+            )
+            result["next_submission_at"] = next_allowed.isoformat()
+            if now < next_allowed:
+                result["reason"] = "submission_cooldown"
+                return result
 
         result["eligible"] = True
         return result
@@ -365,11 +371,7 @@ class CompetitionStorage:
                 )
 
             submission_id = new_submission_id()
-            status = (
-                SubmissionStatus.RUNNING
-                if identifier is CompetitionId.FINAL
-                else SubmissionStatus.QUEUED
-            )
+            status = SubmissionStatus.QUEUED
             completed_at = None
             connection.execute(
                 """
@@ -394,53 +396,10 @@ class CompetitionStorage:
                 ),
             )
 
-            if identifier is CompetitionId.FINAL:
-                connection.execute(
-                    """
-                    UPDATE submissions
-                    SET status = ?, completed_at = ?
-                    WHERE submission_id = ?
-                    """,
-                    (SubmissionStatus.COMPLETED.value, submitted_at, submission_id),
-                )
-                self._create_final_snapshot_locked(connection, submission_id, timestamp)
-
             row = connection.execute(
                 "SELECT * FROM submissions WHERE submission_id = ?", (submission_id,)
             ).fetchone()
             return self._public_submission(self._submission_from_row(row))
-
-    def _create_final_snapshot_locked(
-        self,
-        connection: sqlite3.Connection,
-        submission_id: str,
-        timestamp: datetime,
-    ) -> None:
-        batch_id = new_batch_id()
-        leaderboard = self._public_leaderboard_locked(connection, CompetitionId.FINAL)
-        snapshot = {
-            "competition_id": CompetitionId.FINAL.value,
-            "submission_ids": [submission_id],
-            "leaderboard": leaderboard,
-        }
-        connection.execute(
-            """
-            INSERT INTO batches (batch_id, competition_id, window_start, window_end, created_at, snapshot_json)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                batch_id,
-                CompetitionId.FINAL.value,
-                timestamp.isoformat(),
-                timestamp.isoformat(),
-                timestamp.isoformat(),
-                json.dumps(snapshot),
-            ),
-        )
-        connection.execute(
-            "UPDATE submissions SET batch_id = ? WHERE submission_id = ?",
-            (batch_id, submission_id),
-        )
 
     def seal_phase_one_batches(
         self,
@@ -449,75 +408,115 @@ class CompetitionStorage:
         force: bool = False,
     ) -> int:
         timestamp = now or self.now()
-        total = 0
-
         with self._lock, self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            phase_one_batch_minutes = self._phase_one_batch_minutes_locked(connection)
-            cutoff = (
-                timestamp
-                if force
-                else previous_batch_boundary(
-                    timestamp,
-                    phase_one_batch_minutes,
-                )
+            interval_minutes = self._phase_one_batch_minutes_locked(connection)
+            return self._seal_batches_locked(
+                connection,
+                (CompetitionId.EASY, CompetitionId.HARD),
+                timestamp=timestamp,
+                interval_minutes=interval_minutes,
+                force=force,
             )
-            window_start = cutoff - timedelta(minutes=phase_one_batch_minutes)
-            for identifier in (CompetitionId.EASY, CompetitionId.HARD):
-                comparator = "<=" if force else "<"
-                rows = connection.execute(
-                    f"""
-                    SELECT * FROM submissions
-                    WHERE competition_id = ? AND status = ? AND submitted_at {comparator} ?
-                    ORDER BY submitted_at ASC, submission_id ASC
-                    """,
-                    (identifier.value, SubmissionStatus.QUEUED.value, cutoff.isoformat()),
-                ).fetchall()
-                if not rows:
-                    continue
 
-                submission_ids = [str(row["submission_id"]) for row in rows]
-                placeholders = ", ".join("?" for _ in submission_ids)
-                connection.execute(
-                    f"UPDATE submissions SET status = ? WHERE submission_id IN ({placeholders})",
-                    [SubmissionStatus.RUNNING.value, *submission_ids],
-                )
+    def seal_due_batches(
+        self,
+        *,
+        now: datetime | None = None,
+        force: bool = False,
+    ) -> int:
+        timestamp = now or self.now()
+        with self._lock, self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            stage = self._stage_locked(connection)
+            interval_minutes = self._phase_one_batch_minutes_locked(connection)
+            identifiers = (
+                (CompetitionId.EASY, CompetitionId.HARD)
+                if stage is CompetitionStage.PHASE_ONE
+                else (CompetitionId.FINAL,)
+            )
+            return self._seal_batches_locked(
+                connection,
+                identifiers,
+                timestamp=timestamp,
+                interval_minutes=interval_minutes,
+                force=force,
+            )
 
-                batch_id = new_batch_id()
-                connection.execute(
-                    f"""
-                    UPDATE submissions
-                    SET status = ?, completed_at = ?, batch_id = ?
-                    WHERE submission_id IN ({placeholders})
-                    """,
-                    [
-                        SubmissionStatus.COMPLETED.value,
-                        timestamp.isoformat(),
-                        batch_id,
-                        *submission_ids,
-                    ],
-                )
-                leaderboard = self._public_leaderboard_locked(connection, identifier)
-                snapshot = {
-                    "competition_id": identifier.value,
-                    "submission_ids": submission_ids,
-                    "leaderboard": leaderboard,
-                }
-                connection.execute(
-                    """
-                    INSERT INTO batches (batch_id, competition_id, window_start, window_end, created_at, snapshot_json)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        batch_id,
-                        identifier.value,
-                        window_start.isoformat(),
-                        cutoff.isoformat(),
-                        timestamp.isoformat(),
-                        json.dumps(snapshot),
-                    ),
-                )
-                total += len(submission_ids)
+    def _seal_batches_locked(
+        self,
+        connection: sqlite3.Connection,
+        identifiers: tuple[CompetitionId, ...],
+        *,
+        timestamp: datetime,
+        interval_minutes: int,
+        force: bool,
+    ) -> int:
+        total = 0
+        cutoff = (
+            timestamp
+            if force
+            else previous_batch_boundary(
+                timestamp,
+                interval_minutes,
+            )
+        )
+        window_start = cutoff - timedelta(minutes=interval_minutes)
+        comparator = "<=" if force else "<"
+        for identifier in identifiers:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM submissions
+                WHERE competition_id = ? AND status = ? AND submitted_at {comparator} ?
+                ORDER BY submitted_at ASC, submission_id ASC
+                """,
+                (identifier.value, SubmissionStatus.QUEUED.value, cutoff.isoformat()),
+            ).fetchall()
+            if not rows:
+                continue
+
+            submission_ids = [str(row["submission_id"]) for row in rows]
+            placeholders = ", ".join("?" for _ in submission_ids)
+            connection.execute(
+                f"UPDATE submissions SET status = ? WHERE submission_id IN ({placeholders})",
+                [SubmissionStatus.RUNNING.value, *submission_ids],
+            )
+
+            batch_id = new_batch_id()
+            connection.execute(
+                f"""
+                UPDATE submissions
+                SET status = ?, completed_at = ?, batch_id = ?
+                WHERE submission_id IN ({placeholders})
+                """,
+                [
+                    SubmissionStatus.COMPLETED.value,
+                    timestamp.isoformat(),
+                    batch_id,
+                    *submission_ids,
+                ],
+            )
+            leaderboard = self._public_leaderboard_locked(connection, identifier)
+            snapshot = {
+                "competition_id": identifier.value,
+                "submission_ids": submission_ids,
+                "leaderboard": leaderboard,
+            }
+            connection.execute(
+                """
+                INSERT INTO batches (batch_id, competition_id, window_start, window_end, created_at, snapshot_json)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    batch_id,
+                    identifier.value,
+                    window_start.isoformat(),
+                    cutoff.isoformat(),
+                    timestamp.isoformat(),
+                    json.dumps(snapshot),
+                ),
+            )
+            total += len(submission_ids)
         return total
 
     def get_submission(
@@ -594,6 +593,17 @@ class CompetitionStorage:
     def _ranking_key(self, submission: dict[str, Any]) -> tuple[Any, ...]:
         client_result = ClientResult.from_dict(submission["client_result"])
         return (*client_result.ranking_key(), submission["submitted_at"], submission["submission_id"])
+
+    @staticmethod
+    def _stage_locked(connection: sqlite3.Connection) -> CompetitionStage:
+        row = connection.execute(
+            """
+            SELECT stage
+            FROM competition_state
+            WHERE id = 1
+            """
+        ).fetchone()
+        return CompetitionStage(row["stage"])
 
     def replay_payload(self) -> dict[str, Any]:
         state = self.state()

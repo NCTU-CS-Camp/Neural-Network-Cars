@@ -171,6 +171,11 @@ def create_app(
             raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
         except SubmissionRejected as exc:
             return rejected_response(exc)
+        submission["next_submission_at"] = app_storage.eligibility(
+            CompetitionId.FINAL,
+            group_id=payload.group_id,
+            username=payload.username,
+        )["next_submission_at"]
         broadcaster.publish(app_storage.competition_update_payload())
         return submission
 
