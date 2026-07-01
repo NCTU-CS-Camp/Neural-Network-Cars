@@ -4,121 +4,196 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Neural Cars Competition</title>
+  <!--
+    F1 "Podium Hero" leaderboard.
+    Same data flow as before: GET /v2/state, GET /v2/competitions/{id}/leaderboard, WS /ws/events.
+    Presentation only - no new endpoints, no weights/biases exposed.
+    Fonts load from Google Fonts; if the venue is offline, self-host Saira Condensed / Titillium Web.
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@400;600;700;800;900&family=Saira+Semi+Condensed:wght@400;600;700;800&family=Titillium+Web:wght@400;600;700;900&display=swap" rel="stylesheet">
   <style>
     :root {
       color-scheme: dark;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0b1118;
-      color: #f4f7fb;
+      --bg:#08080C; --bg2:#111017; --panel:#1A1A22; --panel2:#1E1E27;
+      --border:#2A2A34; --line:#22222B;
+      --red:#E10600; --gold:#E1B44C; --silver:#B8BCC6; --bronze:#CD7F32;
+      --white:#F4F4F7; --muted:#8B8B96; --muted2:#9A9AA5; --dim:#5C6974;
+      --disp:'Saira Condensed', sans-serif;
+      --ui:'Titillium Web', sans-serif;
+      --num:'Saira Semi Condensed', sans-serif;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; background: #0b1118; }
-    main { max-width: 1180px; margin: 0 auto; padding: 30px 24px 48px; }
-    header { display: flex; align-items: end; justify-content: space-between; gap: 24px; border-bottom: 1px solid #263442; padding-bottom: 20px; }
-    h1 { margin: 0; font-size: 38px; line-height: 1; letter-spacing: 0; }
-    .eyebrow, .status { color: #96a8ba; font-size: 14px; }
-    .status { text-align: right; font-variant-numeric: tabular-nums; }
-    .tabs { display: flex; gap: 4px; border-bottom: 1px solid #263442; margin: 24px 0 0; }
-    .tab { border: 0; background: transparent; color: #9cadbf; padding: 13px 18px; font: inherit; font-weight: 700; cursor: pointer; border-bottom: 3px solid transparent; }
-    .tab.active[data-competition="easy"] { color: #57d3cf; border-color: #57d3cf; }
-    .tab.active[data-competition="hard"] { color: #f4b16f; border-color: #f4b16f; }
-    .tab.active[data-competition="final"] { color: #d9a8ff; border-color: #d9a8ff; }
-    .summary { display: flex; justify-content: space-between; gap: 18px; padding: 18px 0; color: #b8c5d2; font-size: 14px; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { border-bottom: 1px solid #1d2935; padding: 15px 12px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    th { color: #8295a8; font-size: 12px; font-weight: 700; letter-spacing: 0; text-transform: uppercase; }
-    tbody tr:first-child { background: #14202b; }
-    .rank { width: 72px; color: #aebdcb; font-weight: 800; }
-    .name { font-size: 19px; font-weight: 800; }
-    .group, .muted { color: #9badbf; }
-    .result { font-weight: 800; font-variant-numeric: tabular-nums; }
-    .time { font-variant-numeric: tabular-nums; }
-    .empty { color: #8ea0b1; text-align: center; padding: 48px 12px; }
-    @media (max-width: 680px) {
-      main { padding: 22px 14px 34px; }
-      header { align-items: start; flex-direction: column; }
-      h1 { font-size: 32px; }
-      .status { text-align: left; }
-      th:nth-child(4), td:nth-child(4) { display: none; }
+    html, body { margin:0; padding:0; }
+    body {
+      min-height:100vh; background:radial-gradient(1200px 600px at 50% -80px,#16151d,var(--bg) 70%);
+      color:var(--white); font-family:var(--ui);
+    }
+    main { max-width:1180px; margin:0 auto; padding:34px 40px 60px; position:relative; }
+    /* diagonal speed-slash accent */
+    .slash { position:absolute; top:0; right:0; width:360px; height:160px; pointer-events:none;
+      background:repeating-linear-gradient(-45deg, transparent 0 20px, rgba(225,6,0,.10) 20px 40px); }
+    header .eyebrow { font-family:var(--disp); font-weight:800; font-size:14px; letter-spacing:.28em; color:var(--red); text-transform:uppercase; }
+    .headrow { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; }
+    h1 { margin:6px 0 0; font-family:var(--disp); font-weight:900; font-size:52px; line-height:.85; text-transform:uppercase; }
+    h1 .sub { color:var(--silver); font-size:36px; }
+    .status { text-align:right; font-family:var(--num); font-size:14px; color:var(--muted); line-height:1.5; font-variant-numeric:tabular-nums; }
+
+    .tabs { display:flex; gap:10px; margin-top:22px; }
+    .tab { border:0; cursor:pointer; padding:9px 24px; font-family:var(--disp); font-weight:800; font-size:16px; letter-spacing:.04em;
+      color:var(--muted); background:var(--panel); transform:skewX(-9deg); }
+    .tab > span { display:inline-block; transform:skewX(9deg); }
+    .tab.active[data-competition="easy"]  { color:#08080C; background:var(--silver); }
+    .tab.active[data-competition="hard"]  { color:#08080C; background:var(--red); }
+    .tab.active[data-competition="final"] { color:#08080C; background:var(--gold); }
+
+    /* podium band */
+    .podium { display:flex; gap:10px; margin-top:24px; }
+    .pcard { flex:1; background:var(--panel); border-top:5px solid var(--dim); padding:16px 18px 18px; position:relative; overflow:hidden; min-width:0; }
+    .pcard .ghost { position:absolute; right:2px; top:-22px; font-family:var(--disp); font-weight:900; font-size:112px; line-height:1; }
+    .pcard .plabel { position:relative; font-family:var(--disp); font-weight:800; font-size:13px; letter-spacing:.16em; }
+    .pcard .pname { position:relative; font-family:var(--ui); font-weight:900; font-size:25px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .pcard .psub { position:relative; font-size:13px; color:var(--muted2); margin-top:2px; }
+    .pcard .presult { position:relative; font-family:var(--disp); font-weight:900; font-size:26px; margin-top:10px; font-variant-numeric:tabular-nums; }
+    .pcard .presult .u { font-family:var(--num); font-weight:700; font-size:12px; color:var(--muted); margin-left:5px; }
+    .pcard.p1 { border-top-color:var(--gold);   background:#211d14; } .pcard.p1 .ghost{color:rgba(225,180,76,.16);} .pcard.p1 .plabel,.pcard.p1 .presult{color:var(--gold);}
+    .pcard.p2 { border-top-color:var(--silver); background:#1d1e21; } .pcard.p2 .ghost{color:rgba(199,203,212,.14);} .pcard.p2 .plabel,.pcard.p2 .presult{color:var(--silver);}
+    .pcard.p3 { border-top-color:var(--bronze); background:#1f1712; } .pcard.p3 .ghost{color:rgba(205,127,50,.16);} .pcard.p3 .plabel,.pcard.p3 .presult{color:var(--bronze);}
+
+    /* table */
+    table { width:100%; border-collapse:collapse; table-layout:fixed; margin-top:20px; }
+    th { font-family:var(--disp); font-weight:700; font-size:12px; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; text-align:left; padding:12px 8px; border-bottom:1px solid var(--border); }
+    td { padding:14px 8px; border-bottom:1px solid #1D1D26; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    th.rank, td.rank { width:64px; }
+    th.group, td.group { width:96px; }
+    th.result, td.result, th.time, td.time { text-align:right; }
+    th.result, td.result { width:150px; }
+    th.time, td.time { width:130px; }
+    tbody tr.leader td { background:#1C1620; }
+    tbody tr.dnf td { opacity:.5; }
+    .posblk { min-width:30px; height:28px; padding:0 6px; display:inline-flex; align-items:center; justify-content:center;
+      background:var(--panel2); color:var(--silver); font-family:var(--disp); font-weight:900; font-size:15px; }
+    tr.leader .posblk { background:var(--red); color:#fff; }
+    .player { display:flex; align-items:center; gap:12px; }
+    .tag { font-family:var(--disp); font-weight:800; font-size:15px; color:var(--silver); width:46px; flex:none; }
+    tr.leader .tag { color:var(--red); }
+    .name { font-family:var(--ui); font-weight:700; font-size:17px; }
+    .muted { color:var(--muted); font-size:12px; }
+    .result { font-family:var(--disp); font-weight:800; font-size:17px; font-variant-numeric:tabular-nums; }
+    td.result.dnfval { color:var(--muted); }
+    .time { font-family:var(--num); font-size:14px; color:var(--muted); font-variant-numeric:tabular-nums; }
+    .empty { color:var(--muted2); text-align:center; padding:48px 12px; font-family:var(--disp); font-weight:700; letter-spacing:.1em; }
+
+    @media (max-width: 720px) {
+      main { padding:24px 16px 40px; }
+      h1 { font-size:34px; } h1 .sub { font-size:24px; }
+      .status { text-align:left; }
+      .podium { flex-direction:column; }
+      th.time, td.time { display:none; }
     }
   </style>
 </head>
 <body>
   <main>
+    <div class="slash"></div>
     <header>
-      <div>
-        <div class="eyebrow">NEURAL CARS COMPETITION</div>
-        <h1 id="title">Phase 1 / Easy</h1>
+      <div class="eyebrow">Neural Cars Competition</div>
+      <div class="headrow">
+        <h1 id="title">Phase 1 <span class="sub">/ Easy</span></h1>
+        <div class="status"><span id="status">Connecting…</span><br><span id="timing"></span></div>
       </div>
-      <div class="status" id="status">Connecting...</div>
     </header>
     <nav class="tabs" aria-label="Competition leaderboard">
-      <button class="tab active" data-competition="easy">Easy</button>
-      <button class="tab" data-competition="hard">Hard</button>
-      <button class="tab" data-competition="final">Final</button>
+      <button class="tab active" data-competition="easy"><span>EASY</span></button>
+      <button class="tab" data-competition="hard"><span>HARD</span></button>
+      <button class="tab" data-competition="final"><span>FINAL</span></button>
     </nav>
-    <div class="summary"><span id="summary">Loading leaderboard</span><span id="next-batch"></span></div>
+    <div class="podium" id="podium"></div>
     <table>
-      <thead><tr><th class="rank">Rank</th><th>Player</th><th>Group</th><th>Result</th><th>Completed</th></tr></thead>
+      <thead><tr>
+        <th class="rank">Rank</th><th>Player</th><th class="group">Group</th>
+        <th class="result">Result</th><th class="time">Completed</th>
+      </tr></thead>
       <tbody id="rows"><tr><td colspan="5" class="empty">Waiting for snapshot</td></tr></tbody>
     </table>
   </main>
+
   <script>
     const rows = document.getElementById("rows");
+    const podium = document.getElementById("podium");
     const title = document.getElementById("title");
     const statusEl = document.getElementById("status");
-    const summary = document.getElementById("summary");
-    const nextBatch = document.getElementById("next-batch");
+    const timingEl = document.getElementById("timing");
     let activeCompetition = "easy";
     let state = null;
     let lastUpdatedAt = null;
+    let lastLeaderboard = [];
 
-    function escapeHtml(value) { return String(value).replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[char]); }
-    function formatTicks(value) {
-      const seconds = Number(value) / 30;
-      const minutes = Math.floor(seconds / 60);
-      return `${minutes}:${(seconds % 60).toFixed(1).padStart(4, "0")}`;
-    }
-    function resultText(result) {
-      return result.completed ? `FINISHED ${formatTicks(result.lap_ticks)}` : `${Number(result.max_progress).toFixed(1)} progress`;
-    }
-    function countdownText(isoValue) {
-      if (!isoValue) return "";
-      const remaining = Math.max(0, new Date(isoValue).getTime() - Date.now());
-      const totalSeconds = Math.floor(remaining / 1000);
-      const minutes = Math.floor(totalSeconds / 60);
-      const seconds = String(totalSeconds % 60).padStart(2, "0");
-      return `${minutes}:${seconds}`;
-    }
-    function renderTiming() {
-      if (!state) return;
+    function escapeHtml(v){ return String(v).replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[c]); }
+    // official: completed -> seconds from lap_ticks (SIMULATION_FPS = 30); else max_progress
+    function lapSeconds(ticks){ return (Number(ticks) / 30); }
+    function resultText(r){ return r.completed ? `${lapSeconds(r.lap_ticks).toFixed(3)}s` : `${Number(r.max_progress).toFixed(0)} prog`; }
+    function tag(username){ return String(username).replace(/[^a-z0-9]/gi,"").slice(0,3).toUpperCase(); }
+    function countdownText(iso){ if(!iso) return ""; const rem=Math.max(0,new Date(iso).getTime()-Date.now()); const s=Math.floor(rem/1000); return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; }
+
+    function renderTiming(){
+      if(!state){ return; }
       const updated = lastUpdatedAt ? `Last updated ${lastUpdatedAt.toLocaleTimeString()}` : "Waiting for update";
+      // project convention: prefer next_snapshot_at, fall back to next_phase_one_batch_at
       const snapshotAt = state?.config?.next_snapshot_at || state?.config?.next_phase_one_batch_at;
-      if (!snapshotAt) {
-        nextBatch.textContent = updated;
-        return;
-      }
-      nextBatch.textContent = `Next snapshot in ${countdownText(snapshotAt)} - ${updated}`;
+      if(activeCompetition === "final" || !snapshotAt){ timingEl.textContent = updated; return; }
+      timingEl.textContent = `Next snapshot in ${countdownText(snapshotAt)} · ${updated}`;
     }
-    function render(leaderboard) {
-      const stageLabel = activeCompetition === "final" ? "Final / Group" : `Phase 1 / ${activeCompetition[0].toUpperCase()}${activeCompetition.slice(1)}`;
-      title.textContent = stageLabel;
-      summary.textContent = `${leaderboard.length} ranked submissions`;
+
+    function podiumCard(item, klass){
+      const isFinal = activeCompetition === "final";
+      const main = isFinal ? `Group ${escapeHtml(item.group_id)}` : escapeHtml(item.username);
+      const sub  = isFinal ? escapeHtml(item.username) : "individual";
+      const label = isFinal ? `GROUP ${escapeHtml(item.group_id)}` : (item.rank===1 ? "RACE WINNER" : (item.rank===2 ? "P2" : "P3"));
+      const r = item.client_result;
+      const value = r.completed ? lapSeconds(r.lap_ticks).toFixed(3) : Number(r.max_progress).toFixed(0);
+      const unit = r.completed ? "SEC" : "PROG";
+      return `<div class="pcard ${klass}">
+        <span class="ghost">${item.rank}</span>
+        <div class="plabel">${label}</div>
+        <div class="pname">${main}</div>
+        <div class="psub">${sub}</div>
+        <div class="presult">${value}<span class="u">${unit}</span></div>
+      </div>`;
+    }
+
+    function render(leaderboard){
+      lastLeaderboard = leaderboard;
+      const isFinal = activeCompetition === "final";
+      title.innerHTML = isFinal ? `Final <span class="sub">/ Group</span>`
+        : `Phase 1 <span class="sub">/ ${activeCompetition[0].toUpperCase()}${activeCompetition.slice(1)}</span>`;
       renderTiming();
-      if (!leaderboard.length) {
+
+      podium.innerHTML = leaderboard.slice(0,3).map((it,i)=>podiumCard(it, "p"+(i+1))).join("");
+
+      if(!leaderboard.length){
         rows.innerHTML = '<tr><td colspan="5" class="empty">No completed submissions yet</td></tr>';
         return;
       }
-      rows.innerHTML = leaderboard.map((item) => `
-        <tr>
-          <td class="rank">#${item.rank}</td>
-          <td><div class="name">${escapeHtml(activeCompetition === "final" ? `Group ${item.group_id}` : item.username)}</div><div class="muted">${escapeHtml(activeCompetition === "final" ? item.username : "individual")}</div></td>
-          <td class="group">${escapeHtml(item.group_id)}</td>
-          <td class="result">${resultText(item.client_result)}</td>
-          <td class="time">${item.completed_at ? new Date(item.completed_at).toLocaleTimeString() : "-"}</td>
-        </tr>`).join("");
+      rows.innerHTML = leaderboard.map((item)=>{
+        const r = item.client_result;
+        const isLeader = item.rank === 1;
+        const dnf = !r.completed;
+        const main = isFinal ? `Group ${escapeHtml(item.group_id)}` : escapeHtml(item.username);
+        const sub  = isFinal ? escapeHtml(item.username) : "individual";
+        return `<tr class="${isLeader?"leader":""} ${dnf?"dnf":""}">
+          <td class="rank"><span class="posblk">${item.rank}</span></td>
+          <td><div class="player"><span class="tag">${tag(item.username)}</span>
+            <span><span class="name">${main}</span><br><span class="muted">${sub}</span></span></div></td>
+          <td class="group">G${escapeHtml(item.group_id)}</td>
+          <td class="result ${dnf?"dnfval":""}">${resultText(r)}</td>
+          <td class="time">${item.completed_at ? new Date(item.completed_at).toLocaleTimeString() : "—"}</td>
+        </tr>`;
+      }).join("");
     }
-    async function refresh() {
+
+    async function refresh(){
       const [stateResponse, leaderboardResponse] = await Promise.all([
         fetch("/v2/state", {cache:"no-store"}),
         fetch(`/v2/competitions/${activeCompetition}/leaderboard`, {cache:"no-store"})
@@ -126,32 +201,35 @@
       state = await stateResponse.json();
       lastUpdatedAt = new Date();
       render(await leaderboardResponse.json());
-      statusEl.textContent = `${state.stage.replace("_", " ")} | ${state.config.version}`;
+      statusEl.textContent = `${state.stage.replace("_"," ")} · ${state.config.version}`;
     }
-    document.querySelectorAll(".tab").forEach((tab) => tab.addEventListener("click", () => {
+
+    document.querySelectorAll(".tab").forEach((tab)=>tab.addEventListener("click",()=>{
       activeCompetition = tab.dataset.competition;
-      document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button === tab));
-      refresh().catch((error) => { statusEl.textContent = `Disconnected: ${error}`; });
+      document.querySelectorAll(".tab").forEach((b)=>b.classList.toggle("active", b===tab));
+      refresh().catch((e)=>{ statusEl.textContent = `Disconnected: ${e}`; });
     }));
-    function connectWs() {
+
+    function connectWs(){
       const protocol = location.protocol === "https:" ? "wss:" : "ws:";
       const ws = new WebSocket(`${protocol}//${location.host}/ws/events`);
-      ws.onmessage = (event) => {
+      ws.onmessage = (event)=>{
         const payload = JSON.parse(event.data);
-        if (payload.leaderboards) {
-          state = {...state, stage: payload.stage, config: payload.config};
+        if(payload.leaderboards){
+          state = {...state, stage:payload.stage, config:payload.config};
           lastUpdatedAt = new Date();
           render(payload.leaderboards[activeCompetition] || []);
-          statusEl.textContent = `${payload.stage.replace("_", " ")} | ${payload.config.version}`;
+          statusEl.textContent = `${payload.stage.replace("_"," ")} · ${payload.config.version}`;
         }
       };
-      ws.onclose = () => setTimeout(connectWs, 3000);
-      ws.onerror = () => ws.close();
+      ws.onclose = ()=>setTimeout(connectWs, 3000);
+      ws.onerror = ()=>ws.close();
     }
-    refresh().catch((error) => { statusEl.textContent = `Disconnected: ${error}`; });
+
+    refresh().catch((e)=>{ statusEl.textContent = `Disconnected: ${e}`; });
     connectWs();
     setInterval(renderTiming, 1000);
-    setInterval(() => refresh().catch(() => {}), 15000);
+    setInterval(()=>refresh().catch(()=>{}), 15000);
   </script>
 </body>
 </html>
