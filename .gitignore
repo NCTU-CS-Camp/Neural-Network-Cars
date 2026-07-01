@@ -19,6 +19,7 @@ server/*.db-*
 profile.json
 records.json
 settings.json
+server/competition.db
 
 # Runtime-generated random track outputs
 Images/Tracks/randomGeneratedTrack.json
