@@ -15,6 +15,7 @@ server/*.db
 server/*.db-*
 
 # Local runtime configuration and user data
+.env
 profile.json
 records.json
 settings.json
