@@ -93,12 +93,12 @@
     function renderTiming() {
       if (!state) return;
       const updated = lastUpdatedAt ? `Last updated ${lastUpdatedAt.toLocaleTimeString()}` : "Waiting for update";
-      const snapshotAt = state?.config?.next_phase_one_batch_at;
-      if (activeCompetition === "final" || !snapshotAt) {
+      const snapshotAt = state?.config?.next_snapshot_at || state?.config?.next_phase_one_batch_at;
+      if (!snapshotAt) {
         nextBatch.textContent = updated;
         return;
       }
-      nextBatch.textContent = `Next snapshot in ${countdownText(snapshotAt)} · ${updated}`;
+      nextBatch.textContent = `Next snapshot in ${countdownText(snapshotAt)} - ${updated}`;
     }
     function render(leaderboard) {
       const stageLabel = activeCompetition === "final" ? "Final / Group" : `Phase 1 / ${activeCompetition[0].toUpperCase()}${activeCompetition.slice(1)}`;
