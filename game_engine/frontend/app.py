@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
+import math
 import secrets
 
 import numpy as np
@@ -95,6 +96,7 @@ def _car_from_flat_weights(
 
 def run():
     pygame.init()
+    pygame.scrap.init()
     info = pygame.display.Info()
     win_w = int(info.current_w * 0.9)
     win_h = int(info.current_h * 0.9)
@@ -183,7 +185,6 @@ def run_training_loop(
     )
     simulator = Simulator(track, settings.fps)
 
-    number_track = 2 if map_difficulty == 3 else 1
     generation_started_at = pygame.time.get_ticks()
     submit_status = "Submit: not sent"
     layer_sizes = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
@@ -262,6 +263,7 @@ def run_training_loop(
     font = pygame.font.Font(str(FONT_PATH), 18)
     _bar_head = pygame.font.Font(str(HEAD_FONT_PATH), 14)
     _bar_mono = pygame.font.Font(str(MONO_FONT_PATH), 14)
+    _bar_cjk = pygame.font.Font(str(FONT_PATH), 14)
     _next_gen_mono = pygame.font.Font(str(MONO_FONT_PATH), 18)
     _badge_font = pygame.font.Font(str(HEAD_FONT_PATH), 14)
     _tower_font = pygame.font.Font(str(MONO_FONT_PATH), 14)
@@ -274,7 +276,10 @@ def run_training_loop(
         save_runtime_settings(settings)
 
     def track_spawn():
-        return (120, 480) if number_track == 1 else (140, 610)
+        start_x, start_y = track.centerline[0]
+        next_x, next_y = track.centerline[1]
+        heading = (-math.degrees(math.atan2(next_x - start_x, next_y - start_y))) % 360.0
+        return start_x, start_y, heading
 
     def apply_sensor_line_state():
         car.showlines = session.show_sensor_lines
@@ -289,13 +294,13 @@ def run_training_loop(
         generation_started_at = pygame.time.get_ticks()
 
     def apply_track_spawn(reset_player=False, reset_images=False):
-        spawn_x, spawn_y = track_spawn()
+        spawn_x, spawn_y, spawn_angle = track_spawn()
         for nn_car in nn_cars:
             car_image = assets.white_small_car if reset_images else None
-            nn_car.reset_state(spawn_x, spawn_y, car_image=car_image)
+            nn_car.reset_state(spawn_x, spawn_y, spawn_angle, car_image=car_image)
             nn_car.showlines = session.show_sensor_lines
         if reset_player:
-            car.reset_state(spawn_x, spawn_y)
+            car.reset_state(spawn_x, spawn_y, spawn_angle)
             car.showlines = session.show_sensor_lines
             car.refresh_track_state(track)
         simulator.reset_population(nn_cars)
@@ -460,8 +465,11 @@ def run_training_loop(
         pygame.draw.line(game_display, LINE, (0, bar_h), (W, bar_h))
         training_surf = _bar_head.render("TRAINING", True, F1_RED)
         game_display.blit(training_surf, training_surf.get_rect(midleft=(12, bar_h // 2)))
-        player_surf = _bar_mono.render(f"{profile.username}  Group {profile.group_id}", True, DIM)
-        game_display.blit(player_surf, player_surf.get_rect(midleft=(training_surf.get_width() + 24, bar_h // 2)))
+        name_surf = _bar_cjk.render(profile.username, True, DIM)
+        name_rect = name_surf.get_rect(midleft=(training_surf.get_width() + 24, bar_h // 2))
+        game_display.blit(name_surf, name_rect)
+        group_surf = _bar_mono.render(f"  Group {profile.group_id}", True, DIM)
+        game_display.blit(group_surf, group_surf.get_rect(midleft=(name_rect.right, bar_h // 2)))
         remaining_seconds = max(0.0, session.generation_duration_seconds - generation_elapsed_seconds())
         _ng_right = back_button.rect.left - 12
         _cy = bar_h // 2

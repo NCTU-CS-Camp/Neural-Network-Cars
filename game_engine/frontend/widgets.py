@@ -21,6 +21,12 @@ SELECT_BG = (28, 17, 20)
 
 CHAMFER = 10
 
+# Guard for TextInput's IME composing state: if no TEXTEDITING update refreshes
+# `composing` within this window, treat it as abandoned/stuck rather than keep
+# suppressing TEXTINPUT forever (seen on some SDL2/IME combos, e.g. WSL, where
+# the terminal empty TEXTEDITING that normally clears composition never fires).
+IME_COMPOSING_STALE_MS = 400
+
 
 def _chamfer_points(rect: pygame.Rect, cut: int) -> list[tuple[int, int]]:
     """左上 + 右下切角的多邊形頂點，做出 F1 稜角感。"""
@@ -232,6 +238,9 @@ class TextInput:
     rect: pygame.Rect
     text: str = ""
     active: bool = False
+    cursor_pos: int = 0
+    composing: str = ""
+    composing_started_at: int = 0
     max_length: int = 24
     fill_color: tuple[int, int, int] = FIELD
     text_color: tuple[int, int, int] = INK
@@ -240,6 +249,26 @@ class TextInput:
     allowed_characters: str | None = None
     clear_on_focus: bool = False
 
+    def focus(self) -> None:
+        self.active = True
+        self.cursor_pos = len(self.text)
+        pygame.key.start_text_input()
+        pygame.key.set_text_input_rect(self.rect)
+
+    def blur(self) -> None:
+        self.active = False
+        self.composing = ""
+        self.composing_started_at = 0
+        pygame.key.stop_text_input()
+
+    def _insert(self, chunk: str) -> None:
+        available = self.max_length - len(self.text)
+        chunk = chunk[:available] if available > 0 else ""
+        if not chunk:
+            return
+        self.text = self.text[: self.cursor_pos] + chunk + self.text[self.cursor_pos :]
+        self.cursor_pos += len(chunk)
+
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN:
             was_active = self.active
@@ -247,15 +276,44 @@ class TextInput:
             if clicked_inside and not was_active:
                 if self.clear_on_focus:
                     self.text = ""
-                self.active = True
-            elif was_active and not clicked_inside:
-                self.active = False
+                self.focus()
+            elif clicked_inside:
+                pygame.key.set_text_input_rect(self.rect)
+            elif was_active:
+                self.blur()
             return self.active
 
         if not self.active:
             return False
 
+        if event.type == pygame.TEXTEDITING:
+            self.composing = event.text
+            self.composing_started_at = pygame.time.get_ticks() if event.text else 0
+            return True
+
         if event.type == pygame.TEXTINPUT:
+            # If composing has sat non-empty for too long without a fresh
+            # TEXTEDITING update, assume the composition was abandoned/stuck
+            # rather than keep suppressing input forever.
+            if (
+                self.composing
+                and pygame.time.get_ticks() - self.composing_started_at > IME_COMPOSING_STALE_MS
+            ):
+                self.composing = ""
+
+            # When IME is actively composing with non-ASCII characters (e.g.
+            # Bopomofo), SDL2 on some platforms leaks the raw Latin keystroke
+            # as a single-character TEXTINPUT event alongside the TEXTEDITING
+            # event. Discard only that specific case so real ASCII typing
+            # (e.g. pasted or multi-character commits) is never dropped.
+            if (
+                self.composing
+                and not self.composing.isascii()
+                and event.text.isascii()
+                and len(event.text) == 1
+            ):
+                return True
+            self.composing = ""
             entered_text = event.text
             if self.allowed_characters is not None:
                 entered_text = "".join(
@@ -263,14 +321,33 @@ class TextInput:
                     for character in entered_text
                     if character in self.allowed_characters
                 )
-            available = self.max_length - len(self.text)
-            if available > 0:
-                self.text += entered_text[:available]
+            self._insert(entered_text)
             return True
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
-                self.text = self.text[:-1]
+                if self.composing:
+                    self.composing = ""
+                elif self.cursor_pos > 0:
+                    self.text = self.text[: self.cursor_pos - 1] + self.text[self.cursor_pos :]
+                    self.cursor_pos -= 1
+                return True
+            if event.key == pygame.K_LEFT and not self.composing:
+                self.cursor_pos = max(0, self.cursor_pos - 1)
+                return True
+            if event.key == pygame.K_RIGHT and not self.composing:
+                self.cursor_pos = min(len(self.text), self.cursor_pos + 1)
+                return True
+            if event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL):
+                try:
+                    raw = pygame.scrap.get(pygame.SCRAP_TEXT)
+                    if raw:
+                        pasted = raw.decode("utf-8", errors="ignore").replace("\x00", "").replace("\r", "")
+                        if self.allowed_characters is not None:
+                            pasted = "".join(c for c in pasted if c in self.allowed_characters)
+                        self._insert(pasted)
+                except Exception:
+                    pass
                 return True
 
         return False
@@ -279,8 +356,36 @@ class TextInput:
         pygame.draw.rect(surface, self.fill_color, self.rect)
         border = self.active_border_color if self.active else self.border_color
         pygame.draw.rect(surface, border, self.rect, 1)
-        text_surf = font.render(self.text, True, self.text_color)
-        surface.blit(text_surf, text_surf.get_rect(midleft=(self.rect.x + 8, self.rect.centery)))
+
+        before, after = self.text[: self.cursor_pos], self.text[self.cursor_pos :]
+        origin = (self.rect.x + 8, self.rect.centery)
+
+        before_surf = font.render(before, True, self.text_color)
+        before_rect = before_surf.get_rect(midleft=origin)
+        surface.blit(before_surf, before_rect)
+        cursor_x = before_rect.right
+
+        if self.composing:
+            composing_surf = font.render(self.composing, True, self.text_color)
+            composing_rect = composing_surf.get_rect(midleft=(cursor_x, self.rect.centery))
+            surface.blit(composing_surf, composing_rect)
+            underline_y = composing_rect.bottom - 1
+            pygame.draw.line(surface, self.text_color,
+                             (composing_rect.left, underline_y),
+                             (composing_rect.right, underline_y), 1)
+            cursor_x = composing_rect.right
+
+        after_surf = font.render(after, True, self.text_color)
+        surface.blit(after_surf, after_surf.get_rect(midleft=(cursor_x, self.rect.centery)))
+
+        if self.active and (pygame.time.get_ticks() // 500) % 2 == 0:
+            caret_half = font.get_height() // 2
+            pygame.draw.line(
+                surface, self.text_color,
+                (cursor_x, self.rect.centery - caret_half),
+                (cursor_x, self.rect.centery + caret_half),
+                1,
+            )
 
 
 @dataclass(slots=True)

@@ -340,7 +340,7 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             screen.blit(font.render("選擇組別 (1-10)", True, DIM), (M, btn_y - font.get_height() - 6))
             for button in group_buttons:
                 button.draw(screen, font)
-            screen.blit(font.render("輸入名字", True, DIM), (M, inp_y - font.get_height() - 6))
+            screen.blit(font.render("輸入名字（可用 Ctrl+V 貼上中文）", True, DIM), (M, inp_y - font.get_height() - 6))
             name_input.draw(screen, font)
             register_button.draw(screen, font)
             if error_message:
@@ -494,6 +494,7 @@ def run_training_config_screen(
     last_valid_max_speed = str(max(5, min(30, default_max_speed)))
     last_valid_auto_breed = str(max(30, min(90, default_auto_breed_seconds)))
     saved_slider_values: dict[str, int] = {}
+    record_scroll_offset: int = 0
     custom_presets = FitnessPresetStore().list_presets()
     selected_strategy = BeginnerMix.copy()
     pending_delete_preset = False
@@ -624,7 +625,6 @@ def run_training_config_screen(
         }
 
         # Record section
-        records = RecordStore().list_records()
         record_title_y = record_y + M
         rec_btn_y = record_title_y + title_font.size("A")[1] + M // 2
         rec_row_h = max(30, H // 28)
@@ -632,20 +632,25 @@ def run_training_config_screen(
         action_y = H - M - btn_h
         available_record_h = max(0, action_y - M - rec_btn_y)
         max_visible_rows = max(1, available_record_h // (rec_row_h + 4))
-        max_records = max(0, min(len(records), max_visible_rows - 1))
-        record_rows: list[TrainingRecord | None] = [None, *records[:max_records]]
-        record_buttons: list[tuple[TrainingRecord | None, Button]] = [
-            (
-                row,
-                Button(
-                    "隨機訓練（不套用舊紀錄）"
-                    if row is None
-                    else f"{row.record_name}  |  {format_timestamp_utc8(row.saved_at)}",
-                    pygame.Rect(M + M // 2, rec_btn_y + i * (rec_row_h + 4), left_w - M * 3, rec_row_h),
-                ),
-            )
-            for i, row in enumerate(record_rows)
-        ]
+        # First row is the pinned "隨機訓練" option; the rest scroll.
+        scrollable_rows = max(0, max_visible_rows - 1)
+        # Fetched once per rebuild (not per frame) so TrainingRecord identity
+        # stays stable across frames — `selected_record` is compared with
+        # `is`, which would break every frame if we re-queried the store here.
+        records = RecordStore().list_records()
+        record_scrollbar_w = 10
+        record_btn_w = left_w - M * 3 - record_scrollbar_w - M // 2
+        record_scrollbar = VerticalScrollbar(
+            pygame.Rect(
+                M + M // 2 + record_btn_w + M // 2,
+                rec_btn_y + (rec_row_h + 4),
+                record_scrollbar_w,
+                max(0, scrollable_rows * (rec_row_h + 4) - 4),
+            ),
+            total_items=0,
+            visible_items=scrollable_rows,
+            offset=record_scroll_offset,
+        )
         go_button = Button("GO", pygame.Rect(M + M // 2, action_y, left_w - M * 3, btn_h))
         current_custom_preset: CustomFitnessPreset | None = None
 
@@ -669,6 +674,23 @@ def run_training_config_screen(
                 (p for p in custom_presets if p.preset_name == preset_dropdown.selected), None
             )
 
+            record_scrollbar.total_items = len(records)
+            record_scrollbar.clamp()
+            visible_records = records[record_scrollbar.offset : record_scrollbar.offset + scrollable_rows]
+            record_rows: list[TrainingRecord | None] = [None, *visible_records]
+            record_buttons: list[tuple[TrainingRecord | None, Button]] = [
+                (
+                    row,
+                    Button(
+                        "隨機訓練（不套用舊紀錄）"
+                        if row is None
+                        else f"{row.record_name}  |  {format_timestamp_utc8(row.saved_at)}",
+                        pygame.Rect(M + M // 2, rec_btn_y + i * (rec_row_h + 4), record_btn_w, rec_row_h),
+                    ),
+                )
+                for i, row in enumerate(record_rows)
+            ]
+
             for event in pygame.event.get():
                 _check_quit(event)
                 if event.type == pygame.VIDEORESIZE:
@@ -677,8 +699,12 @@ def run_training_config_screen(
                         last_valid_max_speed = max_speed_input.text
                     if auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90:
                         last_valid_auto_breed = auto_breed_input.text
+                    record_scroll_offset = record_scrollbar.offset
                     resize = True
                     break
+
+                if record_scrollbar.handle_event(event):
+                    continue
 
                 dropdown_was_open = preset_dropdown.is_open
                 dropdown_captured_click = (
@@ -757,8 +783,19 @@ def run_training_config_screen(
                     if go_button.contains(pos) and go_enabled():
                         weights = {name: s.value for name, s in all_sliders.items()}
                         selected_strategy.config.update_weights(weights)
+                        # `selected_strategy.name` may still be the last-loaded
+                        # preset's name even though the sliders have since been
+                        # tweaked away from it; `preset_dropdown.selected` is
+                        # recomputed every frame via `_match_preset_name` and is
+                        # what the UI itself shows (e.g. CUSTOM_PRESET_LABEL), so
+                        # carry that same label into the strategy handed to the
+                        # training screen instead of the stale preset name.
+                        final_strategy = FitnessStrategy(
+                            name=preset_dropdown.selected,
+                            config=selected_strategy.config,
+                        )
                         return (
-                            selected_strategy,
+                            final_strategy,
                             selected_difficulty,
                             selected_record,
                             int(max_speed_input.text),
@@ -848,6 +885,7 @@ def run_training_config_screen(
                 is_current = (row is None and start_mode == "fresh") or (row is not None and row is selected_record)
                 btn.fill_color = F1_RED if is_current else DARK
                 btn.draw(screen, font)
+            record_scrollbar.draw(screen, font)
 
             # Right: fitness sliders
             fit_panel = pygame.Rect(right_x, back_button.rect.bottom, right_w, H - back_button.rect.bottom - M)
@@ -990,6 +1028,14 @@ def run_record_name_screen(
 
         resize = False
         while not resize:
+            # Snapshot composing state before draining this frame's events. If
+            # an IME candidate confirmation lands in the same event batch as
+            # this Enter/Escape (its TEXTINPUT commit arriving alongside the
+            # raw KEYDOWN), `name_input.composing` may already read empty by
+            # the time we reach the KEYDOWN below — so we must judge "was this
+            # keypress used to finish composing" from the state going into the
+            # frame, not the state after handle_event() has processed it.
+            was_composing = bool(name_input.composing)
             for event in pygame.event.get():
                 _check_quit(event)
                 if event.type == pygame.VIDEORESIZE:
@@ -1006,7 +1052,7 @@ def run_record_name_screen(
                     if cancel_button.contains(event.pos):
                         name_input.blur()
                         return None
-                if event.type == pygame.KEYDOWN:
+                if event.type == pygame.KEYDOWN and not was_composing:
                     if event.key == pygame.K_RETURN and name_input.text.strip():
                         name_input.blur()
                         return name_input.text.strip()
