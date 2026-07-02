@@ -40,18 +40,22 @@ class FitnessPresetStore:
             return None
 
         presets = self._read()
-        preset_id = None
-        for item in presets:
-            if item["preset_name"] == name:
-                preset_id = item["preset_id"]
-                break
+        # Always create a new entry rather than matching by name and reusing
+        # its preset_id — the naming screen has no "update this preset"
+        # affordance, so silently overwriting on a name collision destroyed
+        # the original preset without any warning. Auto-disambiguate instead.
+        existing_names = {item["preset_name"] for item in presets}
+        unique_name = name
+        suffix = 2
+        while unique_name in existing_names:
+            unique_name = f"{name} ({suffix})"
+            suffix += 1
 
         preset = CustomFitnessPreset(
-            preset_id=preset_id or f"preset_{uuid4().hex[:8]}",
-            preset_name=name,
+            preset_id=f"preset_{uuid4().hex[:8]}",
+            preset_name=unique_name,
             fitness_config=fitness_config.copy(),
         )
-        presets = [item for item in presets if item["preset_name"] != name]
         presets.append(preset.to_dict())
         self._write(presets)
         return preset

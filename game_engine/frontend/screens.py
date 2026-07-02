@@ -160,16 +160,46 @@ TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None, int, i
 CUSTOM_PRESET_LABEL = "自訂（未儲存）"
 
 FITNESS_TOOLTIPS: dict[str, list[str]] = {
-    "speed":     ["高 → 更愛加速", "太高容易衝太快、撞牆、轉不過去"],
-    "progress":  ["高 → 更意往終點/賽道前方推進", "太高可能亂蹦、打轉也想賺進度"],
-    "centered":  ["高 → 更想待在路中間", "太高可能不敢切彎，也可能比較穩"],
-    "alignment": ["高 → 更意車頭對準路線方向", "太高會比較穩，但可能在複雜彎道變保守"],
-    "safety":    ["高 → 更想離牆遠", "太高可能怕靠近彎道，變慢或不敢轉"],
-    "stall":     ["高 → 停住更痛"],
-    "spin":      ["高 → 原地轉/轉了但沒錢進更痛"],
-    "wrong_way": ["高 → 車頭反方向更痛"],
-    "time":      ["高 → 拖時間更痛"],
-    "crash":     ["高 → 撞牆更痛"],
+    "progress": [
+        "說明：量化車輛沿著賽道中心線向終點推進的有效距離。",
+        "tips：數值太高會讓車輛可能在彎道或牆邊出現高頻率的摩擦或原地打轉。",
+    ],
+    "speed": [
+        "說明：獎勵車子行進過程中的絕對速度或瞬時加速度，可以縮短單圈時間。",
+        "tips：數值過高會導致車輛追求速度而在入彎前缺乏減速控制。",
+    ],
+    "alignment": [
+        "說明：計算車頭朝向與賽道切線向量兩者是否方向一致的程度。",
+        "tips：調高數值時行車軌跡會比較穩，但也可能讓車子變得過於保守而在過彎時減速。",
+    ],
+    "centered": [
+        "說明：量化車輛中心點與賽道中線之間的側向橫移距離，距離越低、獎勵越高。",
+        "tips：數值太高可能會使小車喪失尋找最佳賽車路線的能力，讓車子不敢切彎，過彎效率變差。",
+    ],
+    "safety": [
+        "說明：利用感測器偵測距離，獎勵車身與左右兩側賽道邊牆維持在特定安全距離以上。",
+        "tips：數值過高會讓車輛產生邊界恐懼症，在遇到較窄的彎道時會因為怕靠近牆壁而極度減速或停下。",
+    ],
+    "stall": [
+        "說明：當車輛速度在特定幀數內接近零且未前進時施加的懲罰。",
+        "tips：可以用來懲罰在訓練初期因為害怕撞牆而選擇在原地不停旋轉的車輛。",
+    ],
+    "spin": [
+        "說明：偵測車輛角速度過高，或在很小的空間內卻大幅改動行進方向卻無有效位移的懲罰。",
+        "tips：可以用來懲罰為了刷 progress 獎勵而在賽道原地打轉的行為。",
+    ],
+    "wrong_way": [
+        "說明：當車輛逆向行駛時會觸發懲罰。",
+        "tips：若小車碰撞後反彈或打滑導致逆向，這個懲罰可以讓車輛演化時快速淘汰逆向行駛的基因。",
+    ],
+    "time": [
+        "說明：與訓練時間成正比的持續性小幅度扣分。",
+        "tips：引入時間成本的概念，懲罰那些雖然可以跑完、但車速極慢的保守小車個體。",
+    ],
+    "crash": [
+        "說明：車身邊界與賽道護欄發生碰撞時立即觸發並中止該輪模擬。",
+        "tips：調得越高車輛的駕駛方式就越趨向防撞，而撞到邊界會降低該個體的優勢。",
+    ],
 }
 
 BONUS_FITNESS_PLACEHOLDERS = [
@@ -213,6 +243,25 @@ def _ellipsize(font: pygame.font.Font, text: str, max_width: int) -> str:
     while text and font.size(text + suffix)[0] > max_width:
         text = text[:-1]
     return text + suffix
+
+
+def _wrap_text(font: pygame.font.Font, text: str, max_width: int) -> list[str]:
+    """Greedily break `text` into lines no wider than `max_width`. Wraps by
+    character (not word) since CJK text has no spaces to split on."""
+    if font.size(text)[0] <= max_width:
+        return [text]
+    lines: list[str] = []
+    line = ""
+    for character in text:
+        candidate = line + character
+        if line and font.size(candidate)[0] > max_width:
+            lines.append(line)
+            line = character
+        else:
+            line = candidate
+    if line:
+        lines.append(line)
+    return lines
 
 
 def format_ticks_as_seconds(ticks: int | None, fps: int = FPS) -> str:
@@ -924,10 +973,16 @@ def run_training_config_screen(
 
             # Draw tooltip on top of everything
             if hovered_tip and hovered_tip in FITNESS_TOOLTIPS:
-                lines = FITNESS_TOOLTIPS[hovered_tip]
+                tip_text_max_width = 320
+                wrapped_lines: list[tuple[str, tuple[int, int, int]]] = []
+                for i, ln in enumerate(FITNESS_TOOLTIPS[hovered_tip]):
+                    color = INK if i == 0 else DIM
+                    wrapped_lines.extend(
+                        (wrapped, color) for wrapped in _wrap_text(font, ln, tip_text_max_width)
+                    )
                 line_h = font.get_height() + 4
-                tip_w = max(font.size(ln)[0] for ln in lines) + 24
-                tip_h = len(lines) * line_h + 16
+                tip_w = max(font.size(ln)[0] for ln, _ in wrapped_lines) + 24
+                tip_h = len(wrapped_lines) * line_h + 16
                 tx, ty = hovered_tip_pos
                 if tx + tip_w > W - 4:
                     tx = hovered_tip_pos[0] - (icon_r * 2 + 12) - tip_w
@@ -936,16 +991,23 @@ def run_training_config_screen(
                 pygame.draw.rect(screen, (12, 14, 18), tip_rect)
                 pygame.draw.rect(screen, LINE, tip_rect, 1)
                 pygame.draw.rect(screen, CYAN, pygame.Rect(tip_rect.x, tip_rect.y, 2, tip_rect.height))
-                for i, ln in enumerate(lines):
-                    ls = font.render(ln, True, INK if i == 0 else DIM)
+                for i, (ln, color) in enumerate(wrapped_lines):
+                    ls = font.render(ln, True, color)
                     screen.blit(ls, (tip_rect.x + 12, tip_rect.y + 8 + i * line_h))
             pygame.display.update()
             clock.tick(30)
 
 
-def run_save_confirm_screen(screen: pygame.Surface) -> tuple[bool, bool] | None:
+def run_save_confirm_screen(
+    screen: pygame.Surface, preset_savable: bool = True
+) -> tuple[bool, bool] | None:
     """Returns (save_record, save_as_preset), or None if the user cancels (stay
-    in training). save_as_preset is only ever True alongside save_record."""
+    in training). save_as_preset is only ever True alongside save_record.
+
+    `preset_savable` should be False when the current fitness weights already
+    match an existing preset (built-in or custom) — i.e. the config screen
+    isn't showing CUSTOM_PRESET_LABEL — since saving it again would just
+    create a redundant duplicate preset with identical values."""
     clock = pygame.time.Clock()
     preset_checked = False  # survive resize
 
@@ -957,11 +1019,20 @@ def run_save_confirm_screen(screen: pygame.Surface) -> tuple[bool, bool] | None:
         yes_button = Button("存檔", pygame.Rect(width // 2 - 260, height // 2, 160, 56))
         no_button = Button("不存", pygame.Rect(width // 2 - 90, height // 2, 160, 56))
         cancel_button = Button("取消", pygame.Rect(width // 2 + 80, height // 2, 160, 56))
+        checkbox_label = (
+            "另存為 Fitness 預選組合"
+            if preset_savable
+            else "另存為 Fitness 預選組合（此組合已存在，無需另存）"
+        )
         save_as_preset_checkbox = Checkbox(
             pygame.Rect(width // 2 - 260, height // 2 + 80, 28, 28),
-            label="另存為 Fitness 預選組合",
-            checked=preset_checked,
+            label=checkbox_label,
+            checked=preset_checked and preset_savable,
         )
+        if not preset_savable:
+            save_as_preset_checkbox.box_color = CARBON
+            save_as_preset_checkbox.border_color = DIM
+            save_as_preset_checkbox.text_color = DIM
 
         resize = False
         while not resize:
@@ -970,8 +1041,9 @@ def run_save_confirm_screen(screen: pygame.Surface) -> tuple[bool, bool] | None:
                 if event.type == pygame.VIDEORESIZE:
                     resize = True
                     break
-                save_as_preset_checkbox.handle_event(event)
-                preset_checked = save_as_preset_checkbox.checked
+                if preset_savable:
+                    save_as_preset_checkbox.handle_event(event)
+                    preset_checked = save_as_preset_checkbox.checked
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     if yes_button.contains(event.pos):
                         return True, save_as_preset_checkbox.checked
