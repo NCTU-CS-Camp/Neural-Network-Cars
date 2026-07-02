@@ -584,6 +584,30 @@ def test_empty_replay_session_stops_without_advancing_frames():
     assert session.frames == 0
 
 
+def test_replay_stopped_car_sprite_draws_with_alpha():
+    from game_engine.frontend.replay_client import _draw_replay_car_sprite
+
+    class Car:
+        x = 40
+        y = 40
+        angle = 180
+        car_image = pygame.Surface((12, 20), pygame.SRCALPHA)
+
+    class ReplayCar:
+        car = Car()
+        crashed = True
+        stalled = False
+        finished = False
+
+    pygame.init()
+    ReplayCar.car.car_image.fill((255, 255, 255, 255))
+    surface = pygame.Surface((80, 80), pygame.SRCALPHA)
+
+    _draw_replay_car_sprite(surface, ReplayCar())  # type: ignore[arg-type]
+
+    assert surface.get_at((40, 40)).a == 112
+
+
 def test_phase_one_draw_ticks_both_sides_without_short_circuit():
     from game_engine.frontend.replay_client import ReplayStatus, _draw_phase_one, _fonts
 
