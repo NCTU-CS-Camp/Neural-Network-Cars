@@ -95,6 +95,7 @@ def _car_from_flat_weights(
 
 def run():
     pygame.init()
+    pygame.scrap.init()
     info = pygame.display.Info()
     win_w = int(info.current_w * 0.9)
     win_h = int(info.current_h * 0.9)

@@ -340,7 +340,7 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             screen.blit(font.render("選擇組別 (1-10)", True, DIM), (M, btn_y - font.get_height() - 6))
             for button in group_buttons:
                 button.draw(screen, font)
-            screen.blit(font.render("輸入名字", True, DIM), (M, inp_y - font.get_height() - 6))
+            screen.blit(font.render("輸入名字（可用 Ctrl+V 貼上中文）", True, DIM), (M, inp_y - font.get_height() - 6))
             name_input.draw(screen, font)
             register_button.draw(screen, font)
             if error_message:
