@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
@@ -381,6 +381,25 @@ def _coerce_fitness_weight(name: str, value: Any) -> FitnessWeight:
     return int(numeric) if numeric.is_integer() else numeric
 
 
+def _migrate_upload_results(data: dict[str, Any]) -> dict[str, Any]:
+    """Backward-compat: migrate old flat last_upload_* fields to per-difficulty dict."""
+    if "upload_results" in data:
+        return dict(data["upload_results"])
+    # Old single-upload records used flat fields; import them under the key "legacy"
+    if data.get("last_upload_status") is not None:
+        return {
+            "legacy": {
+                "completed": data.get("last_upload_completed"),
+                "lap_ticks": data.get("last_upload_lap_ticks"),
+                "max_progress": data.get("last_upload_max_progress"),
+                "survival_rate": data.get("last_upload_survival_rate"),
+                "status": data.get("last_upload_status"),
+                "uploaded_at": data.get("last_upload_at"),
+            }
+        }
+    return {}
+
+
 @dataclass(slots=True)
 class TrainingRecord:
     record_id: str
@@ -400,12 +419,7 @@ class TrainingRecord:
     mlp_init_seed: int = DEFAULT_EVOLUTION_SEED
     mlp_init_rng_state: dict[str, Any] | None = None
     mutation_rng_state: tuple[Any, ...] | list[Any] | None = None
-    last_upload_completed: bool | None = None
-    last_upload_lap_ticks: int | None = None
-    last_upload_max_progress: float | None = None
-    last_upload_survival_rate: float | None = None
-    last_upload_status: str | None = None
-    last_upload_at: str | None = None
+    upload_results: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrainingRecord":
@@ -436,12 +450,7 @@ class TrainingRecord:
             ),
             mlp_init_rng_state=data.get("mlp_init_rng_state"),
             mutation_rng_state=data.get("mutation_rng_state"),
-            last_upload_completed=data.get("last_upload_completed"),
-            last_upload_lap_ticks=data.get("last_upload_lap_ticks"),
-            last_upload_max_progress=data.get("last_upload_max_progress"),
-            last_upload_survival_rate=data.get("last_upload_survival_rate"),
-            last_upload_status=data.get("last_upload_status"),
-            last_upload_at=data.get("last_upload_at"),
+            upload_results=_migrate_upload_results(data),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -463,12 +472,7 @@ class TrainingRecord:
             "mlp_init_seed": self.mlp_init_seed,
             "mlp_init_rng_state": self.mlp_init_rng_state,
             "mutation_rng_state": self.mutation_rng_state,
-            "last_upload_completed": self.last_upload_completed,
-            "last_upload_lap_ticks": self.last_upload_lap_ticks,
-            "last_upload_max_progress": self.last_upload_max_progress,
-            "last_upload_survival_rate": self.last_upload_survival_rate,
-            "last_upload_status": self.last_upload_status,
-            "last_upload_at": self.last_upload_at,
+            "upload_results": self.upload_results,
         }
 
 

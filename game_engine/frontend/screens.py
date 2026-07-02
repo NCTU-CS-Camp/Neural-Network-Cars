@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import math
+import platform
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Literal
@@ -120,6 +122,33 @@ VALID_FITNESS_INPUT_COLOR = LINE
 INVALID_FITNESS_INPUT_COLOR = (255, 90, 90)
 UTC_PLUS_8 = timezone(timedelta(hours=8))
 
+_IS_WSL: bool = "microsoft" in platform.uname().release.lower()
+
+
+def _windows_input_box(prompt: str, title: str, default: str = "") -> str | None:
+    """Open a native Windows input dialog via powershell.exe (WSL2 only).
+    Returns the entered text, or None if cancelled / unavailable."""
+    if not _IS_WSL:
+        return None
+    # Escape double-quotes in user-supplied strings
+    p = prompt.replace('"', "'")
+    t = title.replace('"', "'")
+    d = default.replace('"', "'")
+    script = (
+        '[System.Reflection.Assembly]::LoadWithPartialName("Microsoft.VisualBasic") | Out-Null;'
+        f'$r=[Microsoft.VisualBasic.Interaction]::InputBox("{p}","{t}","{d}");'
+        'Write-Output $r'
+    )
+    try:
+        result = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, text=True, encoding="utf-8", timeout=120,
+        )
+        text = result.stdout.strip()
+        return text if result.returncode == 0 else None
+    except Exception:
+        return None
+
 
 class AppQuit(Exception):
     """Raised when the user closes the window from within a blocking screen."""
@@ -129,6 +158,19 @@ GROUP_COUNT = 10
 MenuChoice = Literal["training", "validation", "clear_user"]
 TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None, int, int]
 CUSTOM_PRESET_LABEL = "自訂（未儲存）"
+
+FITNESS_TOOLTIPS: dict[str, list[str]] = {
+    "speed":     ["高 → 更愛加速", "太高容易衝太快、撞牆、轉不過去"],
+    "progress":  ["高 → 更意往終點/賽道前方推進", "太高可能亂蹦、打轉也想賺進度"],
+    "centered":  ["高 → 更想待在路中間", "太高可能不敢切彎，也可能比較穩"],
+    "alignment": ["高 → 更意車頭對準路線方向", "太高會比較穩，但可能在複雜彎道變保守"],
+    "safety":    ["高 → 更想離牆遠", "太高可能怕靠近彎道，變慢或不敢轉"],
+    "stall":     ["高 → 停住更痛"],
+    "spin":      ["高 → 原地轉/轉了但沒錢進更痛"],
+    "wrong_way": ["高 → 車頭反方向更痛"],
+    "time":      ["高 → 拖時間更痛"],
+    "crash":     ["高 → 撞牆更痛"],
+}
 
 BONUS_FITNESS_PLACEHOLDERS = [
     "speed",
@@ -254,7 +296,8 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             for group_id in range(1, GROUP_COUNT + 1)
         ]
         inp_y = H * 55 // 100
-        name_input = TextInput(pygame.Rect(M, inp_y, min(400, W - M * 2), max(40, H // 18)), text=name_text)
+        inp_h = max(40, H // 18)
+        name_input = TextInput(pygame.Rect(M, inp_y, min(400, W - M * 2), inp_h), text=name_text)
         reg_y = H * 70 // 100
         register_button = Button("註冊", pygame.Rect(M, reg_y, max(120, W // 8), max(44, H // 18)))
 
@@ -297,7 +340,7 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             screen.blit(font.render("選擇組別 (1-10)", True, DIM), (M, btn_y - font.get_height() - 6))
             for button in group_buttons:
                 button.draw(screen, font)
-            screen.blit(font.render("輸入名字", True, DIM), (M, inp_y - font.get_height() - 6))
+            screen.blit(font.render("輸入名字（可用 Ctrl+V 貼上中文）", True, DIM), (M, inp_y - font.get_height() - 6))
             name_input.draw(screen, font)
             register_button.draw(screen, font)
             if error_message:
@@ -516,7 +559,7 @@ def run_training_config_screen(
 
         # Fitness sliders
         slider_label_x = right_x + M
-        slider_label_w = max(100, right_w // 5)
+        slider_label_w = max(100, right_w // 5) + 30  # extra 30 px for the "?" icon
         value_input_w = max(56, right_w // 10)
         control_gap = max(10, M // 2)
         slider_x = slider_label_x + slider_label_w
@@ -813,18 +856,51 @@ def run_training_config_screen(
             pygame.draw.rect(screen, CYAN, pygame.Rect(fit_panel.x, fit_panel.y, 3, fit_panel.height))
             screen.blit(head_fitness.render("FITNESS TELEMETRY", True, CYAN),
                         (right_x + M + 4, sliders_top - head_fitness.get_height() - M // 4))
+            hovered_tip: str | None = None
+            hovered_tip_pos: tuple[int, int] = (0, 0)
+            icon_r = max(7, mono_value.get_height() // 2 - 1)
             for name, slider in all_sliders.items():
                 is_bonus = name in BONUS_FITNESS_PLACEHOLDERS
                 label_color = F1_GREEN if is_bonus else F1_RED
                 slider.handle_color = CYAN if is_bonus else F1_RED
                 label_y = slider.rect.centery - font.size(name)[1] // 2
-                screen.blit(font.render(name, True, label_color), (slider_label_x, label_y))
+                label_surf = font.render(name, True, label_color)
+                screen.blit(label_surf, (slider_label_x, label_y))
+                # "?" tooltip icon — fixed column just left of all sliders
+                icon_cx = slider_x - icon_r - 8
+                icon_cy = slider.rect.centery
+                mx, my = mouse_pos
+                icon_hovered = (mx - icon_cx) ** 2 + (my - icon_cy) ** 2 <= icon_r ** 2
+                pygame.draw.circle(screen, CYAN if icon_hovered else (45, 50, 65), (icon_cx, icon_cy), icon_r)
+                q_surf = mono_value.render("?", True, BG if icon_hovered else DIM)
+                screen.blit(q_surf, q_surf.get_rect(center=(icon_cx, icon_cy)))
+                if icon_hovered:
+                    hovered_tip = name
+                    hovered_tip_pos = (icon_cx + icon_r + 6, icon_cy)
                 slider.draw(screen, font)
                 value_inputs[name].draw(screen, mono_value)
 
             go_button.draw(screen, font)
             preset_dropdown.draw(screen, font)
             delete_preset_button.draw(screen, font)
+
+            # Draw tooltip on top of everything
+            if hovered_tip and hovered_tip in FITNESS_TOOLTIPS:
+                lines = FITNESS_TOOLTIPS[hovered_tip]
+                line_h = font.get_height() + 4
+                tip_w = max(font.size(ln)[0] for ln in lines) + 24
+                tip_h = len(lines) * line_h + 16
+                tx, ty = hovered_tip_pos
+                if tx + tip_w > W - 4:
+                    tx = hovered_tip_pos[0] - (icon_r * 2 + 12) - tip_w
+                ty = max(4, min(ty - tip_h // 2, H - tip_h - 4))
+                tip_rect = pygame.Rect(tx, ty, tip_w, tip_h)
+                pygame.draw.rect(screen, (12, 14, 18), tip_rect)
+                pygame.draw.rect(screen, LINE, tip_rect, 1)
+                pygame.draw.rect(screen, CYAN, pygame.Rect(tip_rect.x, tip_rect.y, 2, tip_rect.height))
+                for i, ln in enumerate(lines):
+                    ls = font.render(ln, True, INK if i == 0 else DIM)
+                    screen.blit(ls, (tip_rect.x + 12, tip_rect.y + 8 + i * line_h))
             pygame.display.update()
             clock.tick(30)
 
@@ -1053,24 +1129,28 @@ def _run_record_submission_screen(
     )
 
 
-def _last_upload_line(record: TrainingRecord) -> str | None:
-    if record.last_upload_status is None:
-        return None
-    completed_text = "是" if record.last_upload_completed else "否"
-    if record.last_upload_completed:
-        progress_text = f"耗時 {format_ticks_as_seconds(record.last_upload_lap_ticks)}"
-    else:
-        max_progress = record.last_upload_max_progress or 0.0
-        progress_text = f"最遠進度 {max_progress:.1f}px"
-    survival_rate = record.last_upload_survival_rate or 0.0
-    uploaded_at = (
-        format_timestamp_utc8(record.last_upload_at) if record.last_upload_at else "--"
-    )
-    return (
-        f"上次上傳：{record.last_upload_status}  |  "
-        f"賽道完成：{completed_text}  |  {progress_text}  |  "
-        f"存活率 {survival_rate:.0%}  |  {uploaded_at}"
-    )
+_COMPETITION_LABEL: dict[str, str] = {"easy": "Easy", "hard": "Hard", "final": "Final", "legacy": "Legacy"}
+
+
+def _upload_result_lines(record: TrainingRecord) -> list[str]:
+    """Return one summary line per uploaded competition difficulty (empty list if none)."""
+    lines: list[str] = []
+    for comp_id, r in record.upload_results.items():
+        label = _COMPETITION_LABEL.get(comp_id, comp_id)
+        status = r.get("status") or "--"
+        completed = r.get("completed")
+        if completed:
+            progress_text = f"耗時 {format_ticks_as_seconds(r.get('lap_ticks'))}"
+        else:
+            mp = r.get("max_progress") or 0.0
+            progress_text = f"最遠進度 {mp:.1f}px"
+        sr = r.get("survival_rate") or 0.0
+        uploaded_at = format_timestamp_utc8(r["uploaded_at"]) if r.get("uploaded_at") else "--"
+        lines.append(
+            f"[{label}] {status}  |  完成：{'是' if completed else '否'}  |  "
+            f"{progress_text}  |  存活率 {sr:.0%}  |  {uploaded_at}"
+        )
+    return lines
 
 
 def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
@@ -1091,7 +1171,7 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
         scrollbar_width = 14
         scrollbar_gap = 10
         back_button = Button("返回", pygame.Rect(margin, margin, 120, 48))
-        row_height = 160
+        row_height = 200
         row_gap = 10
         list_top = back_button.rect.bottom + margin
         list_bottom = height - margin
@@ -1216,12 +1296,14 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
                     detail_font.render(reward_line, True, F1_GREEN),
                     (text_x, card_rect.y + 10 + font.get_height() + fitness_surf.get_height() + detail_font.get_height()),
                 )
-                upload_line = _last_upload_line(record) or "尚未上傳"
-                upload_line = _ellipsize(detail_font, upload_line, content_width)
-                screen.blit(
-                    detail_font.render(upload_line, True, DIM),
-                    (text_x, card_rect.y + 10 + font.get_height() + fitness_surf.get_height() + detail_font.get_height() * 2),
-                )
+                upload_lines = _upload_result_lines(record) or ["尚未上傳"]
+                base_y = card_rect.y + 10 + font.get_height() + fitness_surf.get_height() + detail_font.get_height() * 2
+                for ul_idx, upload_line in enumerate(upload_lines):
+                    upload_line = _ellipsize(detail_font, upload_line, content_width)
+                    screen.blit(
+                        detail_font.render(upload_line, True, DIM),
+                        (text_x, base_y + ul_idx * detail_font.get_height()),
+                    )
                 validate_button.draw(screen, font)
                 upload_button.fill_color = CYAN
                 upload_button.text_color = (10, 11, 14)
@@ -1517,10 +1599,12 @@ class SimulationOutcome:
     `collided` only reflects an actual `car.collision()` hit — stalling out
     (see STALL_TICK_LIMIT) or simply running out the frame limit does not
     count as a collision, since survival rate is defined as "never crashed".
+    `completed` is True for cars that finished the full lap without colliding.
     """
 
     survival: list[int]
     collided: list[bool]
+    completed: list[bool]
 
 
 def _draw_progress_screen(
@@ -1531,6 +1615,8 @@ def _draw_progress_screen(
     frame_limit: int,
     active_count: int,
     total: int,
+    completed_count: int = 0,
+    crashed_count: int = 0,
 ) -> None:
     width, height = screen.get_size()
     bar = ProgressBar(
@@ -1542,13 +1628,16 @@ def _draw_progress_screen(
     title_surface = font.render(title, True, INK)
     screen.blit(title_surface, title_surface.get_rect(center=(width // 2, height // 2 - 80)))
     bar.draw(screen, font)
-    status = font.render(
-        f"{format_ticks_as_seconds(tick)} / {format_ticks_as_seconds(frame_limit)}"
-        f"  存活中：{active_count}/{total}",
-        True,
-        CYAN,
+    time_surf = font.render(
+        f"{format_ticks_as_seconds(tick)} / {format_ticks_as_seconds(frame_limit)}",
+        True, CYAN,
     )
-    screen.blit(status, status.get_rect(center=(width // 2, height // 2 + 50)))
+    screen.blit(time_surf, time_surf.get_rect(center=(width // 2, height // 2 + 50)))
+    counts_surf = font.render(
+        f"存活中：{active_count}  ·  完成：{completed_count}  ·  撞車：{crashed_count}  / {total}",
+        True, DIM,
+    )
+    screen.blit(counts_surf, counts_surf.get_rect(center=(width // 2, height // 2 + 80)))
     pygame.display.update()
 
 
@@ -1587,6 +1676,7 @@ def _simulate_candidates(
     active = [True] * len(candidates)
     survival = [frame_limit] * len(candidates)
     collided_flags = [False] * len(candidates)
+    completed_flags = [False] * len(candidates)
     stall_ticks = [0] * len(candidates)
 
     MAP_W, MAP_H = track_front.get_size()
@@ -1636,6 +1726,7 @@ def _simulate_candidates(
                         if trackers[index].completed:
                             active[index] = False
                             survival[index] = tick
+                            completed_flags[index] = True
                             completed_this_tick = True
             previous_positions[index] = car.center
 
@@ -1661,13 +1752,16 @@ def _simulate_candidates(
             pygame.display.update()
         else:
             _draw_progress_screen(
-                screen, font, title, tick, frame_limit, sum(active), len(candidates)
+                screen, font, title, tick, frame_limit,
+                sum(active), len(candidates),
+                completed_count=sum(completed_flags),
+                crashed_count=sum(collided_flags),
             )
         clock.tick(30)
         if stop_on_first_completion and completed_this_tick:
             break
 
-    return SimulationOutcome(survival=survival, collided=collided_flags)
+    return SimulationOutcome(survival=survival, collided=collided_flags, completed=completed_flags)
 
 
 def _client_results_from_trackers(trackers: list[Any]) -> list[ClientResult]:
@@ -1692,7 +1786,7 @@ def _run_candidate_tournament_screen(
     mlp_init_rng_state: dict[str, Any] | None = None,
     mutation_rng_state: tuple[Any, ...] | list[Any] | None = None,
     max_speed: int = MAX_SPEED,
-) -> tuple[Car, ClientResult, float] | None:
+) -> tuple[Car, ClientResult, float, SimulationOutcome] | None:
     assets = load_game_assets()
     competition_map = load_competition_map(competition_id)
     track_front = pygame.image.load(competition_map.front_path)
@@ -1726,8 +1820,9 @@ def _run_candidate_tournament_screen(
 
     client_results = _client_results_from_trackers(trackers)
     winner_index = min(range(len(candidates)), key=lambda i: client_results[i].ranking_key())
+    # survival_rate = cars that never crashed (finished OR still survived time limit)
     survival_rate = 1 - sum(outcome.collided) / len(candidates)
-    return candidates[winner_index], client_results[winner_index], survival_rate
+    return candidates[winner_index], client_results[winner_index], survival_rate, outcome
 
 
 def _run_validation_tournament_screen(
@@ -1934,12 +2029,14 @@ def _submit_result_screen(
                             upload_status = f"rejected:{response.error}"
                         else:
                             upload_status = "network_error"
-                        record.last_upload_completed = client_result.completed
-                        record.last_upload_lap_ticks = client_result.lap_ticks
-                        record.last_upload_max_progress = client_result.max_progress
-                        record.last_upload_survival_rate = survival_rate
-                        record.last_upload_status = upload_status
-                        record.last_upload_at = datetime.now(UTC_PLUS_8).isoformat(timespec="seconds")
+                        record.upload_results[competition_id] = {
+                            "completed": client_result.completed,
+                            "lap_ticks": client_result.lap_ticks,
+                            "max_progress": client_result.max_progress,
+                            "survival_rate": survival_rate,
+                            "status": upload_status,
+                            "uploaded_at": datetime.now(UTC_PLUS_8).isoformat(timespec="seconds"),
+                        }
                         RecordStore().update_record(record)
                 if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     return
@@ -2019,7 +2116,7 @@ def run_submission_screen(
     )
     if tournament_result is None:
         return
-    winner_car, client_result, survival_rate = tournament_result
+    winner_car, client_result, survival_rate, _outcome = tournament_result
 
     _submit_result_screen(
         screen,

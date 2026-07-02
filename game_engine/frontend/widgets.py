@@ -274,6 +274,13 @@ class TextInput:
             return True
 
         if event.type == pygame.TEXTINPUT:
+            # When IME is actively composing with non-ASCII characters (e.g.
+            # Bopomofo), SDL2 on some platforms leaks the raw Latin keystroke
+            # as a TEXTINPUT event alongside the TEXTEDITING event.  Discard
+            # those spurious ASCII events so only the committed Chinese
+            # character gets added.
+            if self.composing and not self.composing.isascii() and event.text.isascii():
+                return True
             self.composing = ""
             entered_text = event.text
             if self.allowed_characters is not None:
