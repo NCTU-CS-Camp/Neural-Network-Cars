@@ -99,9 +99,16 @@ def run():
     # composition events from the Windows IME bridge. X11/XWayland doesn't
     # forward these, which is why other Wayland-aware apps (GTK, Electron)
     # can type Chinese but SDL2 defaults can't.
+    # If the Wayland backend isn't compiled into this SDL2 build, fall back.
+    _tried_wayland = False
     if os.environ.get("WAYLAND_DISPLAY"):
         os.environ.setdefault("SDL_VIDEODRIVER", "wayland")
+        _tried_wayland = True
     pygame.init()
+    if _tried_wayland and not pygame.display.get_init():
+        os.environ.pop("SDL_VIDEODRIVER", None)
+        pygame.quit()
+        pygame.init()
     pygame.scrap.init()
     info = pygame.display.Info()
     win_w = int(info.current_w * 0.9)
