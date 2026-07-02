@@ -517,13 +517,15 @@ class CompetitionStorage:
         row = connection.execute(
             """
             SELECT submitted_at FROM submissions
-            WHERE competition_id = ? AND group_id = ? AND status NOT IN (?, ?)
+            WHERE competition_id = ? AND group_id = ? AND username = ?
+              AND status NOT IN (?, ?)
             ORDER BY submitted_at DESC
             LIMIT 1
             """,
             (
                 CompetitionId.FINAL.value,
                 group_id,
+                username,
                 SubmissionStatus.FAILED.value,
                 SubmissionStatus.DELETED.value,
             ),

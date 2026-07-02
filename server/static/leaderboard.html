@@ -295,7 +295,8 @@
         return item.group_id===myIdentity.group_id && item.username===myIdentity.username;
       });
       const latest = mySubmissions[0];
-      const best = ranked ? `#${ranked.rank} ${resultText(ranked.client_result)}` : "not ranked yet";
+      const representative = ranked && activeCompetition === "final" ? ` represented by ${ranked.username}` : "";
+      const best = ranked ? `#${ranked.rank} ${resultText(ranked.client_result)}${representative}` : "not ranked yet";
       const nextAt = myEligibility?.next_submission_at ? new Date(myEligibility.next_submission_at).toLocaleTimeString() : "unknown";
       const latestText = latest ? `${latest.status} ${resultText(latest.client_result)}` : "no submissions";
       mySummary.textContent = `${groupLabel(myIdentity.group_id)} / ${myIdentity.username} · ${activeCompetition.toUpperCase()} · best ${best} · latest ${latestText} · next ${nextAt}`;

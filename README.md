@@ -152,9 +152,9 @@ export COMPETITION_SERVER_URL=http://127.0.0.1:8000
 開啟 `http://127.0.0.1:8000/admin`，輸入 admin token。開發環境預設為 `admin`。後台內容會在 token 驗證成功後才顯示。
 
 1. 將 stage 設為 `phase_one`，開放個人 Easy 與 Hard submission。
-2. 將 stage 設為 `final`，關閉 Easy/Hard，開放每個 `group_id` 一筆 Final submission。
+2. 將 stage 設為 `final`，關閉 Easy/Hard，開放 Final submissions；Final cooldown 以 `(group_id, username)` 個人為單位，但排行榜以小組最佳代表上榜。
 3. `Snapshot interval` 可設定 snapshot 與 cooldown 間隔，目前支援 1、2、5 分鐘，預設 1 分鐘。
-4. `User Management` 可建立/更新使用者 temporary password、批次匯入帳號、enable/disable 帳號。
+4. `User Management` 可建立/更新使用者 temporary password、批次匯入帳號、enable/disable 帳號；測試帳號可從 `docs/test-users.csv` 匯入。
 5. `Run Snapshot Now` 會立即封存目前 queued submissions，方便測試；正式比賽則由目前 interval 的 UTC 邊界自動封存。
 6. `Restart Replay` 會通知大螢幕 Pygame client 立即從 spawn 重新播放目前 Top 15，不改變排行榜或 snapshot。
 7. `Submissions` 區可 soft-delete 單筆 submission；刪除後會從 leaderboard/replay/cooldown 中排除並重新排名。
@@ -179,17 +179,17 @@ Competition test main 的操作：
 - `U`：先呼叫 eligibility API；可提交時才送出目前 best car weights、`client_result`、`skin_id` 與 `max_speed`。
 - `P`：用 admin token 呼叫 `Run Snapshot Now`，讓 queued submissions 立即進 leaderboard/replay。
 
-Easy/Hard 對同一 `(group_id, username)` 各自有一段 cooldown，長度由 Admin 的 `Snapshot interval` 決定。Final 必須先由 admin 切到 `final` stage，cooldown 以 group 為單位，leaderboard 只保留每個 group 的歷史最佳 non-deleted submission。
+Easy/Hard 對同一 `(group_id, username)` 各自有一段 cooldown，長度由 Admin 的 `Snapshot interval` 決定。Final 必須先由 admin 切到 `final` stage，cooldown 同樣以 `(group_id, username)` 為單位，但 leaderboard 只保留每個 group 的歷史最佳 non-deleted submission。
 
 ### 3. Leaderboard：公開查看排名
 
 開啟 `http://127.0.0.1:8000/leaderboard`，使用 Easy、Hard、Final tabs 切換排行榜。
 
 - Easy/Hard：每個 `(group_id, username)` 只保留歷史最佳 completed submission。
-- Final：每個 `group_id` 只顯示鎖定的 model；username 顯示實際提交者。
+- Final：每個 `group_id` 只顯示小組最佳 model；username 顯示實際代表提交者。
 - 完成模型依圈速排序；未完成模型依最大 progress、到達該 progress 的 tick 排序。
 - queued submission 會在下一個 snapshot 後才進入排行榜。
-- Public leaderboard 不需登入；登入後頁面底部 sticky bar 會顯示目前 tab 的個人成績、next submission time 與 submission history。
+- Public leaderboard 不需登入；登入後頁面底部 sticky bar 會顯示目前 tab 的個人成績、next submission time 與 submission history；Final tab 會顯示小組代表成績、代表提交者與自己的最新提交。
 - Group 顯示統一使用 `Group 8` 這種格式。
 
 公開頁面不會暴露任何人的 weights 或 biases。
@@ -206,7 +206,7 @@ Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛
 
 Replay 目前採 safe-reveal 流程：新 snapshot 或 stage change 抵達時不會中斷目前畫面，而是在本輪 replay 結束後才採用。第一次播放新 leaderboard 時會先隱藏排行榜，等該 Easy/Hard/Final session 結束後再揭示；同一批 snapshot 的後續 replay 會直接顯示排行榜。
 
-Replay 會使用 submission metadata 呈現車子：`skin_id=0` 是白車、`skin_id=1` 是綠車，`max_speed` 會套用到 replay 車速上限。車名使用非灰色排行色；車輛 finished/crashed/stalled 後車體與名字會變暗。下一個 snapshot 剩 5 秒內，active map panel 會覆蓋半透明 F1 start-light 風格倒數燈號，但不會暫停或中斷 replay。
+Replay 會使用 submission metadata 呈現車子：`skin_id=0` 是白車、`skin_id=1` 是綠車，`max_speed` 會套用到 replay 車速上限。車名使用非灰色排行色；車輛 finished/crashed/stalled 後車體與名字會變暗。下一個 snapshot 剩 5 秒內，active map panel 會覆蓋半透明 F1 start-light 風格倒數燈號；若倒數到 0 時 replay 還在跑，會先用目前排名從 spawn 重新播放，並顯示「等待新快照，先重播目前排名」，新快照仍會等安全邊界才揭榜。
 
 若教室電腦的 Pygame 無法正確顯示中文狀態文字，可以指定 CJK 字型：
 

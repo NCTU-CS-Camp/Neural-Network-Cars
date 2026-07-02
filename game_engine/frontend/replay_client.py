@@ -73,6 +73,7 @@ REPLAY_HOLD_SECONDS = 3.0
 REPLAY_FETCH_SECONDS = 5.0
 LEADERBOARD_REVEAL_HIGHLIGHT_SECONDS = 2.0
 VIRTUAL_SIZE = SCREEN_SIZE
+SNAPSHOT_RESTART_LABEL = "等待新快照，先重播目前排名"
 # per-car label colors, intentionally avoiding gray; stopped cars override to DIM.
 REPLAY_COLORS: list[Color] = [
     RED_BRIGHT,
@@ -226,6 +227,8 @@ def run(
     next_fetch_at = 0.0
     status = "Connecting to protected replay feed"
     hold_until: float | None = None
+    last_handled_snapshot_boundary: str | None = None
+    snapshot_restart_notice_until: float | None = None
 
     try:
         while True:
@@ -297,6 +300,23 @@ def run(
                     status = f"Replay feed unavailable: {exc}"
                     next_fetch_at = now + REPLAY_FETCH_SECONDS
 
+            if state is not None:
+                restart_boundary = _snapshot_restart_boundary(
+                    state,
+                    sessions,
+                    hold_until,
+                    last_handled_snapshot_boundary,
+                )
+                if restart_boundary is not None:
+                    sessions = load_replay_sessions(
+                        state,
+                        assets,
+                        revealed_signatures,
+                    )
+                    hold_until = None
+                    last_handled_snapshot_boundary = restart_boundary
+                    snapshot_restart_notice_until = now + REPLAY_FETCH_SECONDS + 0.5
+
             virtual_screen.fill(BACKGROUND)
             if state is None:
                 _draw_centered(
@@ -314,6 +334,7 @@ def run(
                         state,
                         now,
                         hold_until,
+                        _snapshot_restart_notice_active(snapshot_restart_notice_until, now),
                     )
                     finished = _draw_final(
                         virtual_screen,
@@ -354,6 +375,7 @@ def run(
                             state,
                             now,
                             hold_until,
+                            _snapshot_restart_notice_active(snapshot_restart_notice_until, now),
                         )
                     else:
                         display_status = _waiting_status_text(state)
@@ -452,6 +474,7 @@ def _replay_status(
     state: dict[str, Any],
     now: float,
     hold_until: float | None,
+    snapshot_restart_notice: bool = False,
 ) -> ReplayStatus:
     elapsed = max((session.frames for session in sessions), default=0) / FPS
     snapshot = _snapshot_countdown_text(state)
@@ -464,7 +487,7 @@ def _replay_status(
             snapshot_countdown=snapshot,
         )
     return ReplayStatus(
-        label=f"Running replay / {stage}",
+        label=SNAPSHOT_RESTART_LABEL if snapshot_restart_notice else f"Running replay / {stage}",
         elapsed_seconds=elapsed,
         snapshot_countdown=snapshot,
     )
@@ -530,6 +553,42 @@ def _replay_payload_identity(state: dict[str, Any]) -> tuple[str, int, tuple[tup
 
 def _has_runnable_sessions(sessions: dict[str, ReplaySession]) -> bool:
     return any(session.has_cars for session in sessions.values())
+
+
+def _has_active_running_sessions(sessions: dict[str, ReplaySession]) -> bool:
+    return any(session.has_cars and not session.stopped for session in sessions.values())
+
+
+def _snapshot_restart_notice_active(until: float | None, now: float) -> bool:
+    return until is not None and now < until
+
+
+def _snapshot_restart_boundary(
+    state: dict[str, Any],
+    sessions: dict[str, ReplaySession],
+    hold_until: float | None,
+    last_handled_boundary: str | None,
+    *,
+    wall_time: float | None = None,
+) -> str | None:
+    if hold_until is not None or not _has_active_running_sessions(sessions):
+        return None
+    boundary = _snapshot_boundary_iso(state)
+    if boundary is None or boundary == last_handled_boundary:
+        return None
+    try:
+        boundary_time = datetime.fromisoformat(boundary)
+    except ValueError:
+        return None
+    if boundary_time.timestamp() > (time.time() if wall_time is None else wall_time):
+        return None
+    return boundary
+
+
+def _snapshot_boundary_iso(state: dict[str, Any]) -> str | None:
+    config = state.get("config", {})
+    target = config.get("next_snapshot_at") or config.get("next_phase_one_batch_at")
+    return None if not target else str(target)
 
 
 def _handle_finished_cycle(
