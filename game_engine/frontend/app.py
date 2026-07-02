@@ -54,7 +54,7 @@ from game_engine.frontend.profile_store import (
 from game_engine.frontend.shop.screen import run_shop_screen
 from game_engine.frontend.shop import wallet
 from game_engine.frontend.shop.config import GENERATION_REWARD
-from game_engine.frontend.shop.renderer import apply_equipped_skin
+from game_engine.frontend.shop.renderer import apply_equipped_skin, equipped_skin_id
 from game_engine.frontend.scenes import AppShell
 from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
@@ -185,6 +185,7 @@ def run_training_loop(
     fitness_config = fitness_strategy.config
 
     assets = load_game_assets()
+    training_skin_id = equipped_skin_id()
     apply_equipped_skin(assets)
     game_display = screen
     clock = pygame.time.Clock()
@@ -606,6 +607,7 @@ def run_training_loop(
             fitness_config=fitness_config,
             map_difficulty=map_difficulty,
             max_speed=settings.max_speed,
+            skin_id=training_skin_id,
             best_fitness_score=max(
                 pa_payload.fitness_score,
                 pb_payload.fitness_score,

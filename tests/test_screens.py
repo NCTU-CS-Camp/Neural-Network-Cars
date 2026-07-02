@@ -78,6 +78,7 @@ class _FakeRecord:
         self.best_fitness_score = None
         self.mlp_init_seed = 3057
         self.max_speed = 10
+        self.skin_id = 0
 
 
 class _FakeRecordStore:

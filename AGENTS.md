@@ -15,7 +15,8 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 - Phase 1 has independent `easy` and `hard` competitions keyed by `(group_id, username)`.
 - Final is group-based; cooldown is keyed by `group_id`, and ranking keeps each group's best non-deleted completed snapshot entry.
 - Student identity now requires admin-created classroom accounts. Public student actions use `Authorization: Bearer <token>` from `POST /v2/auth/login`; the request body identity must match the token.
-- Submissions persist optional replay metadata: `skin_id` (`0=white`, `1=green`) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
+- Submissions persist optional replay metadata: `skin_id` (shop catalog IDs `0` through `21`) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
+- Training records snapshot the equipped shop `skin_id` when training starts; later Upload submissions reuse that recorded ID rather than the currently equipped skin.
 - Admin can create/update plaintext temporary passwords, bulk import users, enable/disable accounts, and soft-delete individual submissions.
 - Public browser leaderboard is served at `/leaderboard`.
 - Admin page is served at `/admin`.
@@ -78,7 +79,7 @@ Validation rules:
 - Student eligibility/submission bodies must match the bearer-token identity.
 - Weight lengths are 36 and 24; bias lengths are 6 and 4.
 - All gene and result values must be finite.
-- `skin_id` defaults to `0`; only `0` and `1` are valid.
+- `skin_id` defaults to `0`; valid values are the shop catalog IDs `0` through `21`.
 - `max_speed`/`maxSpeed` defaults to `10.0`; valid range is `5` through `30`.
 - Completed runs require positive `lap_ticks`.
 - Incomplete runs require `lap_ticks: null`.

@@ -122,18 +122,23 @@ def _parent_tinted(surface: pygame.Surface) -> pygame.Surface:
     return result
 
 
+def equipped_skin_id() -> int:
+    """Return the active profile's equipped catalog skin, or the default."""
+    from game_engine.frontend.shop import store
+
+    identity = store.active_identity()
+    if identity is None:
+        return DEFAULT_SKIN_ID
+    return int(store.load_entry(identity)["equipped_skin"])
+
+
 def apply_equipped_skin(assets: Any) -> None:
     """Reskin the car base sprites on a GameAssets bundle to the equipped skin.
 
     No-op when no profile is logged in or the default skin is equipped, so
     stock behavior is unchanged unless the player opted into a skin.
     """
-    from game_engine.frontend.shop import store
-
-    identity = store.active_identity()
-    if identity is None:
-        return
-    equipped = int(store.load_entry(identity)["equipped_skin"])
+    equipped = equipped_skin_id()
     if equipped == DEFAULT_SKIN_ID:
         return
     surfaces = surfaces_for(equipped)

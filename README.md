@@ -181,6 +181,7 @@ Competition test main 的操作：
 - `V`：用目前 best car 在選定 competition map 上跑一次，產生 test-only `client_result`。
 - `O`：切換 manual result override，可手動輸入 completed、lap ticks、max progress 與 ticks。
 - `U`：先呼叫 eligibility API；可提交時才送出目前 best car weights、`client_result`、`skin_id` 與 `max_speed`。
+- 訓練紀錄會保存開始訓練時已裝備的商店 `skin_id`；稍後從該紀錄 Upload 時會沿用這個皮膚。
 - `P`：用 admin token 呼叫 `Run Snapshot Now`，讓 queued submissions 立即進 leaderboard/replay。
 
 Easy/Hard 對同一 `(group_id, username)` 各自有一段 cooldown，長度由 Admin 的 `Snapshot interval` 決定。Final 必須先由 admin 切到 `final` stage，cooldown 以 group 為單位，leaderboard 只保留每個 group 的歷史最佳 non-deleted submission。
@@ -210,7 +211,7 @@ Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛
 
 Replay 目前採 safe-reveal 流程：新 snapshot 或 stage change 抵達時不會中斷目前畫面，而是在本輪 replay 結束後才採用。第一次播放新 leaderboard 時會先隱藏排行榜，等該 Easy/Hard/Final session 結束後再揭示；同一批 snapshot 的後續 replay 會直接顯示排行榜。
 
-Replay 會使用 submission metadata 呈現車子：`skin_id=0` 是白車、`skin_id=1` 是綠車，`max_speed` 會套用到 replay 車速上限。車名使用非灰色排行色；車輛 finished/crashed/stalled 後車體與名字會變暗。下一個 snapshot 剩 5 秒內，active map panel 會覆蓋半透明 F1 start-light 風格倒數燈號，但不會暫停或中斷 replay。
+Replay 會使用 submission metadata 呈現車子：`skin_id=0` 是預設白車，`1` 到 `21` 會套用商店 catalog 對應的 `Images/Skins/` 車輛圖片；`max_speed` 會套用到 replay 車速上限。車名使用非灰色排行色；車輛 finished/crashed/stalled 後車體與名字會變暗。下一個 snapshot 剩 5 秒內，active map panel 會覆蓋半透明 F1 start-light 風格倒數燈號，但不會暫停或中斷 replay。
 
 若教室電腦的 Pygame 無法正確顯示中文狀態文字，可以指定 CJK 字型：
 

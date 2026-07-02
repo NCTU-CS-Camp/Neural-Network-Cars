@@ -13,6 +13,7 @@ from server.competition_config import STAGNATION_TICKS
 from server.competition_maps import get_competition_map
 from server.evaluation_worker import BatchWorker
 from server.storage import CompetitionStorage
+from shared.contracts import ALLOWED_SKIN_IDS
 
 
 class Clock:
@@ -413,7 +414,7 @@ def test_submission_metadata_defaults_aliases_and_validation(tmp_path):
         defaulted = submit(client, "easy", username="defaulted")
 
         alias_payload = make_payload(username="alias")
-        alias_payload["skin_id"] = 1
+        alias_payload["skin_id"] = 3
         alias_payload["maxSpeed"] = 12.5
         alias_response = client.post(
             "/v2/competitions/easy/submissions",
@@ -422,7 +423,7 @@ def test_submission_metadata_defaults_aliases_and_validation(tmp_path):
         )
 
         bad_skin = make_payload(username="badskin")
-        bad_skin["skin_id"] = 9
+        bad_skin["skin_id"] = 99
         bad_skin_response = client.post(
             "/v2/competitions/easy/submissions",
             json=bad_skin,
@@ -446,16 +447,44 @@ def test_submission_metadata_defaults_aliases_and_validation(tmp_path):
     assert defaulted["skin_id"] == 0
     assert defaulted["max_speed"] == 10.0
     assert alias_response.status_code == 201
-    assert alias_response.json()["skin_id"] == 1
+    assert alias_response.json()["skin_id"] == 3
     assert alias_response.json()["max_speed"] == 12.5
     assert bad_skin_response.status_code == 400
     assert "skin_id" in bad_skin_response.json()["detail"]
     assert bad_speed_response.status_code == 400
     assert "max_speed" in bad_speed_response.json()["detail"]
-    assert {row["username"]: row["skin_id"] for row in leaderboard}["alias"] == 1
+    assert {row["username"]: row["skin_id"] for row in leaderboard}["alias"] == 3
     assert {item["username"]: item["max_speed"] for item in replay["replays"]["easy"]["items"]}[
         "alias"
     ] == 12.5
+
+
+def test_submission_skin_ids_match_shop_catalog():
+    from game_engine.frontend.shop.catalog import all_skins
+
+    assert set(ALLOWED_SKIN_IDS) == {skin.id for skin in all_skins()}
+
+
+def test_server_logs_received_submission_payload_without_token(tmp_path, capsys):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        payload = make_payload(group_id="8", username="玩家一號")
+        payload["skin_id"] = 3
+        payload["maxSpeed"] = 10.0
+        response = client.post(
+            "/v2/competitions/easy/submissions",
+            json=payload,
+            headers=auth_headers(client, group_id="8", username="玩家一號"),
+        )
+
+    output = capsys.readouterr().out
+    assert response.status_code == 201
+    assert "Received competition submission payload:" in output
+    assert '"username": "玩家一號"' in output
+    assert '"skin_id": 3' in output
+    assert '"maxSpeed": 10.0' in output
+    assert '"lap_ticks": null' in output
+    assert "Bearer " not in output
 
 
 def test_admin_soft_delete_removes_submission_and_recomputes_best(tmp_path):
@@ -722,6 +751,7 @@ def test_dual_replay_sessions_keep_collision_surfaces_per_car():
 def test_replay_session_applies_submission_skin_and_max_speed():
     from game_engine.backend.assets import load_game_assets
     from game_engine.frontend.replay_client import load_replay_sessions
+    from game_engine.frontend.shop.renderer import surfaces_for
 
     pygame.init()
     pygame.display.set_mode((1, 1))
@@ -731,7 +761,7 @@ def test_replay_session_applies_submission_skin_and_max_speed():
         "submission_id": "sub_demo",
         "group_id": "1",
         "username": "ada",
-        "skin_id": 1,
+        "skin_id": 3,
         "max_speed": 12.5,
         "client_result": make_payload()["client_result"],
         "weights": [[0.0] * 36, [0.0] * 24],
@@ -743,7 +773,7 @@ def test_replay_session_applies_submission_skin_and_max_speed():
     )
 
     replay_car = sessions["easy"].cars[0]
-    assert replay_car.car.car_image is assets.green_small_car
+    assert replay_car.car.car_image is surfaces_for(3)["small"]
     assert replay_car.car.max_speed == 12.5
 
 

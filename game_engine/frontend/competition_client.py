@@ -851,6 +851,11 @@ def submit(
         "biases": payload.biases,
         "client_result": client_result.to_dict(),
     }
+    print(
+        "Competition submission payload:\n"
+        + json.dumps(body, ensure_ascii=False, indent=2),
+        flush=True,
+    )
     result = _post_json(url, body, token=token)
     if isinstance(result, NetworkError):
         return result

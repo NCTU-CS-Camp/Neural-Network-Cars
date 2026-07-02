@@ -17,6 +17,7 @@ from game_engine.backend.car import Car
 from game_engine.backend.competition_track import CompetitionRunTracker
 from game_engine.backend.serialization import apply_weight_payload
 from game_engine.backend.settings import FONT_PATH, FPS, SCREEN_SIZE
+from game_engine.frontend.shop.renderer import surfaces_for
 from server.competition_config import (
     FRAME_LIMIT,
     PHASE_ONE_REPLAY_LIMIT,
@@ -647,7 +648,9 @@ def build_replay_car(
 
 
 def _sprite_for_skin(assets: GameAssets, skin_id: int) -> pygame.Surface:
-    return assets.green_small_car if skin_id == 1 else assets.white_small_car
+    if skin_id == 0:
+        return assets.white_small_car
+    return surfaces_for(skin_id)["small"]
 
 
 def update_replay_cars(replay_cars: list[ReplayCar]) -> None:

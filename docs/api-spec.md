@@ -80,7 +80,7 @@ Request body:
 
 All genes and progress values must be finite. Incomplete runs require `lap_ticks: null`;
 completed runs require a positive `lap_ticks`. Tick values cannot exceed 900.
-`skin_id` is optional and defaults to `0`; valid values are `0=white` and `1=green`.
+`skin_id` is optional and defaults to `0`; valid values are shop catalog IDs `0` through `21`. Replay resolves non-default IDs through `game_engine.frontend.shop.renderer` and the assets under `Images/Skins/`.
 `max_speed` or `maxSpeed` is optional and defaults to `10.0`; valid range is 5 through 30.
 These two fields affect replay appearance/physics only and never change official ranking.
 

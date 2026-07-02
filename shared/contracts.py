@@ -17,7 +17,10 @@ DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 DEFAULT_EVOLUTION_SEED = 3057
 DEFAULT_SKIN_ID = 0
 DEFAULT_MAX_SPEED = 10.0
-ALLOWED_SKIN_IDS = (0, 1)
+# Keep this list aligned with game_engine/frontend/shop/catalog.py.  The server
+# treats the value as replay-only metadata and does not need to import frontend
+# rendering code to validate it.
+ALLOWED_SKIN_IDS = tuple(range(22))
 MIN_SUBMISSION_MAX_SPEED = 5.0
 MAX_SUBMISSION_MAX_SPEED = 30.0
 
@@ -192,13 +195,13 @@ class SubmissionPayload:
 
 def _coerce_skin_id(value: Any) -> int:
     if isinstance(value, bool):
-        raise ValueError("skin_id must be 0 or 1")
+        raise ValueError("skin_id must be a valid catalog id from 0 to 21")
     try:
         skin_id = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("skin_id must be 0 or 1") from exc
+        raise ValueError("skin_id must be a valid catalog id from 0 to 21") from exc
     if skin_id not in ALLOWED_SKIN_IDS:
-        raise ValueError("skin_id must be 0 or 1")
+        raise ValueError("skin_id must be a valid catalog id from 0 to 21")
     return skin_id
 
 
@@ -464,6 +467,7 @@ class TrainingRecord:
     fitness_config: FitnessConfig
     map_difficulty: int
     max_speed: int = 10
+    skin_id: int = DEFAULT_SKIN_ID
     best_fitness_score: float | None = None
     mlp_init_seed: int = DEFAULT_EVOLUTION_SEED
     mlp_init_rng_state: dict[str, Any] | None = None
@@ -475,6 +479,9 @@ class TrainingRecord:
         # backward compat: old records stored single weights/biases
         legacy_weights = [[float(w) for w in layer] for layer in data["weights"]] if "weights" in data else []
         legacy_biases = [[float(b) for b in layer] for layer in data["biases"]] if "biases" in data else []
+        skin_id = int(data.get("skin_id", DEFAULT_SKIN_ID))
+        if skin_id not in ALLOWED_SKIN_IDS:
+            skin_id = DEFAULT_SKIN_ID
         return cls(
             record_id=str(data["record_id"]),
             record_name=str(data["record_name"]),
@@ -489,6 +496,7 @@ class TrainingRecord:
             fitness_config=FitnessConfig.from_dict(data["fitness_config"]),
             map_difficulty=int(data["map_difficulty"]),
             max_speed=max(5, min(30, int(data.get("max_speed", 10)))),
+            skin_id=skin_id,
             best_fitness_score=(
                 float(data["best_fitness_score"])
                 if data.get("best_fitness_score") is not None
@@ -517,6 +525,7 @@ class TrainingRecord:
             "fitness_config": self.fitness_config.to_dict(),
             "map_difficulty": self.map_difficulty,
             "max_speed": self.max_speed,
+            "skin_id": self.skin_id,
             "best_fitness_score": self.best_fitness_score,
             "mlp_init_seed": self.mlp_init_seed,
             "mlp_init_rng_state": self.mlp_init_rng_state,

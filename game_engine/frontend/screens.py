@@ -2204,6 +2204,7 @@ def _submit_result_screen(
                             username=username,
                             weights=weight_payload.weights,
                             biases=weight_payload.biases,
+                            skin_id=record.skin_id,
                             max_speed=record.max_speed,
                         )
                         response = submit_to_competition_server(
