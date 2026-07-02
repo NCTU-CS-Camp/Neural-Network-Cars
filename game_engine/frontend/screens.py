@@ -1978,7 +1978,7 @@ def _run_validation_tournament_screen(
         track_back,
         spawn,
         candidates,
-        assets.green_small_car,
+        assets.white_small_car,
         VALIDATION_FRAME_LIMIT,
         trackers,
         title=f"Validation：{map_id}",

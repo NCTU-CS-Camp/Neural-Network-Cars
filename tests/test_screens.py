@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pygame
 import pytest
 
@@ -162,6 +164,52 @@ def test_main_menu_exposes_shop_action(monkeypatch) -> None:
     )
 
     assert choice == "shop"
+
+
+def test_validation_uses_regular_car_sprite(monkeypatch) -> None:
+    regular_sprite = pygame.Surface((17, 35))
+    green_sprite = pygame.Surface((17, 35))
+    captured: dict[str, pygame.Surface] = {}
+
+    monkeypatch.setattr(
+        screens,
+        "load_game_assets",
+        lambda: SimpleNamespace(
+            white_small_car=regular_sprite,
+            green_small_car=green_sprite,
+        ),
+    )
+    monkeypatch.setattr(screens, "apply_equipped_skin", lambda assets: None)
+    monkeypatch.setattr(screens, "_build_candidates", lambda *args, **kwargs: [object()])
+    monkeypatch.setattr(
+        screens,
+        "load_validation_map",
+        lambda _: SimpleNamespace(
+            front_path="front.png",
+            back_path="back.png",
+            spawn={"x": 0.0, "y": 0.0, "angle": 180.0},
+            new_tracker=lambda: object(),
+        ),
+    )
+    monkeypatch.setattr(pygame.image, "load", lambda _: pygame.Surface((10, 10)))
+
+    def capture_sprite(*args, **kwargs):
+        captured["sprite"] = args[5]
+        return None
+
+    monkeypatch.setattr(screens, "_simulate_candidates", capture_sprite)
+
+    assert (
+        screens._run_validation_tournament_screen(
+            pygame.Surface((10, 10)),
+            "easy",
+            object(),
+            object(),
+            [6, 6, 4],
+        )
+        is None
+    )
+    assert captured["sprite"] is regular_sprite
 
 
 @pytest.mark.parametrize(
