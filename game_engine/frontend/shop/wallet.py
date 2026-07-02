@@ -54,6 +54,8 @@ def award_milestone(key: str, amount: int) -> bool:
 
 def spend(amount: int) -> bool:
     """Deduct coins if affordable. Returns True on success."""
+    if amount <= 0:
+        return False
     identity = store.active_identity()
     if identity is None:
         return False

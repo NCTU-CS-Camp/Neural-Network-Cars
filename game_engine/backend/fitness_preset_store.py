@@ -63,3 +63,6 @@ class FitnessPresetStore:
     def delete_preset(self, preset_id: str) -> None:
         presets = [item for item in self._read() if item["preset_id"] != preset_id]
         self._write(presets)
+
+    def clear(self) -> None:
+        self._write([])

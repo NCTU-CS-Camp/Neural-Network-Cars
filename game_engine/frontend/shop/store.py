@@ -69,3 +69,12 @@ def save_entry(
     data = _load_all(path)
     data[identity] = entry
     _save_all(data, path)
+
+
+def delete_entry(identity: str, path: Path = SHOP_STATE_PATH) -> None:
+    """Delete one user's shop progress while preserving other local users."""
+    data = _load_all(path)
+    if identity not in data:
+        return
+    del data[identity]
+    _save_all(data, path)

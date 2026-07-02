@@ -66,21 +66,6 @@ def create_app(
 
     app = FastAPI(title="Neural Network Cars Trusted Competition", lifespan=lifespan)
 
-    def log_submission_payload(body: SubmissionIn) -> None:
-        payload = (
-            body.model_dump()
-            if hasattr(body, "model_dump")
-            else body.dict()
-        )
-        for optional_key in ("skin_id", "max_speed", "maxSpeed"):
-            if payload.get(optional_key) is None:
-                payload.pop(optional_key, None)
-        print(
-            "Received competition submission payload:\n"
-            + json.dumps(payload, ensure_ascii=False, indent=2),
-            flush=True,
-        )
-
     def require_admin(x_admin_token: str | None) -> None:
         if x_admin_token != token:
             raise HTTPException(
@@ -310,7 +295,6 @@ def create_app(
         authorization: str | None = Header(default=None),
     ) -> Any:
         identifier = phase_one_identifier(competition_id)
-        log_submission_payload(body)
         try:
             payload, client_result = body.to_submission()
             token_identity = require_user(authorization)
@@ -357,7 +341,6 @@ def create_app(
         body: SubmissionIn,
         authorization: str | None = Header(default=None),
     ) -> Any:
-        log_submission_payload(body)
         try:
             payload, client_result = body.to_submission()
             token_identity = require_user(authorization)

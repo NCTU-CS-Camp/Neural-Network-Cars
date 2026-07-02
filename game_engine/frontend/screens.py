@@ -235,6 +235,22 @@ def _mono_font(size: int = 18) -> pygame.font.Font:
     return pygame.font.Font(str(MONO_FONT_PATH), size)
 
 
+def _draw_coin_balance(
+    screen: pygame.Surface,
+    font: pygame.font.Font,
+    balance: int,
+    *,
+    right: int | None = None,
+    top: int = 16,
+) -> None:
+    text = font.render(f"COINS  {balance}", True, YELLOW)
+    card = pygame.Rect(0, 0, text.get_width() + 20, text.get_height() + 10)
+    card.topright = (right if right is not None else screen.get_width() - 20, top)
+    pygame.draw.rect(screen, CARBON, card)
+    pygame.draw.rect(screen, LINE, card, 1)
+    screen.blit(text, text.get_rect(center=card.center))
+
+
 def _check_quit(event: pygame.event.Event) -> None:
     if event.type == pygame.QUIT:
         raise AppQuit()
@@ -561,16 +577,17 @@ def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
             pygame.draw.rect(screen, LINE, panel, 1)
             pygame.draw.rect(screen, F1_RED, pygame.Rect(panel.x, panel.y, panel_w, 4))
             title = title_font.render("確定要清除使用者資料？", True, INK)
-            warning = font.render(
-                "profile 與所有本機訓練紀錄都會刪除，且無法復原。",
-                True,
-                F1_RED,
+            warning_lines = (
+                "profile、訓練紀錄與自訂 preset 都會刪除，",
+                "金幣、已獲得皮膚等商店進度也無法復原。",
             )
             screen.blit(title, title.get_rect(center=(width // 2, height // 2 - 50)))
-            screen.blit(
-                warning,
-                warning.get_rect(center=(width // 2, height // 2)),
-            )
+            for index, text in enumerate(warning_lines):
+                warning = font.render(text, True, F1_RED)
+                screen.blit(
+                    warning,
+                    warning.get_rect(center=(width // 2, height // 2 - 8 + index * 28)),
+                )
             confirm_button.draw(screen, font)
             cancel_button.draw(screen, font)
 
@@ -1354,6 +1371,7 @@ def run_validation_list_screen(
     message = ""
     pending_delete_record_id: str | None = None
     scroll_offset = 0
+    coin_balance = shop_wallet.balance()
 
     while True:  # outer: rebuild on VIDEORESIZE
         font = _font(22)
@@ -1432,6 +1450,7 @@ def run_validation_list_screen(
                     for record, _, validate_button, upload_button, delete_button in rows:
                         if validate_button.contains(event.pos):
                             _run_record_validation_screen(screen, record)
+                            coin_balance = shop_wallet.balance()
                             break
                         if upload_button.contains(event.pos):
                             _run_record_submission_screen(screen, profile, record)
@@ -1456,6 +1475,13 @@ def run_validation_list_screen(
             screen.fill(BG)
             title = head32.render("RESULTS · VALIDATION", True, INK)
             screen.blit(title, title.get_rect(midleft=(back_button.rect.right + margin, back_button.rect.centery)))
+            _draw_coin_balance(
+                screen,
+                mono16,
+                coin_balance,
+                right=width - margin,
+                top=margin,
+            )
             back_button.draw(screen, font)
             for idx, (record, card_rect, validate_button, upload_button, delete_button) in enumerate(rows):
                 rank = scrollbar.offset + idx + 1
@@ -1520,6 +1546,7 @@ def _pick_validation_map_screen(screen: pygame.Surface) -> str | None:
     """Easy / Hard / Random picker with map previews, mirroring the submission
     competition picker and the training-config map cards."""
     clock = pygame.time.Clock()
+    coin_balance = shop_wallet.balance()
 
     while True:  # outer: rebuild on VIDEORESIZE
         W, H = screen.get_size()
@@ -1566,6 +1593,13 @@ def _pick_validation_map_screen(screen: pygame.Surface) -> str | None:
 
             screen.fill(BG)
             back_button.draw(screen, font)
+            _draw_coin_balance(
+                screen,
+                font,
+                coin_balance,
+                right=W - M,
+                top=M,
+            )
             screen.blit(font.render("選擇 Validation 地圖", True, INK),
                         (M, back_button.rect.bottom + M))
             for map_id, label, thumb, rect in cards:
@@ -1633,6 +1667,8 @@ def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord
     if outcome is None:
         return
     client_result, survival_ticks, total_length_px = outcome
+    map_key = _random_map_fingerprint() if map_id == "random" else None
+    shop_wallet.award_validation(map_id, client_result, map_key=map_key)
     _validation_result_screen(screen, map_id, client_result, survival_ticks, total_length_px)
 
 
@@ -1837,6 +1873,7 @@ def _draw_progress_screen(
     total: int,
     completed_count: int = 0,
     crashed_count: int = 0,
+    coin_balance: int | None = None,
 ) -> None:
     width, height = screen.get_size()
     cx = width // 2
@@ -1855,6 +1892,8 @@ def _draw_progress_screen(
     )
 
     screen.fill(BG)
+    if coin_balance is not None:
+        _draw_coin_balance(screen, font, coin_balance)
 
     # Title
     title_surf = head.render(title, True, INK)
@@ -1903,6 +1942,7 @@ def _simulate_candidates(
     stop_on_first_completion: bool = False,
     max_speed: int = MAX_SPEED,
     render_live: bool = True,
+    coin_balance: int | None = None,
 ) -> SimulationOutcome | None:
     """Race every candidate on one track until all are eliminated/finished or
     the frame limit hits. A completion requires ordered checkpoint traversal
@@ -1993,6 +2033,9 @@ def _simulate_candidates(
             if esc_button is not None:
                 esc_button.update_hover(pygame.mouse.get_pos())
                 esc_button.draw(screen, font)
+            if coin_balance is not None:
+                right = esc_button.rect.left - 16 if esc_button is not None else None
+                _draw_coin_balance(screen, font, coin_balance, right=right)
             pygame.display.update()
         else:
             _draw_progress_screen(
@@ -2000,6 +2043,7 @@ def _simulate_candidates(
                 sum(active), len(candidates),
                 completed_count=sum(completed_flags),
                 crashed_count=sum(collided_flags),
+                coin_balance=coin_balance,
             )
         clock.tick(30)
         if stop_on_first_completion and completed_this_tick:
@@ -2128,6 +2172,7 @@ def _run_validation_tournament_screen(
         title=f"Validation: {map_id}",
         stop_on_first_completion=True,
         max_speed=max_speed,
+        coin_balance=shop_wallet.balance(),
     )
     if outcome is None:
         return None
@@ -2148,6 +2193,7 @@ def _validation_result_screen(
     total_length_px: float = 0.0,
 ) -> None:
     clock = pygame.time.Clock()
+    coin_balance = shop_wallet.balance()
 
     if client_result is not None:
         progress_text = (
@@ -2190,6 +2236,7 @@ def _validation_result_screen(
             back_button.update_hover(pygame.mouse.get_pos())
 
             screen.fill(BG)
+            _draw_coin_balance(screen, mono, coin_balance, right=width - 60, top=40)
             x_title = 60
             head_surf = head32.render("VALIDATION ", True, INK)
             screen.blit(head_surf, (x_title, 110))

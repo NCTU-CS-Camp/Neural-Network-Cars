@@ -465,7 +465,7 @@ def test_submission_skin_ids_match_shop_catalog():
     assert set(ALLOWED_SKIN_IDS) == {skin.id for skin in all_skins()}
 
 
-def test_server_logs_received_submission_payload_without_token(tmp_path, capsys):
+def test_server_does_not_log_received_submission_payload(tmp_path, capsys):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
         payload = make_payload(group_id="8", username="玩家一號")
@@ -479,12 +479,8 @@ def test_server_logs_received_submission_payload_without_token(tmp_path, capsys)
 
     output = capsys.readouterr().out
     assert response.status_code == 201
-    assert "Received competition submission payload:" in output
-    assert '"username": "玩家一號"' in output
-    assert '"skin_id": 3' in output
-    assert '"maxSpeed": 10.0' in output
-    assert '"lap_ticks": null' in output
-    assert "Bearer " not in output
+    assert "Received competition submission payload:" not in output
+    assert '"username": "玩家一號"' not in output
 
 
 def test_admin_soft_delete_removes_submission_and_recomputes_best(tmp_path):

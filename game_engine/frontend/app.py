@@ -51,10 +51,11 @@ from game_engine.frontend.profile_store import (
     login_session_is_valid,
     load_login_profile,
 )
-from game_engine.frontend.shop.screen import run_shop_screen
+from game_engine.frontend.shop import store as shop_store
 from game_engine.frontend.shop import wallet
 from game_engine.frontend.shop.config import GENERATION_REWARD
 from game_engine.frontend.shop.renderer import apply_equipped_skin, equipped_skin_id
+from game_engine.frontend.shop.screen import run_shop_screen
 from game_engine.frontend.scenes import AppShell
 from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
@@ -100,6 +101,15 @@ def _car_from_flat_weights(
     return car
 
 
+def _clear_current_user_data() -> None:
+    identity = shop_store.active_identity()
+    if identity is not None:
+        shop_store.delete_entry(identity)
+    FitnessPresetStore().clear()
+    RecordStore().clear()
+    clear_login_profile()
+
+
 def run():
     pygame.init()
     pygame.scrap.init()
@@ -127,8 +137,7 @@ def run():
             choice = run_main_menu_screen(screen, profile)
             if choice == "clear_user":
                 if run_clear_user_confirm_screen(screen):
-                    clear_login_profile()
-                    RecordStore().clear()
+                    _clear_current_user_data()
                     profile = run_login_screen(screen, settings.server_url)
                     settings.nickname = profile.username
                     save_runtime_settings(settings)
@@ -333,16 +342,11 @@ def run_training_loop(
     _head = pygame.font.Font(str(HEAD_FONT_PATH), 15)
 
     def display_texts():
-        remaining_seconds = max(
-            0.0,
-            session.generation_duration_seconds - generation_elapsed_seconds(),
-        )
         rows = [
             ("GEN",      str(session.generation),          INK),
             ("CARS",     str(session.population_size),     INK),
             ("ALIVE",    str(session.alive_count),         F1_GREEN),
             ("FITNESS",  fitness_strategy.name,            INK),
-            ("NEXT GEN", f"{remaining_seconds:.3f}s",      YELLOW),
         ]
         panel_w = 220
         panel_h = len(rows) * 22 + 16
@@ -460,7 +464,7 @@ def run_training_loop(
         submit_status = result.message
 
     def redraw_game_window():
-        nonlocal finish_awarded_this_gen
+        nonlocal coin_balance, finish_awarded_this_gen
         # Draw map + cars on the 1600×900 virtual canvas.
         map_canvas.blit(bg, (0, 0))
 
@@ -471,6 +475,7 @@ def run_training_loop(
                     session.mark_collision(nn_car)
                 if step_result.telemetry.finished_now and not finish_awarded_this_gen:
                     wallet.award_training_finish(map_difficulty)
+                    coin_balance = wallet.balance()
                     finish_awarded_this_gen = True
 
         for nn_car in nn_cars:
@@ -511,6 +516,8 @@ def run_training_loop(
         _GAP = 22  # space between items
 
         # Render all label+value surfaces (unified _bar_mono labels / _next_gen_mono values)
+        _coin_lbl_s = _bar_mono.render("COINS", True, DIM)
+        _coin_val_s = _next_gen_mono.render(str(coin_balance), True, YELLOW)
         _ng_lbl_s   = _bar_mono.render("NEXT GEN", True, DIM)
         _ng_val_s   = _next_gen_mono.render(f"{remaining_seconds:.3f}s", True, YELLOW)
         _spd_lbl_s  = _bar_mono.render("MAX SPD", True, DIM)
@@ -518,9 +525,10 @@ def run_training_loop(
         _seed_lbl_s = _bar_mono.render("NN SEED", True, DIM)
         _seed_val_s = _next_gen_mono.render(str(session.evolution_seed), True, YELLOW)
 
-        # Lay out right-to-left: NEXT GEN → MAX SPD → NN SEED
+        # Lay out right-to-left: COINS → NEXT GEN → MAX SPD → NN SEED
         _cur = _ng_right
         for _lbl_s, _val_s in (
+            (_coin_lbl_s, _coin_val_s),
             (_ng_lbl_s, _ng_val_s),
             (_spd_lbl_s, _spd_val_s),
             (_seed_lbl_s, _seed_val_s),
@@ -629,6 +637,7 @@ def run_training_loop(
 
     last_awarded_generation = session.generation
     finish_awarded_this_gen = False
+    coin_balance = wallet.balance()
 
     while True:
         leave_requested = False
@@ -704,6 +713,7 @@ def run_training_loop(
         redraw_game_window()
         if session.generation > last_awarded_generation:
             wallet.award(GENERATION_REWARD * (session.generation - last_awarded_generation))
+            coin_balance = wallet.balance()
             last_awarded_generation = session.generation
             finish_awarded_this_gen = False
         if session.should_end_generation(generation_elapsed_seconds()):

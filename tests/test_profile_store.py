@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+import game_engine.frontend.app as app_module
 from game_engine.frontend.profile_store import (
     clear_login_profile,
     login_session_is_valid,
@@ -77,3 +78,45 @@ def test_clear_login_profile_deletes_file(tmp_path: Path) -> None:
     clear_login_profile(path)
 
     assert not path.exists()
+
+
+def test_clear_current_user_data_clears_profile_records_presets_and_shop(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    monkeypatch.setattr(
+        app_module.shop_store,
+        "active_identity",
+        lambda: "1::apollo",
+    )
+    monkeypatch.setattr(
+        app_module.shop_store,
+        "delete_entry",
+        lambda identity: calls.append(("shop", identity)),
+    )
+
+    class FakePresetStore:
+        def clear(self) -> None:
+            calls.append(("presets", None))
+
+    class FakeRecordStore:
+        def clear(self) -> None:
+            calls.append(("records", None))
+
+    monkeypatch.setattr(app_module, "FitnessPresetStore", FakePresetStore)
+    monkeypatch.setattr(app_module, "RecordStore", FakeRecordStore)
+    monkeypatch.setattr(
+        app_module,
+        "clear_login_profile",
+        lambda: calls.append(("profile", None)),
+    )
+
+    app_module._clear_current_user_data()
+
+    assert calls == [
+        ("shop", "1::apollo"),
+        ("presets", None),
+        ("records", None),
+        ("profile", None),
+    ]

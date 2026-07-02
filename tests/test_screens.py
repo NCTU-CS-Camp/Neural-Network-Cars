@@ -186,7 +186,8 @@ def test_main_menu_exposes_shop_action(monkeypatch) -> None:
 def test_validation_uses_regular_car_sprite(monkeypatch) -> None:
     regular_sprite = pygame.Surface((17, 35))
     green_sprite = pygame.Surface((17, 35))
-    captured: dict[str, pygame.Surface] = {}
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(screens.shop_wallet, "balance", lambda: 42)
 
     monkeypatch.setattr(
         screens,
@@ -212,6 +213,7 @@ def test_validation_uses_regular_car_sprite(monkeypatch) -> None:
 
     def capture_sprite(*args, **kwargs):
         captured["sprite"] = args[5]
+        captured["coin_balance"] = kwargs["coin_balance"]
         return None
 
     monkeypatch.setattr(screens, "_simulate_candidates", capture_sprite)
@@ -227,6 +229,74 @@ def test_validation_uses_regular_car_sprite(monkeypatch) -> None:
         is None
     )
     assert captured["sprite"] is regular_sprite
+    assert captured["coin_balance"] == 42
+
+
+def test_coin_balance_badge_renders_the_given_amount() -> None:
+    rendered_text: list[str] = []
+
+    class FakeFont:
+        def render(self, text, antialias, color):
+            del antialias, color
+            rendered_text.append(text)
+            return pygame.Surface((80, 20))
+
+    screens._draw_coin_balance(
+        pygame.Surface((300, 100)),
+        FakeFont(),  # type: ignore[arg-type]
+        123,
+    )
+
+    assert rendered_text == ["COINS  123"]
+
+
+def test_random_validation_awards_coins_for_the_current_map(monkeypatch) -> None:
+    client_result = SimpleNamespace(
+        completed=True,
+        lap_ticks=300,
+        max_progress=1_000.0,
+        ticks_to_max_progress=300,
+    )
+    award_calls: list[tuple[str, object, str | None]] = []
+    shown_results: list[tuple[str, object, int, float]] = []
+    record = SimpleNamespace(
+        layer_sizes=[6, 6, 4],
+        parent_a_weights=[],
+        parent_a_biases=[],
+        parent_b_weights=[],
+        parent_b_biases=[],
+        username="apollo",
+        mlp_init_seed=3057,
+        max_speed=10,
+    )
+
+    monkeypatch.setattr(screens, "_pick_validation_map_screen", lambda screen: "random")
+    monkeypatch.setattr(screens, "_rebuild_car", lambda *args: object())
+    monkeypatch.setattr(
+        screens,
+        "_run_validation_tournament_screen",
+        lambda *args: (client_result, 300, 1_000.0),
+    )
+    monkeypatch.setattr(screens, "_random_map_fingerprint", lambda: "map-fingerprint")
+    monkeypatch.setattr(
+        screens.shop_wallet,
+        "award_validation",
+        lambda map_id, result, map_key=None: award_calls.append(
+            (map_id, result, map_key)
+        ),
+    )
+    monkeypatch.setattr(
+        screens,
+        "_validation_result_screen",
+        lambda screen, map_id, result, ticks, length: shown_results.append(
+            (map_id, result, ticks, length)
+        ),
+    )
+
+    screens._run_record_validation_screen(pygame.Surface((10, 10)), record)
+
+    assert award_calls == [("random", client_result, "map-fingerprint")]
+    assert shown_results == [("random", client_result, 300, 1_000.0)]
 
 
 @pytest.mark.parametrize(

@@ -216,7 +216,10 @@ def test_eligibility_forwards_bearer_token(monkeypatch) -> None:
     assert captured["token"] == "student-token"
 
 
-def test_submission_forwards_bearer_token(monkeypatch, capsys) -> None:
+def test_submission_forwards_bearer_token_without_logging_payload(
+    monkeypatch,
+    capsys,
+) -> None:
     captured: dict[str, object] = {}
 
     def fake_post_json(url, payload, timeout=10.0, token=None):
@@ -264,10 +267,8 @@ def test_submission_forwards_bearer_token(monkeypatch, capsys) -> None:
         },
     }
     terminal_output = capsys.readouterr().out
-    assert "Competition submission payload:" in terminal_output
-    assert '"username": "ada"' in terminal_output
-    assert '"maxSpeed": 10.0' in terminal_output
-    assert "student-token" not in terminal_output
+    assert "Competition submission payload:" not in terminal_output
+    assert '"username": "ada"' not in terminal_output
 
 
 def test_auto_breed_shortcut_works_even_when_user_field_is_active(competition_client):
