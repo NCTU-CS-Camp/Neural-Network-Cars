@@ -9,11 +9,14 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 ## Current State
 
 - FastAPI v2 server lives in `server/app.py`.
-- SQLite persistence and ranking live in `server/storage.py`; schema version is `trusted-client-v2`.
+- SQLite persistence and ranking live in `server/storage.py`; schema version is `trusted-client-auth-metadata`.
 - Fixed competition maps are loaded from `maps/kaggle_easy.*`, `maps/kaggle_hard.*`, and `maps/kaggle_final.*` through `server/competition_maps.py`.
 - Shared payload contracts live in `shared/contracts.py`.
 - Phase 1 has independent `easy` and `hard` competitions keyed by `(group_id, username)`.
-- Final is group-based and locks one accepted model per `group_id`.
+- Final is group-based; cooldown is keyed by `group_id`, and ranking keeps each group's best non-deleted completed snapshot entry.
+- Student identity now requires admin-created classroom accounts. Public student actions use `Authorization: Bearer <token>` from `POST /v2/auth/login`; the request body identity must match the token.
+- Submissions persist optional replay metadata: `skin_id` (`0=white`, `1=green`) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
+- Admin can create/update plaintext temporary passwords, bulk import users, enable/disable accounts, and soft-delete individual submissions.
 - Public browser leaderboard is served at `/leaderboard`.
 - Admin page is served at `/admin`.
 - Admin UI initially shows only the token form; protected content is revealed after `GET /v2/admin/state` succeeds.
@@ -34,6 +37,8 @@ Model payload shape:
 {
   "group_id": "1",
   "username": "player1",
+  "skin_id": 0,
+  "maxSpeed": 10.0,
   "weights": [[36], [24]],
   "biases": [[6], [4]]
 }
@@ -50,12 +55,10 @@ Submission adds `client_result`:
 }
 ```
 
-Spec_v2 pending payload additions:
+Spec_v2 export-only or not-yet-ranking additions:
 
 ```json
 {
-  "skin_id": 3,
-  "maxSpeed": 10.0,
   "client_result": {
     "survival_rate": 0.467
   },
@@ -67,13 +70,16 @@ Spec_v2 pending payload additions:
 }
 ```
 
-Current implementation does not yet accept or persist `skin_id`, `maxSpeed`, or `client_result.survival_rate`. `training_strategy` appears in the spec_v2 export format and should not be treated as a required submission field unless the server contract is explicitly changed. When implementing alignment, prefer accepting the new fields as optional metadata first; ranking must remain based on `completed`, `lap_ticks`, `max_progress`, and `ticks_to_max_progress`.
+Current implementation accepts and persists `skin_id` plus `max_speed`/`maxSpeed`, exposes them in public submission/leaderboard responses, and includes them in protected replay payloads. `client_result.survival_rate` and `training_strategy` are not accepted by the current server contract; treat them as a future alignment decision unless the API is explicitly changed. Ranking must remain based on `completed`, `lap_ticks`, `max_progress`, and `ticks_to_max_progress`.
 
 Validation rules:
 
 - `group_id` and `username` must be non-empty strings.
+- Student eligibility/submission bodies must match the bearer-token identity.
 - Weight lengths are 36 and 24; bias lengths are 6 and 4.
 - All gene and result values must be finite.
+- `skin_id` defaults to `0`; only `0` and `1` are valid.
+- `max_speed`/`maxSpeed` defaults to `10.0`; valid range is `5` through `30`.
 - Completed runs require positive `lap_ticks`.
 - Incomplete runs require `lap_ticks: null`.
 - Tick values must not exceed the configured frame limit.
@@ -85,7 +91,7 @@ Ranking order:
 - Incomplete submissions sort by highest `max_progress`.
 - Ties use lowest `ticks_to_max_progress`, earliest accepted submission time, then submission ID.
 - Easy/Hard keep each `(group_id, username)` identity's historical best.
-- Final keeps each `group_id` locked model.
+- Final keeps each `group_id` identity's historical best non-deleted completed submission.
 
 ## API Surface
 
@@ -95,6 +101,8 @@ Public:
 GET  /v2/state
 GET  /v2/maps
 GET  /v2/maps/{competition_id}/preview
+POST /v2/auth/login
+GET  /v2/me/submissions
 POST /v2/competitions/{easy|hard}/eligibility
 POST /v2/competitions/{easy|hard}/submissions
 POST /v2/finals/eligibility
@@ -104,17 +112,25 @@ GET  /v2/competitions/{competition_id}/submissions/{submission_id}
 GET  /ws/events
 ```
 
+Student eligibility/submission endpoints require `Authorization: Bearer <token>`. Public leaderboard and public submission status endpoints remain readable without login and never expose weights or biases.
+
 Protected admin/replay, all requiring `X-Admin-Token`:
 
 ```text
 GET  /v2/admin/submissions
 GET  /v2/admin/state
 GET  /v2/admin/replay
+GET  /v2/admin/users
+POST /v2/admin/users
+POST /v2/admin/users/import
+POST /v2/admin/users/{group_id}/{username}/disable
+POST /v2/admin/users/{group_id}/{username}/enable
 POST /v2/admin/stage
 POST /v2/admin/config
 POST /v2/admin/batches/run-now
 POST /v2/admin/replay/restart
 POST /v2/admin/reset-all
+DELETE /v2/admin/submissions/{submission_id}
 ```
 
 Current implementation uses `POST` eligibility endpoints and expects both `group_id` and `username`, including Final eligibility. If spec text says GET or group-only Final eligibility, treat that as an alignment gap rather than silently changing behavior.
@@ -130,7 +146,7 @@ The latest spec_v2 reinforces the server-first boundary:
 
 New or sharpened server-facing requirements:
 
-- Submission/export metadata now mentions `skin_id` and `maxSpeed`.
+- Submission/export metadata now mentions `skin_id` and `maxSpeed`; these are implemented as replay metadata, not ranking inputs.
 - `client_result` now mentions optional-looking `survival_rate`; it is not part of the stated ranking tuple.
 - Eligibility responses should expose `next_submission_at`, current stage, and `competition_config_version`.
 - Submission responses should expose `submission_id`, `status`, `submitted_at`, `next_submission_at`, and `competition_config_version`.
@@ -140,7 +156,8 @@ New or sharpened server-facing requirements:
 
 Current alignment gaps:
 
-- `skin_id`, `maxSpeed`, and `survival_rate` are not in `shared/contracts.py`, storage, public responses, or replay payloads.
+- `client_result.survival_rate` is not in `shared/contracts.py`, storage, public responses, or replay payloads.
+- Public self-registration does not exist by design; accounts are admin-created classroom accounts.
 - `running` is currently transitional inside one storage transaction, not a long-lived replay-processing state.
 - No persistent deferred-submission list or deferred notification exists.
 - No persistent replay playback/audit record exists beyond `batches.snapshot_json`.
@@ -149,13 +166,14 @@ Current alignment gaps:
 
 ## Batching Process
 
-Phase 1 Easy/Hard submissions enter storage as `queued`. Final submissions skip the Phase 1 batch path and become completed immediately after acceptance.
+Phase 1 Easy/Hard submissions enter storage as `queued` while stage is `phase_one`. Final submissions also enter storage as `queued` while stage is `final`; the same snapshot worker seals the active stage's queued submissions.
 
-`BatchWorker` in `server/evaluation_worker.py` polls periodically and calls `CompetitionStorage.seal_phase_one_batches()`. Normal sealing uses the previous UTC boundary for the persisted `phase_one_batch_minutes` interval as the cutoff. Admin demo sealing uses `POST /v2/admin/batches/run-now`, which force-seals currently queued Easy/Hard submissions. Admin can set the interval to 1, 2, or 5 minutes through `POST /v2/admin/config`; the selected interval also controls Easy/Hard cooldown.
+`BatchWorker` in `server/evaluation_worker.py` polls periodically and calls `CompetitionStorage.seal_due_batches()`. Normal sealing uses the previous UTC boundary for the persisted snapshot interval as the cutoff. Admin demo sealing uses `POST /v2/admin/batches/run-now`, which force-seals currently queued submissions for the active stage. Admin can set the interval to 1, 2, or 5 minutes through `POST /v2/admin/config`; the selected interval controls Easy/Hard individual cooldown and Final group cooldown.
 
 Current batch behavior:
 
-- For each of `easy` and `hard`, select queued rows with `submitted_at` before the cutoff, or at/before `now` in force mode.
+- For `phase_one`, process `easy` and `hard`; for `final`, process `final`.
+- Select queued rows with `submitted_at` before the cutoff, or at/before `now` in force mode.
 - Update selected rows to `running`.
 - Immediately update the same rows to `completed`, set `completed_at`, and assign a new `batch_id`.
 - Create one `batches` row per competition with `window_start`, `window_end`, `created_at`, included `submission_ids`, and the public leaderboard snapshot.
@@ -174,18 +192,18 @@ Known batching gaps:
 
 - Local scoring and Pygame replay use sequential boundary checkpoint crossing to detect first-lap completion.
 - A replay car stops updating after first lap completion, collision, or stagnation.
-- Finished replay cars stay visible, dimmed, and labeled `FINISHED` with finish time.
+- Finished/crashed/stalled replay cars stay visible and dimmed; on-map username labels become gray.
 - The Pygame replay client fetches the protected replay payload every 5 seconds and compares stage, replay generation, and leaderboard signatures to detect new data without changing API shape.
 - New snapshots and admin stage changes are adopted only at a safe replay boundary, after the current replay cycle finishes.
 - The first replay cycle for a newly seen leaderboard hides that competition's leaderboard, then reveals it after the corresponding Easy/Hard/Final session stops; later cycles for the same snapshot show the leaderboard normally.
 - Once all replay cars are finished/crashed/stalled, the replay holds for 3 seconds and then either adopts pending replay data or restarts the current payload.
-- Browser leaderboard displays a live countdown to the next Phase 1 snapshot and last update time.
+- Browser leaderboard displays a live countdown for the active stage/tab and last update time.
 - Replay header uses large status/timing text for projection. `COMPETITION_REPLAY_FONT_PATH` can force a CJK-capable font if the OS fallback is insufficient.
 - The server still trusts submitted `client_result`; replay completion never overwrites ranking metrics.
 
 ## Server Ownership Rules
 
-- Validate payload shape, identity, finite values, payload size, cooldown, stage gates, and Final locks.
+- Validate payload shape, bearer-token identity, finite values, payload size, cooldown, and stage gates.
 - Keep public responses free of weights and biases.
 - Keep protected replay/admin payloads behind `X-Admin-Token`.
 - Preserve immutable competition configuration unless the spec explicitly changes it.
@@ -259,7 +277,8 @@ Default local admin/replay token is `admin`, overridden by `COMPETITION_ADMIN_TO
    - Consider persisting replay-loop status now shown client-side only.
 
 2. API Spec Alignment
-   - Add optional server support for `skin_id`, `maxSpeed`, and `client_result.survival_rate`, including validation, persistence, public/admin response policy, and replay payload policy.
+   - Decide whether `client_result.survival_rate` should become an accepted optional field, and document whether it remains non-ranking metadata.
+   - Decide whether `training_strategy` should remain client export metadata or become server-visible audit metadata.
    - Decide whether eligibility should remain `POST` or move to spec-mentioned `GET`.
    - Align response field names across docs and code.
    - Decide whether Final eligibility should require `username` or only `group_id`.

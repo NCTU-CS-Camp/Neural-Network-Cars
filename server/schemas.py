@@ -28,6 +28,17 @@ class IdentityIn(BaseModel):
         return group_id, username
 
 
+class LoginIn(IdentityIn):
+    password: str = Field(min_length=1, max_length=80)
+
+    def clean_login(self) -> tuple[str, str, str]:
+        group_id, username = self.clean_identity()
+        password = self.password.strip()
+        if not password:
+            raise ValueError("password must not be blank")
+        return group_id, username, password
+
+
 class ClientResultIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -45,6 +56,9 @@ class SubmissionIn(IdentityIn):
     weights: list[list[float]]
     biases: list[list[float]]
     client_result: ClientResultIn
+    skin_id: int | None = None
+    max_speed: float | None = None
+    maxSpeed: float | None = None
 
     def to_submission(self) -> tuple[SubmissionPayload, ClientResult]:
         data: dict[str, Any] = self.model_dump() if hasattr(self, "model_dump") else self.dict()
@@ -57,6 +71,17 @@ class SubmissionIn(IdentityIn):
         if client_result.lap_ticks is not None and client_result.lap_ticks > FRAME_LIMIT:
             raise ValueError("client_result.lap_ticks exceeds frame limit")
         return payload, client_result
+
+
+class AdminUserRequest(LoginIn):
+    disabled: bool = False
+
+
+class AdminUserImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    users: list[AdminUserRequest] | None = None
+    text: str | None = None
 
 
 class AdminStageRequest(BaseModel):

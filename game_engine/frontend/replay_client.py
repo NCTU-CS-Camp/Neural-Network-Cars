@@ -73,8 +73,17 @@ REPLAY_HOLD_SECONDS = 3.0
 REPLAY_FETCH_SECONDS = 5.0
 LEADERBOARD_REVEAL_HIGHLIGHT_SECONDS = 2.0
 VIRTUAL_SIZE = SCREEN_SIZE
-# per-car body colors, cycled from the marker ramp (assigned by rank index at load time)
-REPLAY_COLORS: list[Color] = [CAR_RAMP[index % len(CAR_RAMP)] for index in range(15)]
+# per-car label colors, intentionally avoiding gray; stopped cars override to DIM.
+REPLAY_COLORS: list[Color] = [
+    RED_BRIGHT,
+    GOLD,
+    (74, 222, 128),
+    (56, 189, 248),
+    (251, 113, 133),
+    (168, 85, 247),
+    (45, 212, 191),
+    (250, 204, 21),
+]
 
 
 def medal(position: int) -> Color:
@@ -132,17 +141,7 @@ class ReplayCar:
 
     @property
     def label(self) -> str:
-        state = ""
-        if self.finished:
-            if self.finish_ticks is not None:
-                state = f" FINISHED {self.finish_ticks / FPS:.3f}s"
-            else:
-                state = " FINISHED"
-        elif self.stalled:
-            state = " STALLED"
-        elif self.crashed:
-            state = " CRASHED"
-        return f"{self.item.get('username', 'unknown')}{state}"
+        return str(self.item.get("username", "unknown"))
 
     def observe_position(self) -> None:
         current = (float(self.car.x), float(self.car.y))
@@ -598,7 +597,7 @@ def load_replay_session(
             item=item,
             color=REPLAY_COLORS[index % len(REPLAY_COLORS)],
             track=track,
-            car_image=assets.green_small_car,
+            car_image=_sprite_for_skin(assets, int(item.get("skin_id", 0))),
         )
         for index, item in enumerate(replay.get("items", [])[:PHASE_ONE_REPLAY_LIMIT])
     ]
@@ -634,6 +633,7 @@ def build_replay_car(
         biases=item["biases"],
     )
     apply_weight_payload(car, payload)
+    car.max_speed = float(item.get("max_speed", 10.0))
     car.set_collision_surface(track.collision)
     spawn = track.spawn
     car.reset_state(
@@ -644,6 +644,10 @@ def build_replay_car(
     )
     tracker = CompetitionRunTracker.from_metadata_path(track.competition_map.metadata_path)
     return ReplayCar(item=item, car=car, color=color, tracker=tracker)
+
+
+def _sprite_for_skin(assets: GameAssets, skin_id: int) -> pygame.Surface:
+    return assets.green_small_car if skin_id == 1 else assets.white_small_car
 
 
 def update_replay_cars(replay_cars: list[ReplayCar]) -> None:
@@ -681,9 +685,9 @@ def _entry_tag(entry: dict[str, Any], competition_id: str) -> str:
     """Broadcast-style short tag. Final shows the group; otherwise the first 3 ascii-alnum
     chars of the username, falling back to the group when a name has none (e.g. all-CJK)."""
     if competition_id == "final":
-        return f"G{entry.get('group_id', '?')}"
+        return f"Group {entry.get('group_id', '?')}"
     alnum = "".join(ch for ch in str(entry.get("username", "")) if ch.isascii() and ch.isalnum())
-    return alnum[:3].upper() or f"G{entry.get('group_id', '?')}"
+    return alnum[:3].upper() or f"Group {entry.get('group_id', '?')}"
 
 
 def _entry_result(client_result: dict[str, Any]) -> tuple[str, str]:
@@ -771,7 +775,9 @@ def _draw_phase_one(
         (hard, 813, "HARD", ACCENT["hard"]),
     ):
         # map is 16:9 (matches the 1600x900 track) so it fills the panel without distortion
-        _draw_map_panel(screen, session, pygame.Rect(col_x, 96, 753, 424), title, accent, fonts)
+        map_rect = pygame.Rect(col_x, 96, 753, 424)
+        _draw_map_panel(screen, session, map_rect, title, accent, fonts)
+        _draw_snapshot_lights_overlay(screen, map_rect, session, status, fonts)
         _draw_compact_leaderboard(
             screen,
             session,
@@ -799,7 +805,9 @@ def _draw_final(
     _draw_header(screen, fonts, "FINAL", status)
     accent = ACCENT["final"]
     # Final (design FINAL): one large map on the left, stacked podium + tower on the right.
-    _draw_map_panel(screen, session, pygame.Rect(34, 96, 940, 640), "FINAL", accent, fonts)
+    map_rect = pygame.Rect(34, 96, 940, 640)
+    _draw_map_panel(screen, session, map_rect, "FINAL", accent, fonts)
+    _draw_snapshot_lights_overlay(screen, map_rect, session, status, fonts)
     _draw_compact_leaderboard(
         screen,
         session,
@@ -919,12 +927,13 @@ def _draw_map_panel(
     for replay_car in sorted(session.cars, key=_replay_rank, reverse=True):
         cx = fit_x + int(replay_car.car.x / native.get_width() * fit_w)
         cy = fit_y + int(replay_car.car.y / native.get_height() * fit_h)
+        stopped = replay_car.crashed or replay_car.stalled or replay_car.finished
         _draw_replay_name_tag(
             screen,
             str(replay_car.item.get("username", "unknown")),
             cx,
             cy,
-            replay_car.color,
+            DIM if stopped else replay_car.color,
             track_rect,
             fonts["label"],
         )
@@ -988,6 +997,48 @@ def _fixed_label_position(
     return min(max(label_x, min_x), max_x), min(max(label_y, min_y), max_y)
 
 
+def _draw_snapshot_lights_overlay(
+    screen: pygame.Surface,
+    rect: pygame.Rect,
+    session: ReplaySession,
+    status: ReplayStatus,
+    fonts: dict[str, pygame.font.Font],
+) -> None:
+    seconds = _snapshot_seconds_from_status(status)
+    if seconds is None or seconds > 5 or seconds <= 0 or replay_panel_status(session) != "RUNNING":
+        return
+    overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 92))
+    screen.blit(overlay, rect.topleft)
+    lights = 5
+    lit = max(0, min(lights, lights - math.ceil(seconds) + 1))
+    radius = 18
+    gap = 18
+    total_w = lights * radius * 2 + (lights - 1) * gap
+    start_x = rect.centerx - total_w // 2 + radius
+    y = rect.y + 72
+    for index in range(lights):
+        center = (start_x + index * (radius * 2 + gap), y)
+        color = RED_BRIGHT if index < lit else BORDER
+        pygame.draw.circle(screen, DARK_TEXT, center, radius + 5)
+        pygame.draw.circle(screen, color, center, radius)
+    label = fonts["panel"].render("SNAPSHOT", True, WHITE)
+    timer = fonts["title"].render(f"{math.ceil(seconds)}", True, RED_BRIGHT)
+    screen.blit(label, (rect.centerx - label.get_width() // 2, y + 34))
+    screen.blit(timer, (rect.centerx - timer.get_width() // 2, y + 66))
+
+
+def _snapshot_seconds_from_status(status: ReplayStatus) -> float | None:
+    value = status.snapshot_countdown
+    if not value or value == "-":
+        return None
+    try:
+        minutes, seconds = value.split(":", 1)
+        return int(minutes) * 60 + int(seconds)
+    except (ValueError, TypeError):
+        return None
+
+
 def _leader_ticks(entries: list[dict[str, Any]]) -> int | None:
     """lap_ticks of rank 1 when it completed, else None (used for tower intervals)."""
     if entries:
@@ -1015,7 +1066,7 @@ def _draw_phase_one_podium(
         pygame.draw.rect(screen, medal(pos), (card.x, card.y, card.width, 4))
         _draw_ghost_numeral(screen, card.right, card.y, pos, bg, fonts["pod_ghost"])
         screen.blit(fonts["pod_tag"].render(_entry_tag(entry, competition_id), True, WHITE), (card.x + 12, card.y + 12))
-        sub = f"{entry['username']} · G{entry['group_id']}"
+        sub = f"{entry['username']} · Group {entry['group_id']}"
         sub_font = _user_font(fonts, sub, "pod_sub", "pod_sub_cjk")
         _blit_clipped(screen, sub_font.render(sub, True, MUTED2), card.x + 12, card.y + 42, card_w - 20)
         value, unit = _entry_result(entry["client_result"])

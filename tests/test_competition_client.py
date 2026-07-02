@@ -7,7 +7,7 @@ import pygame
 import pytest
 
 from game_engine.backend.assets import load_game_assets
-from game_engine.backend.car import Car
+from game_engine.backend.car import Car, configure_car
 from game_engine.backend.settings import HIDDEN_LAYER, INPUT_LAYER, OUTPUT_LAYER
 from game_engine.backend.training_session import TrainingSession
 from game_engine.frontend.competition_client import (
@@ -95,6 +95,18 @@ def test_generated_client_result_is_test_only_incomplete_result():
     assert math.isfinite(result.max_progress)
     assert result.max_progress >= 0.0
     assert 0 <= result.ticks_to_max_progress <= FRAME_LIMIT
+
+
+def test_generated_client_result_does_not_clear_global_car_sprite():
+    pygame.init()
+    assets = load_game_assets()
+    collision = get_competition_map("easy").build_collision_surface()
+    configure_car(collision, assets.white_small_car, 10)
+    car = Car(LAYER_SIZES)
+
+    evaluate_car_result(car, "easy", max_speed=12.5)
+
+    assert Car(LAYER_SIZES).car_image is assets.white_small_car
 
 
 def test_competition_client_maps_have_spawn_and_collision_surface():

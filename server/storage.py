@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
@@ -28,7 +29,8 @@ from server.models import (
 from shared.contracts import ClientResult, SubmissionPayload
 
 
-SCHEMA_VERSION = "trusted-client-v2"
+SCHEMA_VERSION = "trusted-client-auth-metadata"
+SESSION_LIFETIME = timedelta(hours=12)
 
 
 class SubmissionRejected(Exception):
@@ -116,6 +118,8 @@ class CompetitionStorage:
             DROP TABLE IF EXISTS competition_state;
             DROP TABLE IF EXISTS official_maps;
             DROP TABLE IF EXISTS replay_control;
+            DROP TABLE IF EXISTS user_sessions;
+            DROP TABLE IF EXISTS users;
             DROP TABLE IF EXISTS competition_schema;
 
             CREATE TABLE competition_schema (
@@ -135,6 +139,8 @@ class CompetitionStorage:
                 competition_id TEXT NOT NULL,
                 group_id TEXT NOT NULL,
                 username TEXT NOT NULL,
+                skin_id INTEGER NOT NULL DEFAULT 0,
+                max_speed REAL NOT NULL DEFAULT 10.0,
                 weights_json TEXT NOT NULL,
                 biases_json TEXT NOT NULL,
                 client_result_json TEXT NOT NULL,
@@ -142,7 +148,27 @@ class CompetitionStorage:
                 error_message TEXT,
                 submitted_at TEXT NOT NULL,
                 completed_at TEXT,
-                batch_id TEXT
+                batch_id TEXT,
+                deleted_at TEXT,
+                deleted_reason TEXT
+            );
+
+            CREATE TABLE users (
+                group_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                password_plaintext TEXT NOT NULL,
+                disabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (group_id, username)
+            );
+
+            CREATE TABLE user_sessions (
+                token TEXT PRIMARY KEY,
+                group_id TEXT NOT NULL,
+                username TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );
 
             CREATE TABLE batches (
@@ -160,6 +186,8 @@ class CompetitionStorage:
             ON submissions (competition_id, group_id, username, submitted_at);
             CREATE INDEX batches_competition_idx
             ON batches (competition_id, created_at DESC);
+            CREATE INDEX user_sessions_identity_idx
+            ON user_sessions (group_id, username, expires_at);
             """
         )
         connection.execute(
@@ -235,6 +263,172 @@ class CompetitionStorage:
             )
         return self.state()
 
+    def upsert_user(
+        self,
+        *,
+        group_id: str,
+        username: str,
+        password: str,
+        disabled: bool = False,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        group_id = _clean_identity_part(group_id, "group_id")
+        username = _clean_identity_part(username, "username")
+        password = password.strip()
+        if not password:
+            raise ValueError("password must not be blank")
+        timestamp = (now or self.now()).isoformat()
+        with self._lock, self._connect() as connection:
+            existing = connection.execute(
+                """
+                SELECT created_at FROM users
+                WHERE group_id = ? AND username = ?
+                """,
+                (group_id, username),
+            ).fetchone()
+            created_at = existing["created_at"] if existing is not None else timestamp
+            connection.execute(
+                """
+                INSERT INTO users (
+                    group_id, username, password_plaintext, disabled, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(group_id, username) DO UPDATE SET
+                    password_plaintext = excluded.password_plaintext,
+                    disabled = excluded.disabled,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    group_id,
+                    username,
+                    password,
+                    1 if disabled else 0,
+                    created_at,
+                    timestamp,
+                ),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM users
+                WHERE group_id = ? AND username = ?
+                """,
+                (group_id, username),
+            ).fetchone()
+        return _public_user(row)
+
+    def list_users(self) -> list[dict[str, Any]]:
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT * FROM users
+                ORDER BY CAST(group_id AS INTEGER), group_id, username
+                """
+            ).fetchall()
+        return [_public_user(row) for row in rows]
+
+    def set_user_disabled(
+        self,
+        *,
+        group_id: str,
+        username: str,
+        disabled: bool,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        timestamp = (now or self.now()).isoformat()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE users
+                SET disabled = ?, updated_at = ?
+                WHERE group_id = ? AND username = ?
+                """,
+                (1 if disabled else 0, timestamp, group_id, username),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM users
+                WHERE group_id = ? AND username = ?
+                """,
+                (group_id, username),
+            ).fetchone()
+        return None if row is None else _public_user(row)
+
+    def login_user(
+        self,
+        *,
+        group_id: str,
+        username: str,
+        password: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        group_id = _clean_identity_part(group_id, "group_id")
+        username = _clean_identity_part(username, "username")
+        timestamp = now or self.now()
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM users
+                WHERE group_id = ? AND username = ?
+                """,
+                (group_id, username),
+            ).fetchone()
+            if (
+                row is None
+                or int(row["disabled"])
+                or str(row["password_plaintext"]) != password
+            ):
+                return None
+            token = secrets.token_urlsafe(32)
+            expires_at = timestamp + SESSION_LIFETIME
+            connection.execute(
+                """
+                INSERT INTO user_sessions (token, group_id, username, expires_at, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    token,
+                    group_id,
+                    username,
+                    expires_at.isoformat(),
+                    timestamp.isoformat(),
+                ),
+            )
+        return {
+            "token": token,
+            "expires_at": expires_at.isoformat(),
+            "group_id": group_id,
+            "username": username,
+        }
+
+    def authenticate_token(
+        self,
+        token: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, str] | None:
+        if not token:
+            return None
+        timestamp = now or self.now()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                "DELETE FROM user_sessions WHERE expires_at <= ?",
+                (timestamp.isoformat(),),
+            )
+            row = connection.execute(
+                """
+                SELECT sessions.group_id, sessions.username, users.disabled
+                FROM user_sessions AS sessions
+                JOIN users
+                  ON users.group_id = sessions.group_id
+                 AND users.username = sessions.username
+                WHERE sessions.token = ? AND sessions.expires_at > ?
+                """,
+                (token, timestamp.isoformat()),
+            ).fetchone()
+        if row is None or int(row["disabled"]):
+            return None
+        return {"group_id": str(row["group_id"]), "username": str(row["username"])}
+
     def eligibility(
         self,
         competition_id: CompetitionId | str,
@@ -291,7 +485,7 @@ class CompetitionStorage:
                 """
                 SELECT submitted_at FROM submissions
                 WHERE competition_id = ? AND group_id = ? AND username = ?
-                  AND status != ?
+                  AND status NOT IN (?, ?)
                 ORDER BY submitted_at DESC
                 LIMIT 1
                 """,
@@ -300,6 +494,7 @@ class CompetitionStorage:
                     group_id,
                     username,
                     SubmissionStatus.FAILED.value,
+                    SubmissionStatus.DELETED.value,
                 ),
             ).fetchone()
             if row is not None:
@@ -322,11 +517,16 @@ class CompetitionStorage:
         row = connection.execute(
             """
             SELECT submitted_at FROM submissions
-            WHERE competition_id = ? AND group_id = ? AND status != ?
+            WHERE competition_id = ? AND group_id = ? AND status NOT IN (?, ?)
             ORDER BY submitted_at DESC
             LIMIT 1
             """,
-            (CompetitionId.FINAL.value, group_id, SubmissionStatus.FAILED.value),
+            (
+                CompetitionId.FINAL.value,
+                group_id,
+                SubmissionStatus.FAILED.value,
+                SubmissionStatus.DELETED.value,
+            ),
         ).fetchone()
         if row is not None:
             last_submission = _parse_timestamp(row["submitted_at"])
@@ -377,16 +577,19 @@ class CompetitionStorage:
                 """
                 INSERT INTO submissions (
                     submission_id, competition_id, group_id, username,
+                    skin_id, max_speed,
                     weights_json, biases_json, client_result_json, status,
                     submitted_at, completed_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     submission_id,
                     identifier.value,
                     payload.group_id,
                     payload.username,
+                    payload.skin_id,
+                    payload.max_speed,
                     json.dumps(payload.weights),
                     json.dumps(payload.biases),
                     json.dumps(client_result.to_dict()),
@@ -547,6 +750,66 @@ class CompetitionStorage:
             ).fetchall()
         return [self._submission_from_row(row) for row in rows]
 
+    def user_submissions(
+        self,
+        *,
+        group_id: str,
+        username: str,
+        competition_id: CompetitionId | str | None = None,
+    ) -> list[dict[str, Any]]:
+        params: list[Any] = [group_id, username, SubmissionStatus.DELETED.value]
+        where = """
+            group_id = ? AND username = ? AND status != ?
+        """
+        if competition_id is not None:
+            identifier = CompetitionId(competition_id)
+            where += " AND competition_id = ?"
+            params.append(identifier.value)
+        with self._lock, self._connect() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT * FROM submissions
+                WHERE {where}
+                ORDER BY submitted_at DESC, submission_id DESC
+                """,
+                params,
+            ).fetchall()
+        return [self._public_submission(self._submission_from_row(row)) for row in rows]
+
+    def delete_submission(
+        self,
+        submission_id: str,
+        *,
+        reason: str = "admin_deleted",
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        timestamp = (now or self.now()).isoformat()
+        with self._lock, self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM submissions WHERE submission_id = ?",
+                (submission_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            connection.execute(
+                """
+                UPDATE submissions
+                SET status = ?, deleted_at = ?, deleted_reason = ?
+                WHERE submission_id = ?
+                """,
+                (
+                    SubmissionStatus.DELETED.value,
+                    timestamp,
+                    reason,
+                    submission_id,
+                ),
+            )
+            updated = connection.execute(
+                "SELECT * FROM submissions WHERE submission_id = ?",
+                (submission_id,),
+            ).fetchone()
+        return self._submission_from_row(updated)
+
     def leaderboard(
         self,
         competition_id: CompetitionId | str,
@@ -646,6 +909,8 @@ class CompetitionStorage:
                         "submission_id": submission["submission_id"],
                         "group_id": submission["group_id"],
                         "username": submission["username"],
+                        "skin_id": submission["skin_id"],
+                        "max_speed": submission["max_speed"],
                         "client_result": submission["client_result"],
                         "weights": submission["weights"],
                         "biases": submission["biases"],
@@ -698,6 +963,8 @@ class CompetitionStorage:
             "competition_id": row["competition_id"],
             "group_id": row["group_id"],
             "username": row["username"],
+            "skin_id": int(row["skin_id"]),
+            "max_speed": float(row["max_speed"]),
             "weights": json.loads(row["weights_json"]),
             "biases": json.loads(row["biases_json"]),
             "client_result": json.loads(row["client_result_json"]),
@@ -706,6 +973,8 @@ class CompetitionStorage:
             "submitted_at": row["submitted_at"],
             "completed_at": row["completed_at"],
             "batch_id": row["batch_id"],
+            "deleted_at": row["deleted_at"],
+            "deleted_reason": row["deleted_reason"],
             "competition_config_version": COMPETITION_CONFIG_VERSION,
         }
 
@@ -729,6 +998,8 @@ class CompetitionStorage:
                 "competition_id",
                 "group_id",
                 "username",
+                "skin_id",
+                "max_speed",
                 "client_result",
                 "status",
                 "error_message",
@@ -738,6 +1009,24 @@ class CompetitionStorage:
                 "competition_config_version",
             )
         }
+
+
+def _clean_identity_part(value: str, field_name: str) -> str:
+    cleaned = str(value).strip()
+    if not cleaned:
+        raise ValueError(f"{field_name} must not be blank")
+    return cleaned
+
+
+def _public_user(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "group_id": row["group_id"],
+        "username": row["username"],
+        "password_plaintext": row["password_plaintext"],
+        "disabled": bool(row["disabled"]),
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
 
 
 def _parse_timestamp(value: str) -> datetime:

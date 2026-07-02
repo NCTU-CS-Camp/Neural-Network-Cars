@@ -127,7 +127,7 @@ http://192.168.1.23:8000
 COMPETITION_SERVER_URL=http://192.168.1.23:8000 uv run python competition_main.py
 ```
 
-Phase 1 Easy/Hard queued submissions 要等目前 Admin 設定的 `Phase 1 interval` batch boundary，或由 admin 按 `Create Demo Snapshot` 立即封存。Interval 可設為 1、2、5 分鐘，預設 1 分鐘；正式活動建議不要頻繁按 demo snapshot，除非要展示或排除問題。
+Queued submissions 要等目前 Admin 設定的 `Snapshot interval` boundary，或由 admin 按 `Run Snapshot Now` 立即封存。Interval 可設為 1、2、5 分鐘，預設 1 分鐘；正式活動建議不要頻繁手動封存，除非要展示或排除問題。學生端提交前需要先由 admin 建立帳號與 temporary password。
 
 ### 6. Replay 電腦設定
 
@@ -237,7 +237,7 @@ curl http://192.168.56.10:8000/v2/state
 COMPETITION_SERVER_URL=http://192.168.56.10:8000 uv run python competition_main.py
 ```
 
-在 UI 內輸入任意 `User ID`、`Group ID`，切 Easy/Hard，按 `V` 產生 `client_result`，按 `U` 檢查 eligibility 並提交。
+在 UI 內輸入 admin 建好的 `User ID`、`Group ID`、Password，切 Easy/Hard，按 `I` 登入，按 `V` 產生 `client_result`，按 `U` 檢查 eligibility 並提交。
 
 ### VM B：測試 Leaderboard
 
@@ -264,7 +264,7 @@ curl -X POST http://127.0.0.1:8000/v2/admin/batches/run-now \
 http://192.168.56.10:8000/admin
 ```
 
-輸入 `test-admin`，按 `Create Demo Snapshot`。
+輸入 `test-admin`，按 `Run Snapshot Now`。
 
 ### Replay 測試
 

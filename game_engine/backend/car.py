@@ -10,15 +10,15 @@ from shared.contracts import DEFAULT_EVOLUTION_SEED
 
 collision_surface = None
 default_car_image = None
-maxspeed = MAX_SPEED
+maxspeed = float(MAX_SPEED)
 DEFAULT_MLP_INIT_SEED = DEFAULT_EVOLUTION_SEED
 
 
-def configure_car(collision_map, car_image, max_speed=MAX_SPEED):
+def configure_car(collision_map, car_image, max_speed: float = float(MAX_SPEED)):
     global collision_surface, default_car_image, maxspeed
     collision_surface = collision_map
     default_car_image = car_image
-    maxspeed = max_speed
+    maxspeed = float(max_speed)
 
 
 def set_collision_map(collision_map):
@@ -71,6 +71,7 @@ class Car:
     self.a = self.x-(self.width/2), self.y + self.height-(self.height/2)
     self.velocity = 0.0
     self.acceleration = 0
+    self.max_speed: float = float(maxspeed)
     self.angle = 180
     self.collided = False
     self.color = WHITE
@@ -119,8 +120,9 @@ class Car:
   def update(self, track: TrackGeometry | None = None):
     if self.acceleration != 0:
         self.velocity += self.acceleration
-        if self.velocity > maxspeed:
-            self.velocity = maxspeed
+        speed_limit = getattr(self, "max_speed", maxspeed)
+        if self.velocity > speed_limit:
+            self.velocity = speed_limit
         elif self.velocity < 0:
             self.velocity = 0
     else:
