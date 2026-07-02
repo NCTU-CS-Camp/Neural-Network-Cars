@@ -770,11 +770,12 @@ def _draw_phase_one(
         (easy, 34, "EASY", ACCENT["easy"]),
         (hard, 813, "HARD", ACCENT["hard"]),
     ):
-        _draw_map_panel(screen, session, pygame.Rect(col_x, 96, 753, 352), title, accent, fonts)
+        # map is 16:9 (matches the 1600x900 track) so it fills the panel without distortion
+        _draw_map_panel(screen, session, pygame.Rect(col_x, 96, 753, 424), title, accent, fonts)
         _draw_compact_leaderboard(
             screen,
             session,
-            pygame.Rect(col_x, 462, 753, 408),
+            pygame.Rect(col_x, 528, 753, 342),
             accent,
             fonts,
             rows=5,
@@ -892,14 +893,19 @@ def _draw_map_panel(
     fonts: dict[str, pygame.font.Font],
 ) -> None:
     panel_status = replay_panel_status(session)
-    # darkened track image (design: map darkened ~34% under an F1 dark wash)
-    native = session.track.front.copy()
-    wash = pygame.Surface(native.get_size(), pygame.SRCALPHA)
-    wash.fill((8, 8, 12, 92))
-    native.blit(wash, (0, 0))
-    scaled = pygame.transform.smoothscale(native, rect.size)
-    pygame.draw.rect(screen, BG_DEEP, rect)
-    screen.blit(scaled, rect.topleft)
+    pygame.draw.rect(screen, BG_DEEP, rect)  # map well / letterbox backing
+    native = session.track.front
+    # Fit the track inside the panel preserving its aspect ratio (no squashing).
+    fit_scale = min(rect.width / native.get_width(), rect.height / native.get_height())
+    fit_w = round(native.get_width() * fit_scale)
+    fit_h = round(native.get_height() * fit_scale)
+    fit_x = rect.x + (rect.width - fit_w) // 2
+    fit_y = rect.y + (rect.height - fit_h) // 2
+    track = pygame.transform.smoothscale(native, (fit_w, fit_h))
+    wash = pygame.Surface((fit_w, fit_h), pygame.SRCALPHA)
+    wash.fill((8, 8, 12, 58))  # ~23% dark wash so markers/banner pop without muddying the map
+    track.blit(wash, (0, 0))
+    screen.blit(track, (fit_x, fit_y))
     border_color = accent if panel_status == "RUNNING" else BORDER
     pygame.draw.rect(screen, border_color, rect, 3 if panel_status == "RUNNING" else 1)
     # angled stage banner (EASY / HARD / FINAL), top-left
@@ -909,13 +915,12 @@ def _draw_map_panel(
     if panel_status == "WAITING":
         _draw_waiting_for_submissions(screen, rect, fonts)
         return
-    # car markers: colored dot + skewed tag pill; dim when not running. Best rank on top.
-    native_w, native_h = native.get_size()
+    # car markers mapped into the fitted track area (dot + skewed tag pill; dim when stopped)
     for replay_car in sorted(session.cars, key=_replay_rank, reverse=True):
         running = not (replay_car.crashed or replay_car.stalled or replay_car.finished)
         ring = replay_car.color if running else DIM
-        cx = rect.x + int(replay_car.car.x / native_w * rect.width)
-        cy = rect.y + int(replay_car.car.y / native_h * rect.height)
+        cx = fit_x + int(replay_car.car.x / native.get_width() * fit_w)
+        cy = fit_y + int(replay_car.car.y / native.get_height() * fit_h)
         tag = _entry_tag(replay_car.item, session.competition_id)
         tag_fg = DARK_TEXT if ring in (OFFWHITE, SILVER, SILVER_TAB, GOLD) else WHITE
         _draw_skew_banner(
