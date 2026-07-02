@@ -58,6 +58,7 @@ from game_engine.frontend.shop.renderer import apply_equipped_skin, equipped_ski
 from game_engine.frontend.scenes import AppShell
 from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
+    CUSTOM_PRESET_LABEL,
     AppQuit,
     run_clear_user_confirm_screen,
     run_loading_screen,
@@ -681,7 +682,9 @@ def run_training_loop(
         if leave_requested:
             persist_settings()
             while True:  # loop so cancelling naming returns to save confirm
-                confirm_result = run_save_confirm_screen(screen)
+                confirm_result = run_save_confirm_screen(
+                    screen, preset_savable=fitness_strategy.name == CUSTOM_PRESET_LABEL
+                )
                 if confirm_result is None:
                     break  # user pressed 取消 → stay in training
                 save_record, save_as_preset = confirm_result
