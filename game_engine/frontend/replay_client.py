@@ -71,6 +71,7 @@ CAR_RAMP: list[Color] = [RED, OFFWHITE, SILVER, GOLD, (142, 145, 153), RED_BRIGH
 REPLAY_PROGRESS_DISTANCE_PX = 24.0
 REPLAY_HOLD_SECONDS = 3.0
 REPLAY_FETCH_SECONDS = 5.0
+SNAPSHOT_WAIT_FETCH_SECONDS = 0.5
 LEADERBOARD_REVEAL_HIGHLIGHT_SECONDS = 2.0
 VIRTUAL_SIZE = SCREEN_SIZE
 SNAPSHOT_WAIT_LABEL = "等待新快照"
@@ -271,7 +272,7 @@ def run(
             if now >= next_fetch_at:
                 try:
                     incoming_state = fetch_replay_state(replay_url, replay_token)
-                    next_fetch_at = now + REPLAY_FETCH_SECONDS
+                    next_fetch_at = now + _replay_fetch_delay(snapshot_wait_boundary)
                     if state is None:
                         state = incoming_state
                         sessions = load_replay_sessions(
@@ -292,6 +293,7 @@ def run(
                             pending_state = None
                             hold_until = None
                             snapshot_wait_boundary = None
+                            next_fetch_at = now + REPLAY_FETCH_SECONDS
                         elif _has_runnable_sessions(sessions):
                             pending_state = incoming_state
                         else:
@@ -306,11 +308,18 @@ def run(
                     else:
                         state = incoming_state
                         pending_state = None
-                        if (
-                            snapshot_wait_boundary is not None
-                            and _snapshot_boundary_iso(state) != snapshot_wait_boundary
+                        if _snapshot_wait_finished_without_new_payload(
+                            state,
+                            snapshot_wait_boundary,
                         ):
+                            sessions = load_replay_sessions(
+                                state,
+                                assets,
+                                revealed_signatures,
+                            )
+                            hold_until = None
                             snapshot_wait_boundary = None
+                            next_fetch_at = now + REPLAY_FETCH_SECONDS
                     status = "RUNNING"
                 except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
                     status = f"Replay feed unavailable: {exc}"
@@ -335,8 +344,10 @@ def run(
                         pending_state = None
                         hold_until = None
                         snapshot_wait_boundary = None
+                        next_fetch_at = now + REPLAY_FETCH_SECONDS
                     else:
                         snapshot_wait_boundary = wait_boundary
+                        next_fetch_at = now
 
             virtual_screen.fill(BACKGROUND)
             if state is None:
@@ -576,6 +587,20 @@ def _replay_payload_identity(state: dict[str, Any]) -> tuple[str, int, tuple[tup
 
 def _has_runnable_sessions(sessions: dict[str, ReplaySession]) -> bool:
     return any(session.has_cars for session in sessions.values())
+
+
+def _replay_fetch_delay(snapshot_wait_boundary: str | None) -> float:
+    return SNAPSHOT_WAIT_FETCH_SECONDS if snapshot_wait_boundary is not None else REPLAY_FETCH_SECONDS
+
+
+def _snapshot_wait_finished_without_new_payload(
+    state: dict[str, Any],
+    snapshot_wait_boundary: str | None,
+) -> bool:
+    return (
+        snapshot_wait_boundary is not None
+        and _snapshot_boundary_iso(state) != snapshot_wait_boundary
+    )
 
 
 def _snapshot_wait_boundary(

@@ -1119,6 +1119,42 @@ def test_snapshot_boundary_wait_ignores_empty_sessions_only():
     ) == boundary
 
 
+def test_snapshot_wait_uses_fast_polling_until_boundary_advances():
+    from game_engine.frontend.replay_client import (
+        REPLAY_FETCH_SECONDS,
+        SNAPSHOT_WAIT_FETCH_SECONDS,
+        _replay_fetch_delay,
+        _snapshot_wait_finished_without_new_payload,
+    )
+
+    boundary = "2026-07-03T10:05:00+00:00"
+    next_boundary = "2026-07-03T10:06:00+00:00"
+
+    assert _replay_fetch_delay(None) == REPLAY_FETCH_SECONDS
+    assert _replay_fetch_delay(boundary) == SNAPSHOT_WAIT_FETCH_SECONDS
+    assert (
+        _snapshot_wait_finished_without_new_payload(
+            {"config": {"next_snapshot_at": boundary}},
+            boundary,
+        )
+        is False
+    )
+    assert (
+        _snapshot_wait_finished_without_new_payload(
+            {"config": {"next_snapshot_at": next_boundary}},
+            boundary,
+        )
+        is True
+    )
+    assert (
+        _snapshot_wait_finished_without_new_payload(
+            {"config": {"next_snapshot_at": next_boundary}},
+            None,
+        )
+        is False
+    )
+
+
 def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
