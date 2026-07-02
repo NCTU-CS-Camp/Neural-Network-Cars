@@ -48,6 +48,7 @@ from game_engine.backend.training_session import TrainingSession
 from game_engine.frontend.config_store import load_runtime_settings, save_runtime_settings
 from game_engine.frontend.profile_store import (
     clear_login_profile,
+    login_session_is_valid,
     load_login_profile,
 )
 from game_engine.frontend.shop.screen import run_shop_screen
@@ -110,8 +111,10 @@ def run():
         settings = load_runtime_settings()
         settings.server_url = load_server_url()
         profile = load_login_profile()
-        should_save_settings = profile is None
-        if profile is None:
+        should_save_settings = (
+            profile is None or not login_session_is_valid(profile)
+        )
+        if should_save_settings:
             profile = run_login_screen(screen, settings.server_url)
         else:
             profile.server_url = settings.server_url
@@ -158,7 +161,11 @@ def run():
             elif choice == "shop":
                 run_shop_screen(screen)
             else:
-                run_validation_list_screen(screen, profile.server_url)
+                if not login_session_is_valid(profile):
+                    profile = run_login_screen(screen, settings.server_url)
+                    settings.nickname = profile.username
+                    save_runtime_settings(settings)
+                run_validation_list_screen(screen, profile)
     except AppQuit:
         pass
 

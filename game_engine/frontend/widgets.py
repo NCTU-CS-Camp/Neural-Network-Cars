@@ -248,6 +248,7 @@ class TextInput:
     active_border_color: tuple[int, int, int] = CYAN
     allowed_characters: str | None = None
     clear_on_focus: bool = False
+    masked: bool = False
 
     def focus(self) -> None:
         self.active = True
@@ -357,7 +358,9 @@ class TextInput:
         border = self.active_border_color if self.active else self.border_color
         pygame.draw.rect(surface, border, self.rect, 1)
 
-        before, after = self.text[: self.cursor_pos], self.text[self.cursor_pos :]
+        displayed_text = "•" * len(self.text) if self.masked else self.text
+        before = displayed_text[: self.cursor_pos]
+        after = displayed_text[self.cursor_pos :]
         origin = (self.rect.x + 8, self.rect.centery)
 
         before_surf = font.render(before, True, self.text_color)
@@ -366,7 +369,8 @@ class TextInput:
         cursor_x = before_rect.right
 
         if self.composing:
-            composing_surf = font.render(self.composing, True, self.text_color)
+            composing_text = "•" * len(self.composing) if self.masked else self.composing
+            composing_surf = font.render(composing_text, True, self.text_color)
             composing_rect = composing_surf.get_rect(midleft=(cursor_x, self.rect.centery))
             surface.blit(composing_surf, composing_rect)
             underline_y = composing_rect.bottom - 1

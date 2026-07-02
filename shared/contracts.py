@@ -133,6 +133,8 @@ class LoginProfile:
     group_id: str
     username: str
     server_url: str = DEFAULT_SERVER_URL
+    token: str = ""
+    expires_at: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LoginProfile":
@@ -140,6 +142,8 @@ class LoginProfile:
             group_id=str(data["group_id"]),
             username=str(data["username"]),
             server_url=str(data.get("server_url", DEFAULT_SERVER_URL)),
+            token=str(data.get("token", "")),
+            expires_at=str(data.get("expires_at", "")),
         )
 
     def to_dict(self) -> dict[str, Any]:

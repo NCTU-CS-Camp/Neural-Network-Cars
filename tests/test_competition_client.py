@@ -6,19 +6,25 @@ import os
 import pygame
 import pytest
 
+import game_engine.frontend.competition_client as client_module
 from game_engine.backend.assets import load_game_assets
 from game_engine.backend.car import Car, configure_car
 from game_engine.backend.settings import HIDDEN_LAYER, INPUT_LAYER, OUTPUT_LAYER
 from game_engine.backend.training_session import TrainingSession
 from game_engine.frontend.competition_client import (
+    AuthenticatedSession,
     CompetitionTrainingClient,
+    NetworkError,
+    authenticate_user,
     build_manual_client_result,
+    check_eligibility,
     evaluate_car_result,
     parse_bool,
 )
 from game_engine.frontend.submission_client import submit_car
 from server.competition_config import FRAME_LIMIT
 from server.competition_maps import get_competition_map
+from shared.contracts import ClientResult, SubmissionPayload
 
 
 LAYER_SIZES = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
@@ -132,6 +138,116 @@ def test_submit_client_still_requires_explicit_client_result():
     assert result.ok is False
     assert "client_result" in result.message
     assert "competition_main.py" in result.message
+
+
+def test_authenticate_user_returns_bearer_session(monkeypatch) -> None:
+    monkeypatch.setattr(
+        client_module,
+        "_post_json",
+        lambda *args, **kwargs: (
+            200,
+            {
+                "token": "student-token",
+                "expires_at": "2026-07-03T14:00:00+00:00",
+                "group_id": "1",
+                "username": "ada",
+            },
+        ),
+    )
+
+    result = authenticate_user(
+        "http://localhost:8000",
+        group_id="1",
+        username="ada",
+        password="pw",
+    )
+
+    assert isinstance(result, AuthenticatedSession)
+    assert result.token == "student-token"
+
+
+def test_authenticate_user_reports_invalid_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(
+        client_module,
+        "_post_json",
+        lambda *args, **kwargs: (401, {"detail": "invalid credentials"}),
+    )
+
+    result = authenticate_user(
+        "http://localhost:8000",
+        group_id="1",
+        username="ada",
+        password="wrong",
+    )
+
+    assert isinstance(result, NetworkError)
+    assert "401" in result.message
+
+
+def test_eligibility_forwards_bearer_token(monkeypatch) -> None:
+    captured: dict[str, str | None] = {}
+
+    def fake_post_json(url, payload, timeout=10.0, token=None):
+        del url, payload, timeout
+        captured["token"] = token
+        return (
+            200,
+            {
+                "eligible": True,
+                "reason": None,
+                "stage": "phase_one",
+                "next_submission_at": "2026-07-03T02:00:00+00:00",
+                "competition_config_version": "competition-2026-v1",
+            },
+        )
+
+    monkeypatch.setattr(client_module, "_post_json", fake_post_json)
+
+    result = check_eligibility(
+        "http://localhost:8000",
+        "easy",
+        "1",
+        "ada",
+        token="student-token",
+    )
+
+    assert not isinstance(result, NetworkError)
+    assert result.eligible
+    assert captured["token"] == "student-token"
+
+
+def test_submission_forwards_bearer_token(monkeypatch) -> None:
+    captured: dict[str, str | None] = {}
+
+    def fake_post_json(url, payload, timeout=10.0, token=None):
+        del url, payload, timeout
+        captured["token"] = token
+        return (201, {"submission_id": "sub_1", "status": "queued"})
+
+    monkeypatch.setattr(client_module, "_post_json", fake_post_json)
+    payload = SubmissionPayload(
+        group_id="1",
+        username="ada",
+        weights=[[0.0] * 36, [0.0] * 24],
+        biases=[[0.0] * 6, [0.0] * 4],
+    )
+    client_result = ClientResult(
+        completed=False,
+        lap_ticks=None,
+        max_progress=100.0,
+        ticks_to_max_progress=20,
+    )
+
+    result = client_module.submit(
+        "http://localhost:8000",
+        "easy",
+        payload,
+        client_result,
+        token="student-token",
+    )
+
+    assert isinstance(result, client_module.SubmissionAccepted)
+    assert captured["token"] == "student-token"
 
 
 def test_auto_breed_shortcut_works_even_when_user_field_is_active(competition_client):

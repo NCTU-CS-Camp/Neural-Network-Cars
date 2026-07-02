@@ -38,6 +38,14 @@ class NetworkError:
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class AuthenticatedSession:
+    token: str
+    expires_at: str
+    group_id: str
+    username: str
+
+
 @dataclass(slots=True)
 class EligibilityResult:
     eligible: bool
@@ -751,6 +759,45 @@ def _eligibility_path(competition_id: str) -> str:
     return f"/v2/competitions/{competition_id}/eligibility"
 
 
+def authenticate_user(
+    server_url: str,
+    *,
+    group_id: str,
+    username: str,
+    password: str,
+) -> AuthenticatedSession | NetworkError:
+    result = _post_json(
+        server_url.rstrip("/") + "/v2/auth/login",
+        {
+            "group_id": group_id,
+            "username": username,
+            "password": password,
+        },
+    )
+    if isinstance(result, NetworkError):
+        return result
+
+    status, body = result
+    if status != 200:
+        detail = body.get("detail", "invalid credentials")
+        return NetworkError(message=f"登入失敗（HTTP {status}）：{detail}")
+
+    token = str(body.get("token", "")).strip()
+    expires_at = str(body.get("expires_at", "")).strip()
+    response_group_id = str(body.get("group_id", "")).strip()
+    response_username = str(body.get("username", "")).strip()
+    if not token or not expires_at:
+        return NetworkError(message="登入失敗：server 回應缺少 token 或 expires_at")
+    if response_group_id != group_id or response_username != username:
+        return NetworkError(message="登入失敗：server 回傳的使用者身分不一致")
+    return AuthenticatedSession(
+        token=token,
+        expires_at=expires_at,
+        group_id=response_group_id,
+        username=response_username,
+    )
+
+
 def _submission_path(competition_id: str) -> str:
     if competition_id == "final":
         return "/v2/finals/submissions"
@@ -903,11 +950,13 @@ def _draw_wrapped(
 
 
 __all__ = [
+    "AuthenticatedSession",
     "EligibilityResult",
     "NetworkError",
     "SubmissionAccepted",
     "SubmissionRejected",
     "build_manual_client_result",
+    "authenticate_user",
     "check_eligibility",
     "evaluate_car_result",
     "parse_bool",

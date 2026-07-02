@@ -70,6 +70,7 @@ from game_engine.frontend.competition_client import (
     NetworkError,
     SubmissionAccepted,
     SubmissionRejected,
+    authenticate_user,
     check_eligibility,
 )
 from game_engine.frontend.competition_client import submit as submit_to_competition_server
@@ -284,6 +285,7 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
     selected_group: str | None = None
     error_message = ""
     name_text = ""
+    password_text = ""
 
     while True:  # outer: rebuild on VIDEORESIZE
         W, H = screen.get_size()
@@ -298,11 +300,21 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             Button(str(group_id), pygame.Rect(M + (group_id - 1) * (group_btn_w + 8), btn_y, group_btn_w, group_btn_h))
             for group_id in range(1, GROUP_COUNT + 1)
         ]
-        inp_y = H * 55 // 100
+        inp_y = H * 50 // 100
         inp_h = max(40, H // 18)
         name_input = TextInput(pygame.Rect(M, inp_y, min(400, W - M * 2), inp_h), text=name_text)
-        reg_y = H * 70 // 100
-        register_button = Button("註冊", pygame.Rect(M, reg_y, max(120, W // 8), max(44, H // 18)))
+        password_y = H * 61 // 100
+        password_input = TextInput(
+            pygame.Rect(M, password_y, min(400, W - M * 2), inp_h),
+            text=password_text,
+            max_length=80,
+            masked=True,
+        )
+        login_y = H * 74 // 100
+        login_button = Button(
+            "登入",
+            pygame.Rect(M, login_y, max(120, W // 8), max(44, H // 18)),
+        )
 
         resize = False
         while not resize:
@@ -310,20 +322,36 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
                 _check_quit(event)
                 if event.type == pygame.VIDEORESIZE:
                     name_text = name_input.text
+                    password_text = password_input.text
                     resize = True
                     break
                 name_input.handle_event(event)
+                password_input.handle_event(event)
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     for button in group_buttons:
                         if button.contains(event.pos):
                             selected_group = button.text
-                    if register_button.contains(event.pos):
+                    if login_button.contains(event.pos):
                         username = name_input.text.strip()
-                        if selected_group is None or not username:
-                            error_message = "請選擇組別並輸入名字"
+                        password = password_input.text
+                        if selected_group is None or not username or not password.strip():
+                            error_message = "請選擇組別並輸入名字與密碼"
                         else:
+                            session = authenticate_user(
+                                server_url,
+                                group_id=selected_group,
+                                username=username,
+                                password=password,
+                            )
+                            if isinstance(session, NetworkError):
+                                error_message = session.message
+                                continue
                             profile = LoginProfile(
-                                group_id=selected_group, username=username, server_url=server_url
+                                group_id=session.group_id,
+                                username=session.username,
+                                server_url=server_url,
+                                token=session.token,
+                                expires_at=session.expires_at,
                             )
                             save_login_profile(profile)
                             return profile
@@ -334,8 +362,8 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             for button in group_buttons:
                 button.update_hover(mouse_pos)
                 button.fill_color = F1_RED if button.text == selected_group else CARBON
-            register_button.fill_color = F1_RED
-            register_button.update_hover(mouse_pos)
+            login_button.fill_color = F1_RED
+            login_button.update_hover(mouse_pos)
 
             screen.fill(BG)
             screen.blit(head40.render("DRIVER SIGN-IN", True, INK), (M, H * 12 // 100))
@@ -343,11 +371,19 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             screen.blit(font.render("選擇組別 (1-10)", True, DIM), (M, btn_y - font.get_height() - 6))
             for button in group_buttons:
                 button.draw(screen, font)
-            screen.blit(font.render("輸入名字", True, DIM), (M, inp_y - font.get_height() - 6))
+            screen.blit(font.render("名字", True, DIM), (M, inp_y - font.get_height() - 6))
             name_input.draw(screen, font)
-            register_button.draw(screen, font)
+            screen.blit(
+                font.render("密碼", True, DIM),
+                (M, password_y - font.get_height() - 6),
+            )
+            password_input.draw(screen, font)
+            login_button.draw(screen, font)
             if error_message:
-                screen.blit(font.render(error_message, True, (255, 90, 90)), (M, reg_y + register_button.rect.height + 16))
+                screen.blit(
+                    font.render(error_message, True, (255, 90, 90)),
+                    (M, login_y + login_button.rect.height + 16),
+                )
 
             pygame.display.update()
             clock.tick(30)
@@ -1158,7 +1194,9 @@ def _rebuild_car(
 
 
 def _run_record_submission_screen(
-    screen: pygame.Surface, server_url: str, record: TrainingRecord
+    screen: pygame.Surface,
+    profile: LoginProfile,
+    record: TrainingRecord,
 ) -> None:
     """Upload entry point: rebuild the record's two parents and run the same
     competition submission flow used during live training."""
@@ -1178,9 +1216,10 @@ def _run_record_submission_screen(
     )
     run_submission_screen(
         screen,
-        server_url,
-        record.group_id,
-        record.username,
+        profile.server_url,
+        profile.group_id,
+        profile.username,
+        profile.token,
         parent_a,
         parent_b,
         record.layer_sizes,
@@ -1234,7 +1273,10 @@ def _upload_result_lines(record: TrainingRecord) -> list[str]:
     return lines
 
 
-def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
+def run_validation_list_screen(
+    screen: pygame.Surface,
+    profile: LoginProfile,
+) -> None:
     clock = pygame.time.Clock()
     store = RecordStore()
     message = ""
@@ -1320,7 +1362,7 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
                             _run_record_validation_screen(screen, record)
                             break
                         if upload_button.contains(event.pos):
-                            _run_record_submission_screen(screen, server_url, record)
+                            _run_record_submission_screen(screen, profile, record)
                             break
                         if delete_button.contains(event.pos):
                             pending_delete_record_id = record.record_id
@@ -1629,10 +1671,21 @@ def _pick_competition_screen(screen: pygame.Surface) -> str | None:
 
 
 def _check_eligibility_screen(
-    screen: pygame.Surface, server_url: str, competition_id: str, group_id: str, username: str
+    screen: pygame.Surface,
+    server_url: str,
+    competition_id: str,
+    group_id: str,
+    username: str,
+    token: str,
 ) -> bool:
     clock = pygame.time.Clock()
-    result = check_eligibility(server_url, competition_id, group_id, username)
+    result = check_eligibility(
+        server_url,
+        competition_id,
+        group_id,
+        username,
+        token=token,
+    )
     can_start = isinstance(result, EligibilityResult) and result.eligible
 
     while True:  # outer: rebuild on VIDEORESIZE
@@ -2093,6 +2146,7 @@ def _submit_result_screen(
     competition_id: str,
     group_id: str,
     username: str,
+    token: str,
     winner_car: Car,
     layer_sizes: list[int],
     client_result: ClientResult,
@@ -2150,9 +2204,14 @@ def _submit_result_screen(
                             username=username,
                             weights=weight_payload.weights,
                             biases=weight_payload.biases,
+                            max_speed=record.max_speed,
                         )
                         response = submit_to_competition_server(
-                            server_url, competition_id, payload, client_result
+                            server_url,
+                            competition_id,
+                            payload,
+                            client_result,
+                            token=token,
                         )
                         submitted = True
                         if isinstance(response, SubmissionAccepted):
@@ -2219,6 +2278,7 @@ def run_submission_screen(
     server_url: str,
     group_id: str,
     username: str,
+    token: str,
     parent_a: Any,
     parent_b: Any,
     layer_sizes: list[int],
@@ -2231,7 +2291,14 @@ def run_submission_screen(
     if competition_id is None:
         return
 
-    can_proceed = _check_eligibility_screen(screen, server_url, competition_id, group_id, username)
+    can_proceed = _check_eligibility_screen(
+        screen,
+        server_url,
+        competition_id,
+        group_id,
+        username,
+        token,
+    )
     if not can_proceed:
         return
 
@@ -2256,6 +2323,7 @@ def run_submission_screen(
         competition_id,
         group_id,
         username,
+        token,
         winner_car,
         layer_sizes,
         client_result,

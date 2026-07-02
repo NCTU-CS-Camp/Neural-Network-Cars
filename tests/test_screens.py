@@ -99,17 +99,22 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
     events = [
         pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
-            {"button": 1, "pos": (88, 248)},
+            {"button": 1, "pos": (88, 316)},
         ),
         pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
-            {"button": 1, "pos": (100, 360)},
+            {"button": 1, "pos": (100, 470)},
         ),
         pygame.event.Event(pygame.TEXTEDITING, {"text": "ㄨ"}),
         pygame.event.Event(pygame.TEXTINPUT, {"text": "吳榮恆"}),
         pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
-            {"button": 1, "pos": (100, 450)},
+            {"button": 1, "pos": (100, 570)},
+        ),
+        pygame.event.Event(pygame.TEXTINPUT, {"text": "temporary-password"}),
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (100, 690)},
         ),
     ]
     monkeypatch.setattr(pygame.event, "get", lambda: events)
@@ -117,6 +122,16 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
         screens,
         "save_login_profile",
         lambda _: None,
+    )
+    monkeypatch.setattr(
+        screens,
+        "authenticate_user",
+        lambda *args, **kwargs: SimpleNamespace(
+            token="student-token",
+            expires_at="2026-07-03T14:00:00+00:00",
+            group_id="1",
+            username="吳榮恆",
+        ),
     )
     pygame.font.init()
 
@@ -128,6 +143,7 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
     assert profile.group_id == "1"
     assert profile.username == "吳榮恆"
     assert profile.server_url == "http://192.168.1.20:8000"
+    assert profile.token == "student-token"
 
 
 def test_main_menu_exposes_clear_user_action(monkeypatch) -> None:
@@ -388,7 +404,12 @@ def test_delete_requires_release_on_same_record(
     with pytest.raises(screens.AppQuit):
         screens.run_validation_list_screen(
             pygame.Surface((1600, 900)),
-            "http://127.0.0.1:8000",
+            LoginProfile(
+                group_id="1",
+                username="apollo",
+                server_url="http://127.0.0.1:8000",
+                token="student-token",
+            ),
         )
 
     assert store.deleted == expected_deleted
