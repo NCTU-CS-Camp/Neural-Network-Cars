@@ -893,41 +893,99 @@ def _draw_map_panel(
     fonts: dict[str, pygame.font.Font],
 ) -> None:
     panel_status = replay_panel_status(session)
+    header_h = 40
+    track_rect = pygame.Rect(rect.x, rect.y + header_h, rect.width, rect.height - header_h)
     pygame.draw.rect(screen, BG_DEEP, rect)  # map well / letterbox backing
-    native = session.track.front
-    # Fit the track inside the panel preserving its aspect ratio (no squashing).
-    fit_scale = min(rect.width / native.get_width(), rect.height / native.get_height())
+    native = session.track.front.copy()
+    if panel_status != "WAITING":
+        for replay_car in sorted(session.cars, key=_replay_rank, reverse=True):
+            _draw_replay_car_sprite(native, replay_car)
+    # Fit the track inside the track area preserving its aspect ratio (no squashing).
+    fit_scale = min(track_rect.width / native.get_width(), track_rect.height / native.get_height())
     fit_w = round(native.get_width() * fit_scale)
     fit_h = round(native.get_height() * fit_scale)
-    fit_x = rect.x + (rect.width - fit_w) // 2
-    fit_y = rect.y + (rect.height - fit_h) // 2
+    fit_x = track_rect.x + (track_rect.width - fit_w) // 2
+    fit_y = track_rect.y + (track_rect.height - fit_h) // 2
     track = pygame.transform.smoothscale(native, (fit_w, fit_h))
-    wash = pygame.Surface((fit_w, fit_h), pygame.SRCALPHA)
-    wash.fill((8, 8, 12, 58))  # ~23% dark wash so markers/banner pop without muddying the map
-    track.blit(wash, (0, 0))
     screen.blit(track, (fit_x, fit_y))
     border_color = accent if panel_status == "RUNNING" else BORDER
     pygame.draw.rect(screen, border_color, rect, 3 if panel_status == "RUNNING" else 1)
-    # angled stage banner (EASY / HARD / FINAL), top-left
-    banner_font = fonts["banner_fin"] if title == "FINAL" else fonts["banner"]
-    _draw_skew_banner(screen, rect.x + 14, rect.y + 14, title, accent, banner_font, skew=10)
+    _draw_map_panel_header(screen, rect, title, accent, fonts)
     _draw_panel_badge(screen, rect, panel_status, accent, fonts)
     if panel_status == "WAITING":
-        _draw_waiting_for_submissions(screen, rect, fonts)
+        _draw_waiting_for_submissions(screen, track_rect, fonts)
         return
-    # car markers mapped into the fitted track area (dot + skewed tag pill; dim when stopped)
+    # Lightweight name tags only: no marker dots or filled tag pills over the track.
     for replay_car in sorted(session.cars, key=_replay_rank, reverse=True):
-        running = not (replay_car.crashed or replay_car.stalled or replay_car.finished)
-        ring = replay_car.color if running else DIM
         cx = fit_x + int(replay_car.car.x / native.get_width() * fit_w)
         cy = fit_y + int(replay_car.car.y / native.get_height() * fit_h)
-        tag = _entry_tag(replay_car.item, session.competition_id)
-        tag_fg = DARK_TEXT if ring in (OFFWHITE, SILVER, SILVER_TAB, GOLD) else WHITE
-        _draw_skew_banner(
-            screen, cx - 22, cy - 26, tag, ring, fonts["car_tag"], fg=tag_fg, skew=6, padx=7, pady=1
+        _draw_replay_name_tag(
+            screen,
+            str(replay_car.item.get("username", "unknown")),
+            cx,
+            cy,
+            replay_car.color,
+            track_rect,
+            fonts["label"],
         )
-        pygame.draw.circle(screen, DARK_TEXT, (cx, cy), 9)
-        pygame.draw.circle(screen, ring, (cx, cy), 7)
+
+
+def _draw_map_panel_header(
+    screen: pygame.Surface,
+    rect: pygame.Rect,
+    title: str,
+    accent: Color,
+    fonts: dict[str, pygame.font.Font],
+) -> None:
+    text = fonts["panel"].render(title, True, WHITE)
+    y = rect.y + 7
+    pygame.draw.line(screen, accent, (rect.x + 10, rect.y + 27), (rect.x + 116, rect.y + 27), 2)
+    screen.blit(text, (rect.x + 12, y))
+
+
+def _draw_replay_car_sprite(surface: pygame.Surface, replay_car: ReplayCar) -> None:
+    image = replay_car.car.car_image
+    if image is None:
+        return
+    rotated = pygame.transform.rotate(image, -replay_car.car.angle - 180)
+    if replay_car.crashed or replay_car.stalled or replay_car.finished:
+        rotated = rotated.copy()
+        rotated.set_alpha(112)
+    rect = rotated.get_rect()
+    rect.center = replay_car.car.x, replay_car.car.y
+    surface.blit(rotated, rect)
+
+
+def _draw_replay_name_tag(
+    screen: pygame.Surface,
+    text: str,
+    x: int,
+    y: int,
+    color: Color,
+    bounds: pygame.Rect,
+    font: pygame.font.Font,
+) -> None:
+    rendered = font.render(text, True, color)
+    shadow = font.render(text, True, DARK_TEXT)
+    label_x, label_y = _fixed_label_position(bounds, x, y, rendered)
+    for offset in ((1, 1), (0, 1)):
+        screen.blit(shadow, (label_x + offset[0], label_y + offset[1]))
+    screen.blit(rendered, (label_x, label_y))
+
+
+def _fixed_label_position(
+    bounds: pygame.Rect,
+    x: int,
+    y: int,
+    label: pygame.Surface,
+) -> tuple[int, int]:
+    label_x = x + 9
+    label_y = y - label.get_height() - 8
+    min_x = bounds.x + 4
+    min_y = bounds.y + 4
+    max_x = max(min_x, bounds.right - label.get_width() - 4)
+    max_y = max(min_y, bounds.bottom - label.get_height() - 4)
+    return min(max(label_x, min_x), max_x), min(max(label_y, min_y), max_y)
 
 
 def _leader_ticks(entries: list[dict[str, Any]]) -> int | None:
