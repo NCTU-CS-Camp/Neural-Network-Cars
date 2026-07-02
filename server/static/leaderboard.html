@@ -136,13 +136,18 @@
     function resultText(r){ return r.completed ? `${lapSeconds(r.lap_ticks).toFixed(3)}s` : `${Number(r.max_progress).toFixed(0)} prog`; }
     function tag(username){ return String(username).replace(/[^a-z0-9]/gi,"").slice(0,3).toUpperCase(); }
     function countdownText(iso){ if(!iso) return ""; const rem=Math.max(0,new Date(iso).getTime()-Date.now()); const s=Math.floor(rem/1000); return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; }
+    function activeTabUsesSnapshots(){
+      return (state?.stage === "phase_one" && (activeCompetition === "easy" || activeCompetition === "hard"))
+        || (state?.stage === "final" && activeCompetition === "final");
+    }
 
     function renderTiming(){
       if(!state){ return; }
       const updated = lastUpdatedAt ? `Last updated ${lastUpdatedAt.toLocaleTimeString()}` : "Waiting for update";
       // project convention: prefer next_snapshot_at, fall back to next_phase_one_batch_at
       const snapshotAt = state?.config?.next_snapshot_at || state?.config?.next_phase_one_batch_at;
-      if(activeCompetition === "final" || !snapshotAt){ timingEl.textContent = updated; return; }
+      if(!snapshotAt){ timingEl.textContent = updated; return; }
+      if(!activeTabUsesSnapshots()){ timingEl.textContent = `Stage inactive · ${updated}`; return; }
       timingEl.textContent = `Next snapshot in ${countdownText(snapshotAt)} · ${updated}`;
     }
 
