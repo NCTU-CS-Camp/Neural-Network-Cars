@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
+import os
 import secrets
 
 import numpy as np
@@ -94,6 +95,12 @@ def _car_from_flat_weights(
 
 
 def run():
+    # On WSLg, force SDL2 to use the Wayland backend so it receives IME
+    # composition events from the Windows IME bridge. X11/XWayland doesn't
+    # forward these, which is why other Wayland-aware apps (GTK, Electron)
+    # can type Chinese but SDL2 defaults can't.
+    if os.environ.get("WAYLAND_DISPLAY"):
+        os.environ.setdefault("SDL_VIDEODRIVER", "wayland")
     pygame.init()
     pygame.scrap.init()
     info = pygame.display.Info()
