@@ -340,7 +340,7 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             screen.blit(font.render("選擇組別 (1-10)", True, DIM), (M, btn_y - font.get_height() - 6))
             for button in group_buttons:
                 button.draw(screen, font)
-            screen.blit(font.render("輸入名字（可用 Ctrl+V 貼上中文）", True, DIM), (M, inp_y - font.get_height() - 6))
+            screen.blit(font.render("輸入名字", True, DIM), (M, inp_y - font.get_height() - 6))
             name_input.draw(screen, font)
             register_button.draw(screen, font)
             if error_message:
@@ -1177,6 +1177,21 @@ def _run_record_submission_screen(
 
 _COMPETITION_LABEL: dict[str, str] = {"easy": "Easy", "hard": "Hard", "final": "Final", "legacy": "Legacy"}
 
+_competition_total_length_cache: dict[str, float | None] = {}
+
+
+def _competition_total_length_px(competition_id: str) -> float | None:
+    """Total track length for a kaggle competition map, or None if unavailable
+    (e.g. `legacy`, which has no corresponding map file) — cached since the
+    map metadata is static per competition_id."""
+    if competition_id not in _competition_total_length_cache:
+        try:
+            total = load_competition_map(competition_id).new_tracker().total_length_px
+        except (FileNotFoundError, OSError):
+            total = None
+        _competition_total_length_cache[competition_id] = total
+    return _competition_total_length_cache[competition_id]
+
 
 def _upload_result_lines(record: TrainingRecord) -> list[str]:
     """Return one summary line per uploaded competition difficulty (empty list if none)."""
@@ -1189,7 +1204,11 @@ def _upload_result_lines(record: TrainingRecord) -> list[str]:
             progress_text = f"耗時 {format_ticks_as_seconds(r.get('lap_ticks'))}"
         else:
             mp = r.get("max_progress") or 0.0
-            progress_text = f"最遠進度 {mp:.1f}px"
+            total_length = _competition_total_length_px(comp_id)
+            if total_length:
+                progress_text = f"最遠進度 {min(100.0, mp / total_length * 100):.1f}%"
+            else:
+                progress_text = f"最遠進度 {mp:.1f}px"
         sr = r.get("survival_rate") or 0.0
         uploaded_at = format_timestamp_utc8(r["uploaded_at"]) if r.get("uploaded_at") else "--"
         lines.append(
@@ -1207,18 +1226,19 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
     scroll_offset = 0
 
     while True:  # outer: rebuild on VIDEORESIZE
-        font = _font(18)
-        detail_font = _font(16)
+        font = _font(22)
+        detail_font = _font(19)
         head32 = _head_font(32)
         head28 = _head_font(28)
-        mono16 = _mono_font(16)
+        mono16 = _mono_font(19)
+        line_gap = 6
         width, height = screen.get_size()
         margin = 40
         scrollbar_width = 14
         scrollbar_gap = 10
         back_button = Button("返回", pygame.Rect(margin, margin, 120, 48))
-        row_height = 200
-        row_gap = 10
+        row_height = 240
+        row_gap = 14
         list_top = back_button.rect.bottom + margin
         list_bottom = height - margin
         max_visible_records = max(1, (list_bottom - list_top) // (row_height + row_gap))
@@ -1331,25 +1351,27 @@ def run_validation_list_screen(screen: pygame.Surface, server_url: str) -> None:
                 content_width = validate_button.rect.left - text_x - margin
                 metadata = _ellipsize(font, metadata, content_width)
                 penalty_line, reward_line = _fitness_parameter_lines(record.fitness_config)
-                screen.blit(font.render(metadata, True, INK), (text_x, card_rect.y + 10))
+
+                y_cursor = card_rect.y + 12
+                metadata_surf = font.render(metadata, True, INK)
+                screen.blit(metadata_surf, (text_x, y_cursor))
+                y_cursor += metadata_surf.get_height() + line_gap
+
                 fitness_surf = mono16.render(f"Best Fitness: {performance}", True, CYAN)
-                screen.blit(fitness_surf, (text_x, card_rect.y + 10 + font.get_height()))
-                screen.blit(
-                    detail_font.render(penalty_line, True, F1_RED),
-                    (text_x, card_rect.y + 10 + font.get_height() + fitness_surf.get_height()),
-                )
-                screen.blit(
-                    detail_font.render(reward_line, True, F1_GREEN),
-                    (text_x, card_rect.y + 10 + font.get_height() + fitness_surf.get_height() + detail_font.get_height()),
-                )
+                screen.blit(fitness_surf, (text_x, y_cursor))
+                y_cursor += fitness_surf.get_height() + line_gap
+
+                screen.blit(detail_font.render(penalty_line, True, F1_RED), (text_x, y_cursor))
+                y_cursor += detail_font.get_height() + line_gap
+
+                screen.blit(detail_font.render(reward_line, True, F1_GREEN), (text_x, y_cursor))
+                y_cursor += detail_font.get_height() + line_gap
+
                 upload_lines = _upload_result_lines(record) or ["尚未上傳"]
-                base_y = card_rect.y + 10 + font.get_height() + fitness_surf.get_height() + detail_font.get_height() * 2
-                for ul_idx, upload_line in enumerate(upload_lines):
+                for upload_line in upload_lines:
                     upload_line = _ellipsize(detail_font, upload_line, content_width)
-                    screen.blit(
-                        detail_font.render(upload_line, True, DIM),
-                        (text_x, base_y + ul_idx * detail_font.get_height()),
-                    )
+                    screen.blit(detail_font.render(upload_line, True, DIM), (text_x, y_cursor))
+                    y_cursor += detail_font.get_height() + line_gap
                 validate_button.draw(screen, font)
                 upload_button.fill_color = CYAN
                 upload_button.text_color = (10, 11, 14)
@@ -1469,8 +1491,8 @@ def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord
     )
     if outcome is None:
         return
-    client_result, survival_ticks = outcome
-    _validation_result_screen(screen, map_id, client_result, survival_ticks)
+    client_result, survival_ticks, total_length_px = outcome
+    _validation_result_screen(screen, map_id, client_result, survival_ticks, total_length_px)
 
 
 def _clone_car(
@@ -1669,7 +1691,9 @@ def _draw_progress_screen(
     cy = height // 2
     head = _head_font(32)
     mono_big = _mono_font(42)
-    mono_sm = _mono_font(18)
+    # The count labels below ("存活中"/"完成"/"撞車") are Chinese — SpaceMono
+    # has no CJK glyphs, so use the CJK-capable font for this row instead.
+    mono_sm = _font(18)
 
     bar_w = min(600, width - 120)
     bar = ProgressBar(
@@ -1879,7 +1903,7 @@ def _run_candidate_tournament_screen(
         assets.white_small_car,
         FRAME_LIMIT,
         trackers,
-        title=f"Competition：{competition_id}",
+        title=f"Competition: {competition_id}",
         render_live=False,
         max_speed=max_speed,
     )
@@ -1900,7 +1924,7 @@ def _run_validation_tournament_screen(
     parent_b: Any,
     layer_sizes: list[int],
     max_speed: int = MAX_SPEED,
-) -> tuple[ClientResult | None, int] | None:
+) -> tuple[ClientResult | None, int, float] | None:
     """Breed candidates and race them through ordered map checkpoints.
 
     The first non-colliding candidate to complete the route ends validation.
@@ -1948,7 +1972,7 @@ def _run_validation_tournament_screen(
         assets.green_small_car,
         VALIDATION_FRAME_LIMIT,
         trackers,
-        title=f"Validation：{map_id}",
+        title=f"Validation: {map_id}",
         stop_on_first_completion=True,
         max_speed=max_speed,
     )
@@ -1960,7 +1984,7 @@ def _run_validation_tournament_screen(
         range(len(client_results)),
         key=lambda index: client_results[index].ranking_key(),
     )
-    return client_results[winner], outcome.survival[winner]
+    return client_results[winner], outcome.survival[winner], trackers[0].total_length_px
 
 
 def _validation_result_screen(
@@ -1968,14 +1992,20 @@ def _validation_result_screen(
     map_id: str,
     client_result: ClientResult | None,
     survival_ticks: int,
+    total_length_px: float = 0.0,
 ) -> None:
     clock = pygame.time.Clock()
 
     if client_result is not None:
+        progress_text = (
+            f"{min(100.0, client_result.max_progress / total_length_px * 100):.1f}%"
+            if total_length_px
+            else f"{client_result.max_progress:.1f} px"
+        )
         rows = [
             ("completed",       str(client_result.completed),                           False),
             ("完賽時間",          format_ticks_as_seconds(client_result.lap_ticks),       True),
-            ("max_progress",    f"{client_result.max_progress:.1f} px",                 False),
+            ("max_progress",    progress_text,                                          False),
             ("到達最遠進度時間", format_ticks_as_seconds(client_result.ticks_to_max_progress), True),
         ]
         note = ""
@@ -2046,11 +2076,17 @@ def _submit_result_screen(
     response: SubmissionAccepted | SubmissionRejected | NetworkError | None = None
 
     completed_text = "賽道完成：是" if client_result.completed else "賽道完成：否"
+    _total_length = _competition_total_length_px(competition_id)
+    _progress_text = (
+        f"{min(100.0, client_result.max_progress / _total_length * 100):.1f}%"
+        if _total_length
+        else f"{client_result.max_progress:.1f}px"
+    )
     summary = (
         f"完賽！耗時 {format_ticks_as_seconds(client_result.lap_ticks)}"
         if client_result.completed
         else (
-            f"未完賽，最遠進度 {client_result.max_progress:.1f}px"
+            f"未完賽，最遠進度 {_progress_text}"
             f"（{format_ticks_as_seconds(client_result.ticks_to_max_progress)} 達到）"
         )
     )
@@ -2117,7 +2153,7 @@ def _submit_result_screen(
                 submit_button.update_hover(mouse_pos)
 
             screen.fill(BG)
-            screen.blit(head32.render(f"Local Winner：{competition_id}", True, INK), (60, 140))
+            screen.blit(head32.render(f"Local Winner: {competition_id}", True, INK), (60, 140))
             screen.blit(font.render(completed_text, True, INK), (60, 200))
             screen.blit(font.render(summary, True, CYAN), (60, 236))
             screen.blit(font.render(survival_text, True, DIM), (60, 272))
