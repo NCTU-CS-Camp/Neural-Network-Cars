@@ -11,24 +11,35 @@ import pygame
 
 from game_engine.backend.settings import BLACK, CJK_FONT_PATH, FONT_PATH, WHITE
 from game_engine.frontend.shop import catalog, gacha, store
-from game_engine.frontend.shop.config import SINGLE_PULL_COST, TEN_PULL_COST
+from game_engine.frontend.shop.collection import run_collection_screen
+from game_engine.frontend.shop.config import SINGLE_PULL_COST, TEN_PULL_COST, TIERS
+from game_engine.frontend.shop.earn_guide import run_earn_guide_screen
 from game_engine.frontend.shop.renderer import surfaces_for
 from game_engine.frontend.shop.reveal import play_reveal
 from game_engine.frontend.widgets import Button
 
-_TIER_COLORS: dict[str, tuple[int, int, int]] = {
-    "SSR": (255, 190, 70),
-    "SR": (200, 130, 255),
-    "S": (255, 120, 160),
-    "A": (120, 200, 255),
-    "B": (150, 210, 150),
-    "C": (180, 180, 180),
-}
+_TIER_RANK: dict[str, int] = {tier: i for i, tier in enumerate(TIERS)}
+
+
+def _tier_sort_key(skin_id: int) -> tuple[int, int]:
+    """Sort owned skins by tier high to low, then by catalog id."""
+    skin = catalog.get_skin(skin_id)
+    return (_TIER_RANK.get(skin.tier, len(TIERS)), skin_id)
 
 
 def _font(size: int = 22) -> pygame.font.Font:
     path = CJK_FONT_PATH or str(FONT_PATH)
     return pygame.font.Font(path, size)
+
+
+def _fit_label(font: pygame.font.Font, text: str, max_width: int) -> str:
+    """Trim text with an ellipsis so a long name can't overflow into its
+    neighbour's cell."""
+    if font.size(text)[0] <= max_width:
+        return text
+    while text and font.size(text + "…")[0] > max_width:
+        text = text[:-1]
+    return text + "…"
 
 
 def run_shop_screen(screen: pygame.Surface) -> None:
@@ -46,6 +57,8 @@ def run_shop_screen(screen: pygame.Surface) -> None:
         f"單抽 ({SINGLE_PULL_COST})", pygame.Rect(60, 200, 240, 60)
     )
     ten_button = Button(f"十連 ({TEN_PULL_COST})", pygame.Rect(320, 200, 240, 60))
+    collection_button = Button("車子圖鑑", pygame.Rect(width - 260, 170, 200, 44))
+    earn_button = Button("賺錢方式", pygame.Rect(width - 260, 224, 200, 44))
 
     message = ""
     inv_top = 375
@@ -55,7 +68,7 @@ def run_shop_screen(screen: pygame.Surface) -> None:
     def owned_skins() -> list[int]:
         if identity is None:
             return []
-        return list(store.load_entry(identity)["owned_skins"])
+        return sorted(store.load_entry(identity)["owned_skins"], key=_tier_sort_key)
 
     def equipped_skin() -> int:
         if identity is None:
@@ -141,6 +154,10 @@ def run_shop_screen(screen: pygame.Surface) -> None:
                     else:
                         message = ""
                         play_reveal(screen, results)
+                elif collection_button.contains(pos):
+                    run_collection_screen(screen)
+                elif earn_button.contains(pos):
+                    run_earn_guide_screen(screen)
                 elif viewport.collidepoint(pos):
                     for index, skin_id in enumerate(owned):
                         if inventory_cell_rect(index).move(0, -scroll).collidepoint(pos):
@@ -150,7 +167,13 @@ def run_shop_screen(screen: pygame.Surface) -> None:
         scroll = max(0, min(scroll, max_scroll))
 
         mouse_pos = pygame.mouse.get_pos()
-        for button in (back_button, single_button, ten_button):
+        for button in (
+            back_button,
+            single_button,
+            ten_button,
+            collection_button,
+            earn_button,
+        ):
             button.update_hover(mouse_pos)
 
         screen.fill(BLACK)
@@ -161,6 +184,8 @@ def run_shop_screen(screen: pygame.Surface) -> None:
         back_button.draw(screen, font)
         single_button.draw(screen, font)
         ten_button.draw(screen, font)
+        collection_button.draw(screen, font)
+        earn_button.draw(screen, font)
 
         if message:
             screen.blit(font.render(message, True, (255, 120, 120)), (60, 300))
@@ -174,8 +199,8 @@ def run_shop_screen(screen: pygame.Surface) -> None:
             if rect.bottom < viewport.top or rect.top > viewport.bottom:
                 continue
             skin = catalog.get_skin(skin_id)
-            sprite = surfaces_for(skin_id)["small"]
-            sprite = pygame.transform.scale(sprite, (rect.width - 16, rect.height - 16))
+            sprite = surfaces_for(skin_id)["display"]
+            sprite = pygame.transform.smoothscale(sprite, (rect.width - 16, rect.height - 16))
             screen.blit(sprite, (rect.x + 8, rect.y + 8))
             # White border for every cell so the equipped one (gold + thicker)
             # is the only highlighted frame and easy to spot.
@@ -184,14 +209,15 @@ def run_shop_screen(screen: pygame.Surface) -> None:
             pygame.draw.rect(screen, border, rect, 5 if is_equipped else 2, border_radius=6)
             # Tier is shown by a colored badge with the tier text, so the level
             # stays readable without color-coding the border.
-            tier_color = _TIER_COLORS.get(skin.tier, WHITE)
+            tier_color = catalog.TIER_COLORS.get(skin.tier, WHITE)
             tier_surf = small_font.render(skin.tier, True, BLACK)
             badge = pygame.Rect(
                 rect.x + 6, rect.y + 6, tier_surf.get_width() + 10, tier_surf.get_height() + 4
             )
             pygame.draw.rect(screen, tier_color, badge, border_radius=4)
             screen.blit(tier_surf, (badge.x + 5, badge.y + 2))
-            screen.blit(small_font.render(skin.name, True, WHITE), (rect.x, rect.bottom + 2))
+            label = _fit_label(small_font, skin.name, rect.width + 14)
+            screen.blit(small_font.render(label, True, WHITE), (rect.x, rect.bottom + 2))
         screen.set_clip(previous_clip)
 
         if thumb is not None:

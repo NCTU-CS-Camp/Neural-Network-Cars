@@ -26,15 +26,6 @@ from game_engine.frontend.shop import catalog, renderer
 from game_engine.frontend.shop.gacha import PullResult
 from game_engine.frontend.widgets import Button
 
-_TIER_COLORS: dict[str, tuple[int, int, int]] = {
-    "SSR": (255, 190, 70),
-    "SR": (200, 130, 255),
-    "S": (255, 120, 160),
-    "A": (120, 200, 255),
-    "B": (150, 210, 150),
-    "C": (180, 180, 180),
-    "DEFAULT": (230, 230, 230),
-}
 
 # Rarity order, best first — used to emphasise the rarest card in the summary.
 _TIER_ORDER: list[str] = ["SSR", "SR", "S", "A", "B", "C", "DEFAULT"]
@@ -74,10 +65,10 @@ def _ease_out(t: float) -> float:
 
 
 def _hero_surface(skin_id: int) -> pygame.Surface:
-    big = renderer.surfaces_for(skin_id)["big"]
+    big = renderer.surfaces_for(skin_id)["display"]
     scale = _HERO_HEIGHT / big.get_height()
     size = (max(1, int(big.get_width() * scale)), max(1, int(big.get_height() * scale)))
-    return pygame.transform.scale(big, size)
+    return pygame.transform.smoothscale(big, size)
 
 
 def _soft_circle(radius: int, color: tuple[int, int, int], alpha: int) -> pygame.Surface:
@@ -97,7 +88,7 @@ def _reveal_one(
     width, height = screen.get_size()
     cx, cy = width // 2, height // 2 - 30
     skin = catalog.get_skin(result.skin_id)
-    color = _TIER_COLORS.get(result.tier, WHITE)
+    color = catalog.TIER_COLORS.get(result.tier, WHITE)
     buildup, flash_len, particle_count, shake_len = _DRAMA.get(result.tier, _DRAMA["C"])
     hero = _hero_surface(result.skin_id)
 
@@ -106,7 +97,7 @@ def _reveal_one(
     badge_font = _font(28)
     hint_font = _font(24)
 
-    skip_button = Button("Skip ▶", pygame.Rect(width - 180, height - 80, 150, 50))
+    skip_button = Button("Skip", pygame.Rect(width - 180, height - 80, 150, 50))
 
     particles: list[_Particle] = []
     phase = "buildup"
@@ -288,16 +279,16 @@ def _summary(screen: pygame.Surface, clock: pygame.time.Clock, results: list[Pul
             rect = pygame.Rect(
                 grid_x + col * (cell + gap), grid_y + row * (cell + gap + 30), cell, cell
             )
-            color = _TIER_COLORS.get(result.tier, WHITE)
+            color = catalog.TIER_COLORS.get(result.tier, WHITE)
             emphasised = i == rarest
             border_color = (255, 215, 90) if emphasised else color
             pygame.draw.rect(screen, (24, 24, 30), rect, border_radius=8)
             pygame.draw.rect(screen, border_color, rect, 5 if emphasised else 3, border_radius=8)
 
-            sprite = renderer.surfaces_for(result.skin_id)["big"]
+            sprite = renderer.surfaces_for(result.skin_id)["display"]
             target_h = int(cell * 0.62)
             scale = target_h / sprite.get_height()
-            sprite = pygame.transform.scale(
+            sprite = pygame.transform.smoothscale(
                 sprite, (max(1, int(sprite.get_width() * scale)), target_h)
             )
             screen.blit(sprite, sprite.get_rect(center=(rect.centerx, rect.centery - 6)))

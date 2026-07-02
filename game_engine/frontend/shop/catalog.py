@@ -24,40 +24,58 @@ class Skin:
     render: dict[str, Any]
 
 
-def _image(tier: str, slug: str) -> dict[str, Any]:
-    return {"type": "image", "path": f"Images/Skins/{tier}/{slug}"}
+def _image(tier: str, slug: str, rotate: float = 0) -> dict[str, Any]:
+    """`rotate` (degrees, CCW) corrects art that isn't drawn top-down nose-up,
+    since the engine spins the sprite by the car's heading."""
+    render: dict[str, Any] = {"type": "image", "path": f"Images/Skins/{tier}/{slug}"}
+    if rotate:
+        render["rotate"] = rotate
+    return render
 
 
 # id 0 is the always-owned stock car; ids 1+ are the gacha roster by tier.
 SKINS: list[Skin] = [
     Skin(0, "原廠白車", "DEFAULT", {"type": "tint", "base": "white", "color": (255, 255, 255)}),
     # C
-    Skin(1, "Blue", "C", _image("C", "blue")),
-    Skin(2, "Green", "C", _image("C", "green")),
-    Skin(3, "Orange", "C", _image("C", "orange")),
-    Skin(4, "Purple", "C", _image("C", "purple")),
-    Skin(5, "Red", "C", _image("C", "red")),
-    Skin(6, "Yellow", "C", _image("C", "yellow")),
+    Skin(1, "藍", "C", _image("C", "blue")),
+    Skin(2, "黑", "C", _image("C", "black")),
+    Skin(3, "橙", "C", _image("C", "orange")),
+    Skin(4, "紫", "C", _image("C", "purple")),
+    Skin(5, "紅", "C", _image("C", "red")),
+    Skin(6, "黃", "C", _image("C", "yellow")),
     # B
-    Skin(7, "Initial D", "B", _image("B", "initiald")),
-    Skin(8, "KartRider", "B", _image("B", "kartrider")),
-    Skin(9, "Mario Kart", "B", _image("B", "mariokart")),
-    Skin(10, "McQueen", "B", _image("B", "mcqueen")),
-    Skin(11, "Molcar", "B", _image("B", "molcar")),
+    Skin(7, "頭文字D", "B", _image("B", "initiald", rotate=-90)),
+    Skin(8, "跑跑卡丁車", "B", _image("B", "kartrider")),
+    Skin(9, "馬力歐賽車", "B", _image("B", "mariokart")),
+    Skin(10, "閃電麥坤", "B", _image("B", "mcqueen", rotate=90)),
+    Skin(11, "天竺鼠車車", "B", _image("B", "molcar", rotate=90)),
     # A
-    Skin(12, "F1 Ferrari", "A", _image("A", "f1_ferrari")),
-    Skin(13, "F1 McLaren", "A", _image("A", "f1_mclaren")),
-    Skin(14, "F1 Mercedes", "A", _image("A", "f1_mercedes")),
-    Skin(15, "F1 Red Bull", "A", _image("A", "f1_redbull")),
+    Skin(12, "F1 法拉利", "A", _image("A", "f1_ferrari")),
+    Skin(13, "F1 邁凱倫", "A", _image("A", "f1_mclaren", rotate=180)),
+    Skin(14, "F1 賓士", "A", _image("A", "f1_mercedes", rotate=-90)),
+    Skin(15, "F1 紅牛", "A", _image("A", "f1_redbull")),
     # S
-    Skin(16, "Boss", "S", _image("S", "boss")),
-    Skin(17, "Colossal Titan", "S", _image("S", "colossal_titan")),
-    Skin(18, "Poli", "S", _image("S", "poli")),
+    Skin(16, "勞大", "S", _image("S", "boss")),
+    Skin(17, "巨人", "S", _image("S", "colossal_titan")),
+    Skin(18, "波力", "S", _image("S", "poli")),
     # SR
-    Skin(19, "Egg67", "SR", _image("SR", "egg67")),
+    Skin(19, "蛋蛋67", "SR", _image("SR", "egg67")),
+    Skin(21, "郁朝北鼻來悲茶的臉", "SR", _image("SR", "beicha")),
     # SSR
-    Skin(20, "Tadpole", "SSR", _image("SSR", "tadpole")),
+    Skin(20, "蝌蚪", "SSR", _image("SSR", "tadpole")),
 ]
+
+# Per-tier accent color, shared by the shop grid, 圖鑑, and reveal so a tier
+# always reads the same everywhere.
+TIER_COLORS: dict[str, tuple[int, int, int]] = {
+    "SSR": (255, 190, 70),
+    "SR": (200, 130, 255),
+    "S": (255, 120, 160),
+    "A": (120, 200, 255),
+    "B": (150, 210, 150),
+    "C": (180, 180, 180),
+    "DEFAULT": (200, 200, 200),
+}
 
 _BY_ID: dict[int, Skin] = {skin.id: skin for skin in SKINS}
 

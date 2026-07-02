@@ -12,8 +12,7 @@ from game_engine.frontend.shop import store
 from game_engine.frontend.shop.config import (
     EASY_VALIDATION_MILESTONES,
     HARD_VALIDATION_MILESTONES,
-    RANDOM_VALIDATION_COMPLETION_REWARD,
-    RANDOM_VALIDATION_MILESTONE_KEY,
+    RANDOM_VALIDATION_MILESTONES,
     TRAINING_FINISH_REWARD,
 )
 
@@ -71,31 +70,26 @@ def award_training_finish(map_difficulty: int) -> None:
     award(TRAINING_FINISH_REWARD.get(map_difficulty, 0))
 
 
-def award_validation(map_id: str, client_result: Any) -> list[tuple[str, int]]:
+def award_validation(
+    map_id: str, client_result: Any, map_key: str | None = None
+) -> list[tuple[str, int]]:
     """Award first-time validation milestones for a completed run.
+
+    ``map_key`` scopes the milestone to a specific map instance. Fixed easy/hard
+    maps pass None so each threshold is a once-ever reward. Random maps pass a
+    per-map fingerprint so a threshold is claimable once per distinct map: a new
+    random map earns again, but re-clearing one you already beat does not.
 
     Returns the list of (key, reward) newly awarded (for UI/debug).
     """
     awarded: list[tuple[str, int]] = []
 
-    if map_id == "random":
-        if (
-            RANDOM_VALIDATION_COMPLETION_REWARD > 0
-            and client_result is not None
-            and client_result.completed
-            and award_milestone(
-                RANDOM_VALIDATION_MILESTONE_KEY, RANDOM_VALIDATION_COMPLETION_REWARD
-            )
-        ):
-            awarded.append(
-                (RANDOM_VALIDATION_MILESTONE_KEY, RANDOM_VALIDATION_COMPLETION_REWARD)
-            )
-        return awarded
-
     if map_id == "easy":
         milestones = EASY_VALIDATION_MILESTONES
     elif map_id == "hard":
         milestones = HARD_VALIDATION_MILESTONES
+    elif map_id == "random":
+        milestones = RANDOM_VALIDATION_MILESTONES
     else:
         return awarded
 
@@ -106,6 +100,7 @@ def award_validation(map_id: str, client_result: Any) -> list[tuple[str, int]]:
 
     seconds = client_result.lap_ticks / FPS
     for key, threshold, reward in milestones:
-        if seconds <= threshold and award_milestone(key, reward):
-            awarded.append((key, reward))
+        claim_key = f"{key}:{map_key}" if map_key else key
+        if seconds <= threshold and award_milestone(claim_key, reward):
+            awarded.append((claim_key, reward))
     return awarded

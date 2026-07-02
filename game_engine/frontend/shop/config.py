@@ -23,8 +23,8 @@ TIER_PROBABILITIES: dict[str, float] = {
 GUARANTEE_TIERS: tuple[str, ...] = ("SSR", "SR", "S", "A")
 
 # --- Gacha costs (coins) ---
-SINGLE_PULL_COST: int = 1
-TEN_PULL_COST: int = 2  # slight discount vs 10x single (author tunes)
+SINGLE_PULL_COST: int = 10
+TEN_PULL_COST: int = 90  # slight discount vs 10x single (author tunes)
 TEN_PULL_COUNT: int = 10
 
 # --- Earning rewards (coins) ---
@@ -43,13 +43,15 @@ EASY_VALIDATION_MILESTONES: list[tuple[str, float, int]] = [
     ("easy_val_10s", 10.0, 40),
 ]
 HARD_VALIDATION_MILESTONES: list[tuple[str, float, int]] = [
-    # ("hard_val_20s", 20.0, 30),  # author fills in real thresholds/amounts
+    ("hard_val_25s", 25.0, 30),
+    ("hard_val_20s", 20.0, 40),
+    ("hard_val_17s", 17.0, 50),
 ]
-
-# Random validation maps vary per seed, so reward on completion, not on time.
-# Set the reward > 0 to enable it.
-RANDOM_VALIDATION_COMPLETION_REWARD: int = 0
-RANDOM_VALIDATION_MILESTONE_KEY: str = "random_val_complete"
+RANDOM_VALIDATION_MILESTONES: list[tuple[str, float, int]] = [
+    ("random_val_25s", 25.0, 40),
+    ("random_val_20s", 20.0, 50),
+    ("random_val_17s", 17.0, 60),
+]
 
 # The free starter skin everyone owns and equips by default.
 DEFAULT_SKIN_ID: int = 0

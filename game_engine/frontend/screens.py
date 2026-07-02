@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any, Literal
@@ -1034,6 +1035,17 @@ def _pick_validation_map_screen(screen: pygame.Surface) -> str | None:
         clock.tick(30)
 
 
+def _random_map_fingerprint() -> str:
+    """Stable id for the current random map from its route metadata on disk.
+
+    Called right after a random validation run, before the map is regenerated,
+    so it identifies the layout that was just played. Two different layouts hash
+    differently; the same layout hashes the same.
+    """
+    data = TRACK_METADATA_PATH.read_bytes()
+    return hashlib.md5(data).hexdigest()[:16]
+
+
 def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord) -> None:
     """Validation entry point: pick a map, breed one generation from the
     record's two parents, race all candidates, then show the run metrics."""
@@ -1067,7 +1079,11 @@ def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord
     if outcome is None:
         return
     client_result, survival_ticks = outcome
-    shop_wallet.award_validation(map_id, client_result)
+    # Random maps are generated fresh each run; fingerprint the just-played
+    # layout so its time rewards are claimable once per distinct map (a new map
+    # pays again, re-clearing a beaten one does not). Fixed maps stay once-ever.
+    map_key = _random_map_fingerprint() if map_id == "random" else None
+    shop_wallet.award_validation(map_id, client_result, map_key)
     _validation_result_screen(screen, map_id, client_result, survival_ticks)
 
 
