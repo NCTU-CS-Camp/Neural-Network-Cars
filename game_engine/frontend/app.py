@@ -307,6 +307,7 @@ def run_training_loop(
         session.alive_count = len(nn_cars)
 
     _mono = pygame.font.Font(str(MONO_FONT_PATH), 15)
+    _mono_cjk = pygame.font.Font(str(FONT_PATH), 15)
     _head = pygame.font.Font(str(HEAD_FONT_PATH), 15)
 
     def display_texts():
@@ -332,7 +333,11 @@ def run_training_loop(
             y = panel_y + 8 + i * 22
             lbl_surf = _mono.render(label, True, DIM)
             game_display.blit(lbl_surf, (panel_x + 8, y))
-            val_surf = _mono.render(value, True, val_color)
+            # Values are normally plain ASCII (counts, seconds), but a custom
+            # fitness preset name can contain Chinese — SpaceMono has no CJK
+            # glyphs, so fall back to the CJK-capable font when needed.
+            value_font = _mono if value.isascii() else _mono_cjk
+            val_surf = value_font.render(value, True, val_color)
             game_display.blit(val_surf, val_surf.get_rect(right=panel_x + panel_w - 8, y=y))
 
     def breed_selected():

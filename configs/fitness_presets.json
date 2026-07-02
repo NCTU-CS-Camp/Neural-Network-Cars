@@ -18,6 +18,24 @@
           "crash": 50
         }
       }
+    },
+    {
+      "preset_id": "preset_bc4bcaf7",
+      "preset_name": "\u53c3\u65782",
+      "fitness_config": {
+        "weights": {
+          "speed": 30,
+          "progress": 20,
+          "centered": 10,
+          "alignment": 25,
+          "safety": 10,
+          "stall": 15,
+          "spin": 10,
+          "wrong_way": 35,
+          "time": 3,
+          "crash": 35
+        }
+      }
     }
   ]
 }
