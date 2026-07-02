@@ -232,25 +232,13 @@ class TextInput:
     rect: pygame.Rect
     text: str = ""
     active: bool = False
-    composing: str = ""
     max_length: int = 24
     fill_color: tuple[int, int, int] = FIELD
     text_color: tuple[int, int, int] = INK
     border_color: tuple[int, int, int] = LINE
     active_border_color: tuple[int, int, int] = CYAN
-    composing_color: tuple[int, int, int] = CYAN
     allowed_characters: str | None = None
     clear_on_focus: bool = False
-
-    def focus(self) -> None:
-        self.active = True
-        pygame.key.start_text_input()
-        pygame.key.set_text_input_rect(self.rect)
-
-    def blur(self) -> None:
-        self.active = False
-        self.composing = ""
-        pygame.key.stop_text_input()
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type == pygame.MOUSEBUTTONDOWN:
@@ -259,29 +247,15 @@ class TextInput:
             if clicked_inside and not was_active:
                 if self.clear_on_focus:
                     self.text = ""
-                self.focus()
-            elif clicked_inside:
-                pygame.key.set_text_input_rect(self.rect)
-            elif was_active:
-                self.blur()
+                self.active = True
+            elif was_active and not clicked_inside:
+                self.active = False
             return self.active
 
         if not self.active:
             return False
 
-        if event.type == pygame.TEXTEDITING:
-            self.composing = event.text
-            return True
-
         if event.type == pygame.TEXTINPUT:
-            # When IME is actively composing with non-ASCII characters (e.g.
-            # Bopomofo), SDL2 on some platforms leaks the raw Latin keystroke
-            # as a TEXTINPUT event alongside the TEXTEDITING event.  Discard
-            # those spurious ASCII events so only the committed Chinese
-            # character gets added.
-            if self.composing and not self.composing.isascii() and event.text.isascii():
-                return True
-            self.composing = ""
             entered_text = event.text
             if self.allowed_characters is not None:
                 entered_text = "".join(
@@ -296,23 +270,7 @@ class TextInput:
 
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_BACKSPACE:
-                if self.composing:
-                    self.composing = ""
-                else:
-                    self.text = self.text[:-1]
-                return True
-            if event.key == pygame.K_v and (event.mod & pygame.KMOD_CTRL):
-                try:
-                    raw = pygame.scrap.get(pygame.SCRAP_TEXT)
-                    if raw:
-                        pasted = raw.decode("utf-8", errors="ignore").replace("\x00", "").replace("\r", "")
-                        if self.allowed_characters is not None:
-                            pasted = "".join(c for c in pasted if c in self.allowed_characters)
-                        available = self.max_length - len(self.text)
-                        if available > 0:
-                            self.text += pasted[:available]
-                except Exception:
-                    pass
+                self.text = self.text[:-1]
                 return True
 
         return False
@@ -321,19 +279,8 @@ class TextInput:
         pygame.draw.rect(surface, self.fill_color, self.rect)
         border = self.active_border_color if self.active else self.border_color
         pygame.draw.rect(surface, border, self.rect, 1)
-
-        committed_surf = font.render(self.text, True, self.text_color)
-        committed_rect = committed_surf.get_rect(midleft=(self.rect.x + 8, self.rect.centery))
-        surface.blit(committed_surf, committed_rect)
-
-        if self.composing:
-            composing_surf = font.render(self.composing, True, self.composing_color)
-            composing_rect = composing_surf.get_rect(midleft=(committed_rect.right, self.rect.centery))
-            surface.blit(composing_surf, composing_rect)
-            underline_y = composing_rect.bottom - 1
-            pygame.draw.line(surface, self.composing_color,
-                             (composing_rect.left, underline_y),
-                             (composing_rect.right, underline_y), 1)
+        text_surf = font.render(self.text, True, self.text_color)
+        surface.blit(text_surf, text_surf.get_rect(midleft=(self.rect.x + 8, self.rect.centery)))
 
 
 @dataclass(slots=True)
