@@ -31,9 +31,9 @@ FPS = 30
 MAX_SPEED = 10
 TRACK_HALF_WIDTH = 66.0
 
-# Cars are drawn this many times larger than their 17x35 collision box. Purely
-# visual (collision geometry is fixed in car.py) — raises skin/sprite clarity.
-CAR_RENDER_SCALE = 1.4
+# Keep training sprites at the original feat/nn_engine dimensions. Collision
+# geometry remains fixed separately in car.py.
+CAR_RENDER_SCALE = 1.2
 
 # Validation run length. Kept as a config knob because the termination rule is
 # expected to change later (e.g. stagnation / first-completion); for now a flat

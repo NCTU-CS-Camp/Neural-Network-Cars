@@ -158,7 +158,7 @@ class AppQuit(Exception):
 
 
 GROUP_COUNT = 10
-MenuChoice = Literal["training", "validation", "clear_user"]
+MenuChoice = Literal["training", "validation", "clear_user", "shop"]
 TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None, int, int]
 CUSTOM_PRESET_LABEL = "自訂（未儲存）"
 
@@ -356,55 +356,32 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
 def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuChoice:
     clock = pygame.time.Clock()
 
-    training_button = Button(
-        "Training", pygame.Rect(width // 2 - 360, height // 2 - 100, 320, 200)
-    )
-    validation_button = Button(
-        "Validation", pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200)
-    )
-    clear_user_button = Button(
-        "清除使用者資料",
-        pygame.Rect(width // 2 - 160, height // 2 + 140, 320, 56),
-        fill_color=(100, 30, 30),
-        hover_color=(145, 40, 40),
-        border_color=(190, 70, 70),
-    )
-    shop_button = Button(
-        "商店",
-        pygame.Rect(width // 2 - 160, height // 2 + 210, 320, 56),
-        fill_color=(30, 70, 60),
-        hover_color=(40, 100, 85),
-        border_color=(70, 170, 140),
-    )
-
-    while True:
-        for event in pygame.event.get():
-            _check_quit(event)
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if training_button.contains(event.pos):
-                    return "training"
-                if validation_button.contains(event.pos):
-                    return "validation"
-                if clear_user_button.contains(event.pos):
-                    return "clear_user"
-                if shop_button.contains(event.pos):
-                    return "shop"
-
-        mouse_pos = pygame.mouse.get_pos()
-        training_button.update_hover(mouse_pos)
-        validation_button.update_hover(mouse_pos)
-        clear_user_button.update_hover(mouse_pos)
-        shop_button.update_hover(mouse_pos)
-
-        screen.fill(BLACK)
-        screen.blit(
-            title_font.render(f"歡迎, {profile.username} (組 {profile.group_id})", True, WHITE),
-            (60, 60),
+    while True:  # outer: rebuild controls after VIDEORESIZE
+        font = _font()
+        head22 = _head_font(22)
+        width, height = screen.get_size()
+        training_button = Button(
+            "TRAINING",
+            pygame.Rect(width // 2 - 360, height // 2 - 100, 320, 200),
         )
-        training_button.draw(screen, font)
-        validation_button.draw(screen, font)
-        clear_user_button.draw(screen, font)
-        shop_button.draw(screen, font)
+        validation_button = Button(
+            "VALIDATION",
+            pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200),
+        )
+        clear_user_button = Button(
+            "清除使用者資料",
+            pygame.Rect(width // 2 - 160, height // 2 + 140, 320, 56),
+            fill_color=F1_RED,
+            hover_color=(200, 30, 22),
+            border_color=F1_RED,
+        )
+        shop_button = Button(
+            "商店",
+            pygame.Rect(width // 2 - 160, height // 2 + 210, 320, 56),
+            fill_color=F1_GREEN,
+            hover_color=(40, 190, 95),
+            border_color=F1_GREEN,
+        )
 
         resize = False
         while not resize:
@@ -420,6 +397,8 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
                         return "validation"
                     if clear_user_button.contains(event.pos):
                         return "clear_user"
+                    if shop_button.contains(event.pos):
+                        return "shop"
             if resize:
                 break
 
@@ -427,6 +406,7 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
             training_button.update_hover(mouse_pos)
             validation_button.update_hover(mouse_pos)
             clear_user_button.update_hover(mouse_pos)
+            shop_button.update_hover(mouse_pos)
 
             screen.fill(BG)
             name_surf = font.render(profile.username, True, INK)
@@ -445,6 +425,7 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
             training_button.draw(screen, head22)
             validation_button.draw(screen, head22)
             clear_user_button.draw(screen, font)
+            shop_button.draw(screen, font)
 
             pygame.display.update()
             clock.tick(30)

@@ -146,6 +146,24 @@ def test_main_menu_exposes_clear_user_action(monkeypatch) -> None:
     assert choice == "clear_user"
 
 
+def test_main_menu_exposes_shop_action(monkeypatch) -> None:
+    events = [
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (800, 688)},
+        )
+    ]
+    monkeypatch.setattr(pygame.event, "get", lambda: events)
+    pygame.font.init()
+
+    choice = screens.run_main_menu_screen(
+        pygame.Surface((1600, 900)),
+        LoginProfile(group_id="1", username="apollo"),
+    )
+
+    assert choice == "shop"
+
+
 @pytest.mark.parametrize(
     ("position", "expected"),
     [
