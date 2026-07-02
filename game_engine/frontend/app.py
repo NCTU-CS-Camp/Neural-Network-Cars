@@ -264,7 +264,6 @@ def run_training_loop(
     _bar_head = pygame.font.Font(str(HEAD_FONT_PATH), 14)
     _bar_mono = pygame.font.Font(str(MONO_FONT_PATH), 14)
     _next_gen_mono = pygame.font.Font(str(MONO_FONT_PATH), 18)
-    _info_font = pygame.font.Font(str(MONO_FONT_PATH), 13)
     _badge_font = pygame.font.Font(str(HEAD_FONT_PATH), 14)
     _tower_font = pygame.font.Font(str(MONO_FONT_PATH), 14)
     _tower_head = pygame.font.Font(str(HEAD_FONT_PATH), 14)
@@ -465,11 +464,30 @@ def run_training_loop(
         player_surf = _bar_mono.render(f"{profile.username}  Group {profile.group_id}", True, DIM)
         game_display.blit(player_surf, player_surf.get_rect(midleft=(training_surf.get_width() + 24, bar_h // 2)))
         remaining_seconds = max(0.0, session.generation_duration_seconds - generation_elapsed_seconds())
-        next_gen_label = _bar_mono.render("NEXT GEN", True, DIM)
-        next_gen_val = _next_gen_mono.render(f"{remaining_seconds:.3f}s", True, YELLOW)
         _ng_right = back_button.rect.left - 12
-        game_display.blit(next_gen_val, next_gen_val.get_rect(midright=(_ng_right, bar_h // 2)))
-        game_display.blit(next_gen_label, next_gen_label.get_rect(midright=(_ng_right - next_gen_val.get_width() - 8, bar_h // 2)))
+        _cy = bar_h // 2
+        _GAP = 22  # space between items
+
+        # Render all label+value surfaces (unified _bar_mono labels / _next_gen_mono values)
+        _ng_lbl_s   = _bar_mono.render("NEXT GEN", True, DIM)
+        _ng_val_s   = _next_gen_mono.render(f"{remaining_seconds:.3f}s", True, YELLOW)
+        _spd_lbl_s  = _bar_mono.render("MAX SPD", True, DIM)
+        _spd_val_s  = _next_gen_mono.render(str(settings.max_speed), True, CYAN)
+        _seed_lbl_s = _bar_mono.render("NN SEED", True, DIM)
+        _seed_val_s = _next_gen_mono.render(str(session.evolution_seed), True, CYAN)
+
+        # Lay out right-to-left: NEXT GEN → MAX SPD → NN SEED
+        _cur = _ng_right
+        for _lbl_s, _val_s in (
+            (_ng_lbl_s, _ng_val_s),
+            (_spd_lbl_s, _spd_val_s),
+            (_seed_lbl_s, _seed_val_s),
+        ):
+            _vr = _val_s.get_rect(midright=(_cur, _cy))
+            game_display.blit(_val_s, _vr)
+            _lr = _lbl_s.get_rect(midright=(_vr.left - 6, _cy))
+            game_display.blit(_lbl_s, _lr)
+            _cur = _lr.left - _GAP
 
         # --- 右上按鈕 ---
         mouse_pos = pygame.mouse.get_pos()
@@ -483,18 +501,6 @@ def run_training_loop(
         if new_map_button is not None:
             new_map_button.update_hover(mouse_pos)
             new_map_button.draw(game_display, font)
-
-        # --- NN Seed / Max Speed ---
-        info_font = _info_font
-        seed_lbl = info_font.render("NN SEED", True, DIM)
-        seed_val = info_font.render(str(session.evolution_seed), True, CYAN)
-        spd_lbl = info_font.render("MAX SPD", True, DIM)
-        spd_val = info_font.render(str(settings.max_speed), True, CYAN)
-        seed_y = restart_button.rect.bottom + 12
-        game_display.blit(seed_lbl, seed_lbl.get_rect(right=W - 20, y=seed_y))
-        game_display.blit(seed_val, seed_val.get_rect(right=W - 20, y=seed_y + seed_lbl.get_height()))
-        game_display.blit(spd_lbl, spd_lbl.get_rect(right=W - 20, y=seed_y + seed_lbl.get_height() * 2 + 4))
-        game_display.blit(spd_val, spd_val.get_rect(right=W - 20, y=seed_y + seed_lbl.get_height() * 3 + 4))
 
         # --- 計時塔（左上，依 draw_fitness_leaders 的 leader 列出 P1/P2 fitness）---
         if nn_cars:
