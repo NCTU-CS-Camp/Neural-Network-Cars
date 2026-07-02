@@ -842,7 +842,15 @@ def submit(
     token: str | None = None,
 ) -> SubmissionAccepted | SubmissionRejected | NetworkError:
     url = f"{server_url.rstrip('/')}{_submission_path(competition_id)}"
-    body = {**payload.to_dict(), "client_result": client_result.to_dict()}
+    body = {
+        "group_id": payload.group_id,
+        "username": payload.username,
+        "skin_id": payload.skin_id,
+        "maxSpeed": payload.max_speed,
+        "weights": payload.weights,
+        "biases": payload.biases,
+        "client_result": client_result.to_dict(),
+    }
     result = _post_json(url, body, token=token)
     if isinstance(result, NetworkError):
         return result

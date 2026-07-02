@@ -217,10 +217,11 @@ def test_eligibility_forwards_bearer_token(monkeypatch) -> None:
 
 
 def test_submission_forwards_bearer_token(monkeypatch) -> None:
-    captured: dict[str, str | None] = {}
+    captured: dict[str, object] = {}
 
     def fake_post_json(url, payload, timeout=10.0, token=None):
-        del url, payload, timeout
+        del url, timeout
+        captured["payload"] = payload
         captured["token"] = token
         return (201, {"submission_id": "sub_1", "status": "queued"})
 
@@ -248,6 +249,20 @@ def test_submission_forwards_bearer_token(monkeypatch) -> None:
 
     assert isinstance(result, client_module.SubmissionAccepted)
     assert captured["token"] == "student-token"
+    assert captured["payload"] == {
+        "group_id": "1",
+        "username": "ada",
+        "skin_id": 0,
+        "maxSpeed": 10.0,
+        "weights": [[0.0] * 36, [0.0] * 24],
+        "biases": [[0.0] * 6, [0.0] * 4],
+        "client_result": {
+            "completed": False,
+            "lap_ticks": None,
+            "max_progress": 100.0,
+            "ticks_to_max_progress": 20,
+        },
+    }
 
 
 def test_auto_breed_shortcut_works_even_when_user_field_is_active(competition_client):
