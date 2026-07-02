@@ -692,6 +692,10 @@ def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
 
     assert page.status_code == 200
     assert "data-competition=\"easy\"" in page.text
+    assert "activeTabUsesSnapshots" in page.text
+    assert "Stage inactive" in page.text
+    assert 'if(activeCompetition === "final" || !snapshotAt)' not in page.text
+    assert "setInterval(renderTiming, 1000)" in page.text
     assert admin.status_code == 200
     assert "Run Snapshot Now" in admin.text
     assert event["type"] == "competition_snapshot_updated"
