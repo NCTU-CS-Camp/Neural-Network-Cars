@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import platform
@@ -82,6 +83,8 @@ from game_engine.frontend.widgets import (
     TextInput,
     VerticalScrollbar,
 )
+from game_engine.frontend.shop import wallet as shop_wallet
+from game_engine.frontend.shop.renderer import apply_equipped_skin
 from shared.contracts import (
     ClientResult,
     CustomFitnessPreset,
@@ -353,23 +356,55 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
 def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuChoice:
     clock = pygame.time.Clock()
 
-    while True:  # outer: rebuild on VIDEORESIZE
-        font = _font()
-        head22 = _head_font(22)
-        width, height = screen.get_size()
-        training_button = Button(
-            "TRAINING", pygame.Rect(width // 2 - 360, height // 2 - 100, 320, 200)
+    training_button = Button(
+        "Training", pygame.Rect(width // 2 - 360, height // 2 - 100, 320, 200)
+    )
+    validation_button = Button(
+        "Validation", pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200)
+    )
+    clear_user_button = Button(
+        "清除使用者資料",
+        pygame.Rect(width // 2 - 160, height // 2 + 140, 320, 56),
+        fill_color=(100, 30, 30),
+        hover_color=(145, 40, 40),
+        border_color=(190, 70, 70),
+    )
+    shop_button = Button(
+        "商店",
+        pygame.Rect(width // 2 - 160, height // 2 + 210, 320, 56),
+        fill_color=(30, 70, 60),
+        hover_color=(40, 100, 85),
+        border_color=(70, 170, 140),
+    )
+
+    while True:
+        for event in pygame.event.get():
+            _check_quit(event)
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if training_button.contains(event.pos):
+                    return "training"
+                if validation_button.contains(event.pos):
+                    return "validation"
+                if clear_user_button.contains(event.pos):
+                    return "clear_user"
+                if shop_button.contains(event.pos):
+                    return "shop"
+
+        mouse_pos = pygame.mouse.get_pos()
+        training_button.update_hover(mouse_pos)
+        validation_button.update_hover(mouse_pos)
+        clear_user_button.update_hover(mouse_pos)
+        shop_button.update_hover(mouse_pos)
+
+        screen.fill(BLACK)
+        screen.blit(
+            title_font.render(f"歡迎, {profile.username} (組 {profile.group_id})", True, WHITE),
+            (60, 60),
         )
-        validation_button = Button(
-            "VALIDATION", pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200)
-        )
-        clear_user_button = Button(
-            "清除使用者資料",
-            pygame.Rect(width // 2 - 160, height // 2 + 140, 320, 56),
-            fill_color=F1_RED,
-            hover_color=(200, 30, 22),
-            border_color=F1_RED,
-        )
+        training_button.draw(screen, font)
+        validation_button.draw(screen, font)
+        clear_user_button.draw(screen, font)
+        shop_button.draw(screen, font)
 
         resize = False
         while not resize:
@@ -1437,6 +1472,17 @@ def _pick_validation_map_screen(screen: pygame.Surface) -> str | None:
             clock.tick(30)
 
 
+def _random_map_fingerprint() -> str:
+    """Stable id for the current random map from its route metadata on disk.
+
+    Called right after a random validation run, before the map is regenerated,
+    so it identifies the layout that was just played. Two different layouts hash
+    differently; the same layout hashes the same.
+    """
+    data = TRACK_METADATA_PATH.read_bytes()
+    return hashlib.md5(data).hexdigest()[:16]
+
+
 def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord) -> None:
     """Validation entry point: pick a map, breed one generation from the
     record's two parents, race all candidates, then show the run metrics."""
@@ -1470,6 +1516,11 @@ def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord
     if outcome is None:
         return
     client_result, survival_ticks = outcome
+    # Random maps are generated fresh each run; fingerprint the just-played
+    # layout so its time rewards are claimable once per distinct map (a new map
+    # pays again, re-clearing a beaten one does not). Fixed maps stay once-ever.
+    map_key = _random_map_fingerprint() if map_id == "random" else None
+    shop_wallet.award_validation(map_id, client_result, map_key)
     _validation_result_screen(screen, map_id, client_result, survival_ticks)
 
 
@@ -1906,6 +1957,7 @@ def _run_validation_tournament_screen(
     The first non-colliding candidate to complete the route ends validation.
     """
     assets = load_game_assets()
+    apply_equipped_skin(assets)
     candidates = _build_candidates(
         parent_a,
         parent_b,
