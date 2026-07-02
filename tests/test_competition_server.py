@@ -954,6 +954,47 @@ def test_replay_stopped_car_sprite_draws_with_alpha():
     assert surface.get_at((40, 40)).a == 112
 
 
+def test_snapshot_lights_overlay_does_not_render_numeric_countdown():
+    from game_engine.frontend.replay_client import (
+        ReplayStatus,
+        _draw_snapshot_lights_overlay,
+    )
+
+    class Session:
+        has_cars = True
+
+    class SpyFont:
+        def __init__(self) -> None:
+            self.rendered: list[str] = []
+
+        def render(self, text: str, antialias: bool, color: tuple[int, int, int]) -> pygame.Surface:
+            del antialias, color
+            self.rendered.append(text)
+            return pygame.Surface((max(1, len(text) * 8), 16), pygame.SRCALPHA)
+
+    pygame.init()
+    screen = pygame.Surface((220, 160), pygame.SRCALPHA)
+    panel_font = SpyFont()
+    fonts = {"panel": panel_font}
+
+    _draw_snapshot_lights_overlay(
+        screen,
+        pygame.Rect(0, 0, 220, 160),
+        Session(),  # type: ignore[arg-type]
+        ReplayStatus("Running replay", snapshot_countdown="0:03"),
+        fonts,  # type: ignore[arg-type]
+    )
+    _draw_snapshot_lights_overlay(
+        screen,
+        pygame.Rect(0, 0, 220, 160),
+        Session(),  # type: ignore[arg-type]
+        ReplayStatus("Waiting snapshot", snapshot_countdown="0:00", snapshot_waiting=True),
+        fonts,  # type: ignore[arg-type]
+    )
+
+    assert panel_font.rendered == ["SNAPSHOT", "SNAPSHOT READY"]
+
+
 def test_phase_one_draw_ticks_both_sides_without_short_circuit():
     from game_engine.frontend.replay_client import ReplayStatus, _draw_phase_one, _fonts
 
@@ -999,8 +1040,8 @@ def test_phase_one_draw_ticks_both_sides_without_short_circuit():
     assert hard.ticks == 1
 
 
-def test_snapshot_boundary_restart_triggers_once_for_active_running_sessions():
-    from game_engine.frontend.replay_client import _snapshot_restart_boundary
+def test_snapshot_boundary_wait_triggers_once_for_sessions_with_cars():
+    from game_engine.frontend.replay_client import _snapshot_wait_boundary
 
     class Session:
         has_cars = True
@@ -1012,7 +1053,7 @@ def test_snapshot_boundary_restart_triggers_once_for_active_running_sessions():
     wall_time = datetime.fromisoformat(boundary).timestamp() + 0.1
 
     assert (
-        _snapshot_restart_boundary(
+        _snapshot_wait_boundary(
             state,
             sessions,  # type: ignore[arg-type]
             None,
@@ -1022,7 +1063,7 @@ def test_snapshot_boundary_restart_triggers_once_for_active_running_sessions():
         == boundary
     )
     assert (
-        _snapshot_restart_boundary(
+        _snapshot_wait_boundary(
             state,
             sessions,  # type: ignore[arg-type]
             None,
@@ -1033,8 +1074,8 @@ def test_snapshot_boundary_restart_triggers_once_for_active_running_sessions():
     )
 
 
-def test_snapshot_boundary_restart_ignores_hold_and_non_running_sessions():
-    from game_engine.frontend.replay_client import _snapshot_restart_boundary
+def test_snapshot_boundary_wait_ignores_empty_sessions_only():
+    from game_engine.frontend.replay_client import _snapshot_wait_boundary
 
     class RunningSession:
         has_cars = True
@@ -1052,18 +1093,15 @@ def test_snapshot_boundary_restart_ignores_hold_and_non_running_sessions():
     state = {"config": {"next_snapshot_at": boundary}}
     wall_time = datetime.fromisoformat(boundary).timestamp() + 0.1
 
+    assert _snapshot_wait_boundary(
+        state,
+        {"easy": RunningSession()},  # type: ignore[arg-type]
+        123.0,
+        None,
+        wall_time=wall_time,
+    ) == boundary
     assert (
-        _snapshot_restart_boundary(
-            state,
-            {"easy": RunningSession()},  # type: ignore[arg-type]
-            123.0,
-            None,
-            wall_time=wall_time,
-        )
-        is None
-    )
-    assert (
-        _snapshot_restart_boundary(
+        _snapshot_wait_boundary(
             state,
             {"easy": WaitingSession()},  # type: ignore[arg-type]
             None,
@@ -1072,16 +1110,13 @@ def test_snapshot_boundary_restart_ignores_hold_and_non_running_sessions():
         )
         is None
     )
-    assert (
-        _snapshot_restart_boundary(
-            state,
-            {"easy": StoppedSession()},  # type: ignore[arg-type]
-            None,
-            None,
-            wall_time=wall_time,
-        )
-        is None
-    )
+    assert _snapshot_wait_boundary(
+        state,
+        {"easy": StoppedSession()},  # type: ignore[arg-type]
+        None,
+        None,
+        wall_time=wall_time,
+    ) == boundary
 
 
 def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):
@@ -1135,6 +1170,9 @@ def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
     assert "represented by" in page.text
     assert "Stage inactive" in page.text
     assert 'if(activeCompetition === "final" || !snapshotAt)' not in page.text
+    assert "function tag(username)" not in page.text
+    assert "replace(/[^a-z0-9]/gi" not in page.text
+    assert 'class="tag"' not in page.text
     assert "setInterval(renderTiming, 1000)" in page.text
     assert admin.status_code == 200
     assert "Run Snapshot Now" in admin.text

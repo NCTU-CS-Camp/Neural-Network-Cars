@@ -80,9 +80,7 @@
     .posblk { min-width:30px; height:28px; padding:0 6px; display:inline-flex; align-items:center; justify-content:center;
       background:var(--panel2); color:var(--silver); font-family:var(--disp); font-weight:900; font-size:15px; }
     tr.leader .posblk { background:var(--red); color:#fff; }
-    .player { display:flex; align-items:center; gap:12px; }
-    .tag { font-family:var(--disp); font-weight:800; font-size:15px; color:var(--silver); width:46px; flex:none; }
-    tr.leader .tag { color:var(--red); }
+    .player { display:flex; align-items:center; gap:12px; min-width:0; }
     .name { font-family:var(--ui); font-weight:700; font-size:17px; }
     .muted { color:var(--muted); font-size:12px; }
     .result { font-family:var(--disp); font-weight:800; font-size:17px; font-variant-numeric:tabular-nums; }
@@ -175,7 +173,6 @@
     // official: completed -> seconds from lap_ticks (SIMULATION_FPS = 30); else max_progress
     function lapSeconds(ticks){ return (Number(ticks) / 30); }
     function resultText(r){ return r.completed ? `${lapSeconds(r.lap_ticks).toFixed(3)}s` : `${Number(r.max_progress).toFixed(0)} prog`; }
-    function tag(username){ return String(username).replace(/[^a-z0-9]/gi,"").slice(0,3).toUpperCase(); }
     function groupLabel(groupId){ return `Group ${escapeHtml(groupId)}`; }
     function countdownText(iso){ if(!iso) return ""; const rem=Math.max(0,new Date(iso).getTime()-Date.now()); const s=Math.floor(rem/1000); return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; }
     function activeTabUsesSnapshots(){
@@ -231,7 +228,7 @@
         const sub  = isFinal ? escapeHtml(item.username) : "individual";
         return `<tr class="${isLeader?"leader":""} ${dnf?"dnf":""}">
           <td class="rank"><span class="posblk">${item.rank}</span></td>
-          <td><div class="player"><span class="tag">${tag(item.username)}</span>
+          <td><div class="player">
             <span><span class="name">${main}</span><br><span class="muted">${sub}</span></span></div></td>
           <td class="group">${groupLabel(item.group_id)}</td>
           <td class="result ${dnf?"dnfval":""}">${resultText(r)}</td>

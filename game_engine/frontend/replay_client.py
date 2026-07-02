@@ -73,7 +73,7 @@ REPLAY_HOLD_SECONDS = 3.0
 REPLAY_FETCH_SECONDS = 5.0
 LEADERBOARD_REVEAL_HIGHLIGHT_SECONDS = 2.0
 VIRTUAL_SIZE = SCREEN_SIZE
-SNAPSHOT_RESTART_LABEL = "等待新快照，先重播目前排名"
+SNAPSHOT_WAIT_LABEL = "等待新快照"
 # per-car label colors, intentionally avoiding gray; stopped cars override to DIM.
 REPLAY_COLORS: list[Color] = [
     RED_BRIGHT,
@@ -199,6 +199,7 @@ class ReplayStatus:
     elapsed_seconds: float = 0.0
     restart_seconds: float | None = None
     snapshot_countdown: str = "-"
+    snapshot_waiting: bool = False
 
 
 def run(
@@ -228,7 +229,7 @@ def run(
     status = "Connecting to protected replay feed"
     hold_until: float | None = None
     last_handled_snapshot_boundary: str | None = None
-    snapshot_restart_notice_until: float | None = None
+    snapshot_wait_boundary: str | None = None
 
     try:
         while True:
@@ -281,7 +282,17 @@ def run(
                         pending_state = None
                         hold_until = None
                     elif _replay_payload_identity(incoming_state) != _replay_payload_identity(state):
-                        if _has_runnable_sessions(sessions):
+                        if snapshot_wait_boundary is not None:
+                            state = incoming_state
+                            sessions = load_replay_sessions(
+                                state,
+                                assets,
+                                revealed_signatures,
+                            )
+                            pending_state = None
+                            hold_until = None
+                            snapshot_wait_boundary = None
+                        elif _has_runnable_sessions(sessions):
                             pending_state = incoming_state
                         else:
                             state = incoming_state
@@ -295,27 +306,37 @@ def run(
                     else:
                         state = incoming_state
                         pending_state = None
+                        if (
+                            snapshot_wait_boundary is not None
+                            and _snapshot_boundary_iso(state) != snapshot_wait_boundary
+                        ):
+                            snapshot_wait_boundary = None
                     status = "RUNNING"
                 except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
                     status = f"Replay feed unavailable: {exc}"
                     next_fetch_at = now + REPLAY_FETCH_SECONDS
 
             if state is not None:
-                restart_boundary = _snapshot_restart_boundary(
+                wait_boundary = _snapshot_wait_boundary(
                     state,
                     sessions,
                     hold_until,
                     last_handled_snapshot_boundary,
                 )
-                if restart_boundary is not None:
-                    sessions = load_replay_sessions(
-                        state,
-                        assets,
-                        revealed_signatures,
-                    )
-                    hold_until = None
-                    last_handled_snapshot_boundary = restart_boundary
-                    snapshot_restart_notice_until = now + REPLAY_FETCH_SECONDS + 0.5
+                if wait_boundary is not None:
+                    last_handled_snapshot_boundary = wait_boundary
+                    if pending_state is not None:
+                        state = pending_state
+                        sessions = load_replay_sessions(
+                            state,
+                            assets,
+                            revealed_signatures,
+                        )
+                        pending_state = None
+                        hold_until = None
+                        snapshot_wait_boundary = None
+                    else:
+                        snapshot_wait_boundary = wait_boundary
 
             virtual_screen.fill(BACKGROUND)
             if state is None:
@@ -334,7 +355,7 @@ def run(
                         state,
                         now,
                         hold_until,
-                        _snapshot_restart_notice_active(snapshot_restart_notice_until, now),
+                        snapshot_wait_boundary is not None,
                     )
                     finished = _draw_final(
                         virtual_screen,
@@ -375,7 +396,7 @@ def run(
                             state,
                             now,
                             hold_until,
-                            _snapshot_restart_notice_active(snapshot_restart_notice_until, now),
+                            snapshot_wait_boundary is not None,
                         )
                     else:
                         display_status = _waiting_status_text(state)
@@ -474,7 +495,7 @@ def _replay_status(
     state: dict[str, Any],
     now: float,
     hold_until: float | None,
-    snapshot_restart_notice: bool = False,
+    snapshot_waiting: bool = False,
 ) -> ReplayStatus:
     elapsed = max((session.frames for session in sessions), default=0) / FPS
     snapshot = _snapshot_countdown_text(state)
@@ -485,11 +506,13 @@ def _replay_status(
             elapsed_seconds=elapsed,
             restart_seconds=remaining,
             snapshot_countdown=snapshot,
+            snapshot_waiting=snapshot_waiting,
         )
     return ReplayStatus(
-        label=SNAPSHOT_RESTART_LABEL if snapshot_restart_notice else f"Running replay / {stage}",
+        label=f"{SNAPSHOT_WAIT_LABEL} / {stage}" if snapshot_waiting else f"Running replay / {stage}",
         elapsed_seconds=elapsed,
         snapshot_countdown=snapshot,
+        snapshot_waiting=snapshot_waiting,
     )
 
 
@@ -555,15 +578,7 @@ def _has_runnable_sessions(sessions: dict[str, ReplaySession]) -> bool:
     return any(session.has_cars for session in sessions.values())
 
 
-def _has_active_running_sessions(sessions: dict[str, ReplaySession]) -> bool:
-    return any(session.has_cars and not session.stopped for session in sessions.values())
-
-
-def _snapshot_restart_notice_active(until: float | None, now: float) -> bool:
-    return until is not None and now < until
-
-
-def _snapshot_restart_boundary(
+def _snapshot_wait_boundary(
     state: dict[str, Any],
     sessions: dict[str, ReplaySession],
     hold_until: float | None,
@@ -571,7 +586,8 @@ def _snapshot_restart_boundary(
     *,
     wall_time: float | None = None,
 ) -> str | None:
-    if hold_until is not None or not _has_active_running_sessions(sessions):
+    del hold_until
+    if not _has_runnable_sessions(sessions):
         return None
     boundary = _snapshot_boundary_iso(state)
     if boundary is None or boundary == last_handled_boundary:
@@ -740,15 +756,6 @@ def step_replay_car(replay_car: ReplayCar) -> None:
 
 
 # ------------------------------------------------------------------ F1 draw helpers
-def _entry_tag(entry: dict[str, Any], competition_id: str) -> str:
-    """Broadcast-style short tag. Final shows the group; otherwise the first 3 ascii-alnum
-    chars of the username, falling back to the group when a name has none (e.g. all-CJK)."""
-    if competition_id == "final":
-        return f"Group {entry.get('group_id', '?')}"
-    alnum = "".join(ch for ch in str(entry.get("username", "")) if ch.isascii() and ch.isalnum())
-    return alnum[:3].upper() or f"Group {entry.get('group_id', '?')}"
-
-
 def _entry_result(client_result: dict[str, Any]) -> tuple[str, str]:
     """(value, unit) for a podium/tower result: lap seconds when completed, else progress."""
     if client_result.get("completed"):
@@ -1064,13 +1071,21 @@ def _draw_snapshot_lights_overlay(
     fonts: dict[str, pygame.font.Font],
 ) -> None:
     seconds = _snapshot_seconds_from_status(status)
-    if seconds is None or seconds > 5 or seconds <= 0 or replay_panel_status(session) != "RUNNING":
+    if not session.has_cars:
+        return
+    if not status.snapshot_waiting and (
+        seconds is None or seconds > 5 or seconds <= 0
+    ):
         return
     overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
     overlay.fill((0, 0, 0, 92))
     screen.blit(overlay, rect.topleft)
     lights = 5
-    lit = max(0, min(lights, lights - math.ceil(seconds) + 1))
+    lit = (
+        lights
+        if status.snapshot_waiting
+        else max(0, min(lights, lights - math.ceil(seconds or 0) + 1))
+    )
     radius = 18
     gap = 18
     total_w = lights * radius * 2 + (lights - 1) * gap
@@ -1081,10 +1096,9 @@ def _draw_snapshot_lights_overlay(
         color = RED_BRIGHT if index < lit else BORDER
         pygame.draw.circle(screen, DARK_TEXT, center, radius + 5)
         pygame.draw.circle(screen, color, center, radius)
-    label = fonts["panel"].render("SNAPSHOT", True, WHITE)
-    timer = fonts["title"].render(f"{math.ceil(seconds)}", True, RED_BRIGHT)
+    label_text = "SNAPSHOT READY" if status.snapshot_waiting else "SNAPSHOT"
+    label = fonts["panel"].render(label_text, True, WHITE)
     screen.blit(label, (rect.centerx - label.get_width() // 2, y + 34))
-    screen.blit(timer, (rect.centerx - timer.get_width() // 2, y + 66))
 
 
 def _snapshot_seconds_from_status(status: ReplayStatus) -> float | None:
@@ -1124,8 +1138,16 @@ def _draw_phase_one_podium(
         pygame.draw.rect(screen, bg, card)
         pygame.draw.rect(screen, medal(pos), (card.x, card.y, card.width, 4))
         _draw_ghost_numeral(screen, card.right, card.y, pos, bg, fonts["pod_ghost"])
-        screen.blit(fonts["pod_tag"].render(_entry_tag(entry, competition_id), True, WHITE), (card.x + 12, card.y + 12))
-        sub = f"{entry['username']} · Group {entry['group_id']}"
+        username = str(entry["username"])
+        username_font = _user_font(fonts, username, "pod_tag", "pod_sub_cjk")
+        _blit_clipped(
+            screen,
+            username_font.render(username, True, WHITE),
+            card.x + 12,
+            card.y + 12,
+            card_w - 20,
+        )
+        sub = f"Group {entry['group_id']}"
         sub_font = _user_font(fonts, sub, "pod_sub", "pod_sub_cjk")
         _blit_clipped(screen, sub_font.render(sub, True, MUTED2), card.x + 12, card.y + 42, card_w - 20)
         value, unit = _entry_result(entry["client_result"])
@@ -1182,10 +1204,12 @@ def _draw_tower_row(
     block = pygame.Rect(x, y + 3, 30, 24)
     pygame.draw.rect(screen, PANEL2, block)
     screen.blit(fonts["row_pos"].render(str(pos), True, MUTED), (block.x + 8, block.y + 4))
-    screen.blit(fonts["row_tag"].render(_entry_tag(entry, competition_id), True, WHITE), (x + 40, y + 6))
-    name = f"Group {entry['group_id']}" if competition_id == "final" else str(entry["username"])
+    if competition_id == "final":
+        name = f"Group {entry['group_id']} · {entry['username']}"
+    else:
+        name = str(entry["username"])
     name_font = _user_font(fonts, name, "row_name", "row_name_cjk")
-    _blit_clipped(screen, name_font.render(name, True, MUTED if completed else DIM), x + 92, y + 8, width - 182)
+    _blit_clipped(screen, name_font.render(name, True, MUTED if completed else DIM), x + 40, y + 8, width - 130)
     if completed:
         if pos == 1 or leader_ticks is None:
             text, color = f"{int(client_result['lap_ticks']) / FPS:.3f}", accent
