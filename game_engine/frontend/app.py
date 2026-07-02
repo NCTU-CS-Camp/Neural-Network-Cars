@@ -306,6 +306,12 @@ def run_training_loop(
         simulator.reset_population(nn_cars)
         session.alive_count = len(nn_cars)
 
+    # Without this, cars sit at Car.__init__'s hardcoded (120, 480) default
+    # on first entry instead of the map's actual start point — Next Gen /
+    # Restart / New Map already call apply_track_spawn(), so the very first
+    # render should use the same logic instead of being a special case.
+    apply_track_spawn(reset_player=True, reset_images=True)
+
     _mono = pygame.font.Font(str(MONO_FONT_PATH), 15)
     _mono_cjk = pygame.font.Font(str(FONT_PATH), 15)
     _head = pygame.font.Font(str(HEAD_FONT_PATH), 15)
