@@ -218,7 +218,7 @@ def _ellipsize(font: pygame.font.Font, text: str, max_width: int) -> str:
 def format_ticks_as_seconds(ticks: int | None, fps: int = FPS) -> str:
     if ticks is None:
         return "--"
-    return f"{ticks / fps:.1f}s"
+    return f"{ticks / fps:.3f}s"
 
 
 def _parse_timestamp_utc8(timestamp: str) -> datetime | None:
@@ -1619,25 +1619,52 @@ def _draw_progress_screen(
     crashed_count: int = 0,
 ) -> None:
     width, height = screen.get_size()
+    cx = width // 2
+    cy = height // 2
+    head = _head_font(32)
+    mono_big = _mono_font(42)
+    mono_sm = _mono_font(18)
+
+    bar_w = min(600, width - 120)
     bar = ProgressBar(
-        pygame.Rect(width // 2 - 300, height // 2 - 20, 600, 40),
+        pygame.Rect(cx - bar_w // 2, cy + 10, bar_w, 8),
         value=tick,
         max_value=frame_limit,
     )
+
     screen.fill(BG)
-    title_surface = font.render(title, True, INK)
-    screen.blit(title_surface, title_surface.get_rect(center=(width // 2, height // 2 - 80)))
+
+    # Title
+    title_surf = head.render(title, True, INK)
+    screen.blit(title_surf, title_surf.get_rect(center=(cx, cy - 100)))
+
+    # Red accent line under title
+    accent_y = cy - 100 + title_surf.get_height() // 2 + 16
+    pygame.draw.rect(screen, F1_RED, pygame.Rect(cx - 120, accent_y, 240, 2))
+
+    # Large time display
+    time_str = f"{format_ticks_as_seconds(tick)}  /  {format_ticks_as_seconds(frame_limit)}"
+    time_surf = mono_big.render(time_str, True, CYAN)
+    screen.blit(time_surf, time_surf.get_rect(center=(cx, cy - 30)))
+
+    # Progress bar
     bar.draw(screen, font)
-    time_surf = font.render(
-        f"{format_ticks_as_seconds(tick)} / {format_ticks_as_seconds(frame_limit)}",
-        True, CYAN,
-    )
-    screen.blit(time_surf, time_surf.get_rect(center=(width // 2, height // 2 + 50)))
-    counts_surf = font.render(
-        f"存活中：{active_count}  ·  完成：{completed_count}  ·  撞車：{crashed_count}  / {total}",
-        True, DIM,
-    )
-    screen.blit(counts_surf, counts_surf.get_rect(center=(width // 2, height // 2 + 80)))
+
+    # Counts row: active · completed · crashed / total
+    active_surf = mono_sm.render(f"存活中  {active_count}", True, INK)
+    comp_surf   = mono_sm.render(f"完成  {completed_count}", True, F1_GREEN)
+    crash_surf  = mono_sm.render(f"撞車  {crashed_count}", True, F1_RED)
+    total_surf  = mono_sm.render(f"/ {total}", True, DIM)
+
+    gap = 32
+    parts = [active_surf, comp_surf, crash_surf, total_surf]
+    total_w = sum(s.get_width() for s in parts) + gap * (len(parts) - 1)
+    x = cx - total_w // 2
+    counts_y = cy + 40
+    for s in parts:
+        screen.blit(s, (x, counts_y))
+        x += s.get_width() + gap
+
     pygame.display.update()
 
 
@@ -1734,16 +1761,11 @@ def _simulate_candidates(
             canvas.blit(track_front, (0, 0))
             for car in candidates:
                 car.draw(canvas)
-            canvas.blit(
-                font.render(
-                    f"{title}  時間 {format_ticks_as_seconds(tick)}"
-                    f" / {format_ticks_as_seconds(frame_limit)}"
-                    f"  Active: {sum(active)}",
-                    True,
-                    WHITE,
-                ),
-                (20, 20),
+            overlay = (
+                f"{title}  {format_ticks_as_seconds(tick)} / {format_ticks_as_seconds(frame_limit)}"
+                f"  存活 {sum(active)}  完成 {sum(completed_flags)}  撞車 {sum(collided_flags)}"
             )
+            canvas.blit(font.render(overlay, True, WHITE), (20, 20))
             screen.fill(BG)
             screen.blit(pygame.transform.scale(canvas, (dst_w, dst_h)), (dst_x, dst_y))
             if esc_button is not None:
