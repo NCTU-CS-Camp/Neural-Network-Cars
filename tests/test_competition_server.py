@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pygame
 from fastapi.testclient import TestClient
@@ -55,10 +56,63 @@ def make_client(tmp_path, clock: Clock) -> TestClient:
     return TestClient(create_app(storage=storage, start_worker=False, admin_token="secret"))
 
 
+def create_user(
+    client: TestClient,
+    *,
+    group_id: str = "1",
+    username: str = "tester",
+    password: str = "pw",
+    disabled: bool = False,
+) -> dict:
+    response = client.post(
+        "/v2/admin/users",
+        headers={"X-Admin-Token": "secret"},
+        json={
+            "group_id": group_id,
+            "username": username,
+            "password": password,
+            "disabled": disabled,
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def auth_headers(
+    client: TestClient,
+    *,
+    group_id: str = "1",
+    username: str = "tester",
+    password: str = "pw",
+) -> dict[str, str]:
+    create_user(client, group_id=group_id, username=username, password=password)
+    response = client.post(
+        "/v2/auth/login",
+        json={"group_id": group_id, "username": username, "password": password},
+    )
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
+def student_post(client: TestClient, path: str, payload: dict) -> Any:
+    headers = auth_headers(
+        client,
+        group_id=str(payload.get("group_id", "1")),
+        username=str(payload.get("username", "tester")),
+    )
+    return client.post(path, json=payload, headers=headers)
+
+
 def submit(client: TestClient, competition_id: str, **kwargs) -> dict:
+    payload = make_payload(**kwargs)
     response = client.post(
         f"/v2/competitions/{competition_id}/submissions",
-        json=make_payload(**kwargs),
+        json=payload,
+        headers=auth_headers(
+            client,
+            group_id=payload["group_id"],
+            username=payload["username"],
+        ),
     )
     assert response.status_code == 201
     return response.json()
@@ -102,22 +156,27 @@ def test_batch_worker_retries_after_transient_failure(caplog):
 def test_phase_one_submission_is_queued_and_cooldown_is_per_competition(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
+        headers = auth_headers(client, username="ada")
         eligibility = client.post(
             "/v2/competitions/easy/eligibility",
             json={"group_id": "1", "username": "ada"},
+            headers=headers,
         )
         first = submit(client, "easy", username="ada")
         easy_again = client.post(
             "/v2/competitions/easy/eligibility",
             json={"group_id": "1", "username": "ada"},
+            headers=headers,
         )
         hard = client.post(
             "/v2/competitions/hard/eligibility",
             json={"group_id": "1", "username": "ada"},
+            headers=headers,
         )
         duplicate = client.post(
             "/v2/competitions/easy/submissions",
             json=make_payload(username="ada"),
+            headers=headers,
         )
 
     assert eligibility.json()["eligible"] is True
@@ -191,7 +250,92 @@ def test_admin_page_gates_content_behind_session_token(tmp_path):
     assert 'sessionStorage' in html
     assert 'Phase 1 Timing' not in html
     assert 'Snapshot Timing' in html
+    assert 'User Management' in html
+    assert '/v2/admin/users' in html
+    assert '/v2/admin/submissions' in html
+    assert 'data-action="enable"' in html
     assert 'id="admin-content" class="hidden"' in html
+
+
+def test_user_login_authentication_and_expiration(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        create_user(client, group_id="8", username="ada", password="pw8")
+        ok = client.post(
+            "/v2/auth/login",
+            json={"group_id": "8", "username": "ada", "password": "pw8"},
+        )
+        bad_password = client.post(
+            "/v2/auth/login",
+            json={"group_id": "8", "username": "ada", "password": "bad"},
+        )
+        create_user(
+            client,
+            group_id="8",
+            username="disabled",
+            password="pw",
+            disabled=True,
+        )
+        disabled = client.post(
+            "/v2/auth/login",
+            json={"group_id": "8", "username": "disabled", "password": "pw"},
+        )
+        token = ok.json()["token"]
+        clock.advance(hours=13)
+        expired = client.get(
+            "/v2/me/submissions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert ok.status_code == 200
+    assert ok.json()["group_id"] == "8"
+    assert bad_password.status_code == 401
+    assert disabled.status_code == 401
+    assert expired.status_code == 401
+
+
+def test_student_endpoints_require_matching_bearer_identity(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        missing = client.post(
+            "/v2/competitions/easy/eligibility",
+            json={"group_id": "1", "username": "ada"},
+        )
+        mismatch = client.post(
+            "/v2/competitions/easy/eligibility",
+            json={"group_id": "1", "username": "ben"},
+            headers=auth_headers(client, group_id="1", username="ada"),
+        )
+
+    assert missing.status_code == 401
+    assert mismatch.status_code == 403
+
+
+def test_admin_can_import_users_and_plaintext_passwords_are_visible(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        imported = client.post(
+            "/v2/admin/users/import",
+            headers={"X-Admin-Token": "secret"},
+            json={"text": "2,bob,pw2\n3,cy,pw3,true"},
+        )
+        users = client.get(
+            "/v2/admin/users",
+            headers={"X-Admin-Token": "secret"},
+        )
+        invalid_json = client.post(
+            "/v2/admin/users/import",
+            headers={"X-Admin-Token": "secret"},
+            json={"text": "[bad"},
+        )
+
+    assert imported.status_code == 200
+    assert imported.json()["imported"] == 2
+    assert [user["username"] for user in users.json()] == ["bob", "cy"]
+    assert users.json()[0]["password_plaintext"] == "pw2"
+    assert users.json()[1]["disabled"] is True
+    assert invalid_json.status_code == 400
+    assert "JSON import text is invalid" in invalid_json.json()["detail"]
 
 
 def test_phase_one_configured_interval_controls_cooldown(tmp_path):
@@ -204,14 +348,17 @@ def test_phase_one_configured_interval_controls_cooldown(tmp_path):
         )
         submit(client, "easy", username="ada")
         clock.advance(minutes=1)
+        headers = auth_headers(client, username="ada")
         blocked = client.post(
             "/v2/competitions/easy/submissions",
             json=make_payload(username="ada"),
+            headers=headers,
         )
         clock.advance(minutes=1)
         accepted = client.post(
             "/v2/competitions/easy/submissions",
             json=make_payload(username="ada"),
+            headers=headers,
         )
 
     assert blocked.status_code == 429
@@ -260,6 +407,84 @@ def test_ranking_uses_client_result_and_keeps_individual_historical_best(tmp_pat
     assert leaderboard[2]["group_id"] == "2"
 
 
+def test_submission_metadata_defaults_aliases_and_validation(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        defaulted = submit(client, "easy", username="defaulted")
+
+        alias_payload = make_payload(username="alias")
+        alias_payload["skin_id"] = 1
+        alias_payload["maxSpeed"] = 12.5
+        alias_response = client.post(
+            "/v2/competitions/easy/submissions",
+            json=alias_payload,
+            headers=auth_headers(client, username="alias"),
+        )
+
+        bad_skin = make_payload(username="badskin")
+        bad_skin["skin_id"] = 9
+        bad_skin_response = client.post(
+            "/v2/competitions/easy/submissions",
+            json=bad_skin,
+            headers=auth_headers(client, username="badskin"),
+        )
+
+        bad_speed = make_payload(username="badspeed")
+        bad_speed["max_speed"] = 99
+        bad_speed_response = client.post(
+            "/v2/competitions/easy/submissions",
+            json=bad_speed,
+            headers=auth_headers(client, username="badspeed"),
+        )
+        process_now(client)
+        leaderboard = client.get("/v2/competitions/easy/leaderboard").json()
+        replay = client.get(
+            "/v2/admin/replay",
+            headers={"X-Admin-Token": "secret"},
+        ).json()
+
+    assert defaulted["skin_id"] == 0
+    assert defaulted["max_speed"] == 10.0
+    assert alias_response.status_code == 201
+    assert alias_response.json()["skin_id"] == 1
+    assert alias_response.json()["max_speed"] == 12.5
+    assert bad_skin_response.status_code == 400
+    assert "skin_id" in bad_skin_response.json()["detail"]
+    assert bad_speed_response.status_code == 400
+    assert "max_speed" in bad_speed_response.json()["detail"]
+    assert {row["username"]: row["skin_id"] for row in leaderboard}["alias"] == 1
+    assert {item["username"]: item["max_speed"] for item in replay["replays"]["easy"]["items"]}[
+        "alias"
+    ] == 12.5
+
+
+def test_admin_soft_delete_removes_submission_and_recomputes_best(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        first = submit(client, "easy", username="ada", max_progress=2_000.0)
+        process_now(client)
+        clock.advance(minutes=1)
+        second = submit(client, "easy", username="ada", max_progress=1_000.0)
+        process_now(client)
+
+        deleted = client.delete(
+            f"/v2/admin/submissions/{first['submission_id']}",
+            headers={"X-Admin-Token": "secret"},
+        )
+        leaderboard = client.get("/v2/competitions/easy/leaderboard").json()
+        replay = client.get(
+            "/v2/admin/replay",
+            headers={"X-Admin-Token": "secret"},
+        ).json()
+
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+    assert leaderboard[0]["submission_id"] == second["submission_id"]
+    assert first["submission_id"] not in [
+        item["submission_id"] for item in replay["replays"]["easy"]["items"]
+    ]
+
+
 def test_chinese_username_round_trips_through_leaderboard(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
@@ -291,7 +516,14 @@ def test_ranking_prefers_completion_then_lap_ticks_then_progress_then_time(tmp_p
 def test_final_stage_queues_submissions_and_uses_group_cooldown(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
-        closed = client.post("/v2/finals/submissions", json=make_payload(group_id="1", username="ada"))
+        ada_headers = auth_headers(client, group_id="1", username="ada")
+        ben_headers = auth_headers(client, group_id="1", username="ben")
+        cy_headers = auth_headers(client, group_id="2", username="cy")
+        closed = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ada"),
+            headers=ada_headers,
+        )
         stage = client.post(
             "/v2/admin/stage",
             headers={"X-Admin-Token": "secret"},
@@ -300,14 +532,17 @@ def test_final_stage_queues_submissions_and_uses_group_cooldown(tmp_path):
         first = client.post(
             "/v2/finals/submissions",
             json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=520),
+            headers=ada_headers,
         )
         cooldown = client.post(
             "/v2/finals/submissions",
             json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
+            headers=ben_headers,
         )
         other = client.post(
             "/v2/finals/submissions",
             json=make_payload(group_id="2", username="cy", completed=True, lap_ticks=480),
+            headers=cy_headers,
         )
         queued_leaderboard = client.get("/v2/competitions/final/leaderboard").json()
         processed = process_now(client)
@@ -317,6 +552,7 @@ def test_final_stage_queues_submissions_and_uses_group_cooldown(tmp_path):
         better = client.post(
             "/v2/finals/submissions",
             json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
+            headers=ben_headers,
         )
         processed_better = process_now(client)
         leaderboard = client.get("/v2/competitions/final/leaderboard").json()
@@ -350,6 +586,7 @@ def test_final_eligibility_keeps_current_group_and_username_schema(tmp_path):
         eligibility = client.post(
             "/v2/finals/eligibility",
             json={"group_id": "1", "username": "ada"},
+            headers=auth_headers(client, group_id="1", username="ada"),
         )
 
     assert eligibility.status_code == 200
@@ -359,20 +596,29 @@ def test_final_eligibility_keeps_current_group_and_username_schema(tmp_path):
 def test_submission_validation_rejects_bad_client_result_shape_and_non_finite_genes(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
+        headers = auth_headers(client)
         bad_result = make_payload(lap_ticks=20)
         bad_result["client_result"]["lap_ticks"] = 20
-        result_response = client.post("/v2/competitions/easy/submissions", json=bad_result)
+        result_response = client.post(
+            "/v2/competitions/easy/submissions",
+            json=bad_result,
+            headers=headers,
+        )
 
         bad_shape = make_payload()
         bad_shape["weights"][0] = [0.0]
-        shape_response = client.post("/v2/competitions/easy/submissions", json=bad_shape)
+        shape_response = client.post(
+            "/v2/competitions/easy/submissions",
+            json=bad_shape,
+            headers=headers,
+        )
 
         non_finite = make_payload()
         non_finite["weights"][0][0] = float("nan")
         finite_response = client.post(
             "/v2/competitions/easy/submissions",
             content=json.dumps(non_finite),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **headers},
         )
 
     assert result_response.status_code == 400
@@ -471,6 +717,34 @@ def test_dual_replay_sessions_keep_collision_surfaces_per_car():
     assert sessions["easy"].track.collision is not sessions["hard"].track.collision
     assert sessions["easy"].cars[0].car.collision_surface is sessions["easy"].track.collision
     assert sessions["hard"].cars[0].car.collision_surface is sessions["hard"].track.collision
+
+
+def test_replay_session_applies_submission_skin_and_max_speed():
+    from game_engine.backend.assets import load_game_assets
+    from game_engine.frontend.replay_client import load_replay_sessions
+
+    pygame.init()
+    pygame.display.set_mode((1, 1))
+    assets = load_game_assets()
+    item = {
+        "rank": 1,
+        "submission_id": "sub_demo",
+        "group_id": "1",
+        "username": "ada",
+        "skin_id": 1,
+        "max_speed": 12.5,
+        "client_result": make_payload()["client_result"],
+        "weights": [[0.0] * 36, [0.0] * 24],
+        "biases": [[0.0] * 6, [0.0] * 4],
+    }
+    sessions = load_replay_sessions(
+        {"replays": {"easy": {"items": [item], "leaderboard": []}}},
+        assets,
+    )
+
+    replay_car = sessions["easy"].cars[0]
+    assert replay_car.car.car_image is assets.green_small_car
+    assert replay_car.car.max_speed == 12.5
 
 
 def test_replay_payload_identity_detects_leaderboard_and_restart_changes():
@@ -661,6 +935,7 @@ def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):
             headers={"X-Admin-Token": "secret"},
             json={"phase_one_batch_minutes": 2},
         )
+        create_user(client, group_id="8", username="ada", password="pw8")
         submit(client, "easy", username="ada")
         process_now(client)
         client.post(
@@ -672,12 +947,14 @@ def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):
         state = client.get("/v2/state").json()
         leaderboard = client.get("/v2/competitions/easy/leaderboard").json()
         admin_rows = client.get("/v2/admin/submissions", headers={"X-Admin-Token": "secret"}).json()
+        users = client.get("/v2/admin/users", headers={"X-Admin-Token": "secret"}).json()
 
     assert reset.json() == {"status": "reset", "scope": "competition"}
     assert state["stage"] == "final"
     assert state["config"]["phase_one_batch_minutes"] == 2
     assert leaderboard == []
     assert admin_rows == []
+    assert {user["group_id"] for user in users} == {"1", "8"}
 
 
 def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
@@ -693,6 +970,11 @@ def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
     assert page.status_code == 200
     assert "data-competition=\"easy\"" in page.text
     assert "activeTabUsesSnapshots" in page.text
+    assert "/v2/auth/login" in page.text
+    assert "/v2/me/submissions" in page.text
+    assert "competitionUserToken" in page.text
+    assert "My Runs" in page.text
+    assert "Group ${" in page.text
     assert "Stage inactive" in page.text
     assert 'if(activeCompetition === "final" || !snapshotAt)' not in page.text
     assert "setInterval(renderTiming, 1000)" in page.text

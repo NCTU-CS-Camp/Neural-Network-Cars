@@ -25,6 +25,9 @@ def submit_car(
     username: str,
     competition_id: str = "easy",
     client_result: ClientResult | None = None,
+    token: str | None = None,
+    skin_id: int = 0,
+    max_speed: float = 10.0,
     timeout: float = 5.0,
 ) -> SubmissionResult:
     if client_result is None:
@@ -37,17 +40,21 @@ def submit_car(
         group_id=group_id,
         username=username,
     )
-    body = json.dumps({**payload.to_dict(), "client_result": client_result.to_dict()}).encode(
-        "utf-8"
-    )
+    data = {**payload.to_dict(), "client_result": client_result.to_dict()}
+    data["skin_id"] = skin_id
+    data["max_speed"] = max_speed
+    body = json.dumps(data).encode("utf-8")
     if competition_id == "final":
         url = server_url.rstrip("/") + "/v2/finals/submissions"
     else:
         url = server_url.rstrip("/") + f"/v2/competitions/{competition_id}/submissions"
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
 

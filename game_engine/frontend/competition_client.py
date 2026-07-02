@@ -132,6 +132,7 @@ class CompetitionTrainingClient:
     fitness_strategy: Any = None
     fields: list[TextField] = field(default_factory=list)
     result_fields: list[TextField] = field(default_factory=list)
+    user_token: str | None = None
 
     def __post_init__(self) -> None:
         self.fitness_strategy = rank_car
@@ -158,7 +159,25 @@ class CompetitionTrainingClient:
 
     @property
     def admin_token(self) -> str:
-        return self.fields[3].value.strip()
+        return self.fields[6].value.strip()
+
+    @property
+    def password(self) -> str:
+        return self.fields[2].value.strip()
+
+    @property
+    def skin_id(self) -> int:
+        try:
+            return int(self.fields[3].value.strip() or "0")
+        except ValueError:
+            return 0
+
+    @property
+    def submission_max_speed(self) -> float:
+        try:
+            return float(self.fields[4].value.strip() or str(MAX_SPEED))
+        except ValueError:
+            return float(MAX_SPEED)
 
     def load_competition(self, competition_id: CompetitionName, *, reset_weights: bool) -> None:
         self.competition_id = competition_id
@@ -251,6 +270,9 @@ class CompetitionTrainingClient:
             return True
         elif key == pygame.K_p:
             self.run_batch_now()
+            return True
+        elif key == pygame.K_i:
+            self.login_user()
             return True
         return False
 
@@ -363,7 +385,11 @@ class CompetitionTrainingClient:
             self.status = "No cars to score."
             return
         try:
-            self.generated_result = evaluate_car_result(best, self.competition_id)
+            self.generated_result = evaluate_car_result(
+                best,
+                self.competition_id,
+                max_speed=self.submission_max_speed,
+            )
         except ValueError as exc:
             self.status = f"Scoring failed: {exc}"
             return
@@ -390,11 +416,14 @@ class CompetitionTrainingClient:
             self.status = "No cars to submit."
             return
         try:
+            if not self.user_token and not self.login_user():
+                return
             eligibility = _check_eligibility_raw(
                 self.server_url,
                 self.competition_id,
                 group_id=self.group_id,
                 username=self.user_id,
+                token=self.user_token,
             )
             if not eligibility.get("eligible"):
                 reason = eligibility.get("reason", "not eligible")
@@ -409,12 +438,41 @@ class CompetitionTrainingClient:
                 username=self.user_id,
                 competition_id=self.competition_id,
                 client_result=result,
+                token=self.user_token,
+                skin_id=self.skin_id,
+                max_speed=self.submission_max_speed,
                 timeout=8.0,
             )
         except (ValueError, HTTPError, URLError, TimeoutError) as exc:
             self.status = f"Submit failed: {exc}"
             return
         self.status = submission.message
+
+    def login_user(self) -> bool:
+        if not self.password:
+            self.status = "Password required before login."
+            return False
+        try:
+            response = post_json(
+                self.server_url.rstrip("/") + "/v2/auth/login",
+                {
+                    "group_id": self.group_id,
+                    "username": self.user_id,
+                    "password": self.password,
+                },
+            )
+        except (HTTPError, URLError, ValueError, TimeoutError) as exc:
+            self.status = f"Login failed: {exc}"
+            self.user_token = None
+            return False
+        token = response.get("token")
+        if not token:
+            self.status = "Login failed: missing token."
+            self.user_token = None
+            return False
+        self.user_token = str(token)
+        self.status = f"Logged in as Group {self.group_id} / {self.user_id}."
+        return True
 
     def run_batch_now(self) -> None:
         if not self.admin_token:
@@ -492,24 +550,24 @@ class CompetitionTrainingClient:
         )
         for text_field in self.fields:
             text_field.draw(self.screen, self.small_font)
-        y = PANEL.y + 246
+        y = PANEL.y + 382
         self._text("Shortcuts", PANEL.x + 18, y, self.font)
         shortcuts = [
             "E/H/F map   L lines   R reset",
             "LMB select   RMB remove   C clean",
             "B breed selected   G auto-breed",
             "V score best   O manual result",
-            "U submit best   P run batch now",
+            "I login   U submit best   P run batch",
             "Tab moves between fields",
         ]
         for index, text in enumerate(shortcuts):
             self._text(text, PANEL.x + 18, y + 28 + index * 20, self.small_font, MUTED)
-        y += 172
+        y += 162
         mode = "Manual override" if self.manual_override else "Generated result"
         self._text(f"client_result: {mode}", PANEL.x + 18, y, self.font, GREEN)
         for text_field in self.result_fields:
             text_field.draw(self.screen, self.small_font)
-        y += 190
+        y += 170
         result = self.current_result_preview()
         self._text(result, PANEL.x + 18, y, self.small_font, WHITE)
         status_rect = pygame.Rect(PANEL.x + 18, PANEL.y + PANEL.height - 112, 430, 84)
@@ -559,13 +617,19 @@ def run(server_url: str | None = None) -> None:
     client.run()
 
 
-def evaluate_car_result(car: Car, competition_id: CompetitionName) -> ClientResult:
+def evaluate_car_result(
+    car: Car,
+    competition_id: CompetitionName,
+    *,
+    max_speed: float = float(MAX_SPEED),
+) -> ClientResult:
     competition_map = get_competition_map(competition_id)
     tracker = CompetitionRunTracker.from_metadata_path(competition_map.metadata_path)
     test_car = Car(LAYER_SIZES)
     test_car.weights = [layer.copy() for layer in car.weights]
     test_car.biases = [layer.copy() for layer in car.biases]
     collision = competition_map.build_collision_surface()
+    test_car.max_speed = float(max_speed)
     test_car.set_collision_surface(collision)
     spawn = competition_map.spawn
     test_car.reset_state(spawn["x"], spawn["y"], angle=spawn["angle"])
@@ -641,25 +705,30 @@ def _check_eligibility_raw(
     *,
     group_id: str,
     username: str,
+    token: str | None,
 ) -> dict[str, Any]:
     body = {"group_id": group_id, "username": username}
     if competition_id == "final":
         path = "/v2/finals/eligibility"
     else:
         path = f"/v2/competitions/{competition_id}/eligibility"
-    return post_json(server_url.rstrip("/") + path, body)
+    return post_json(server_url.rstrip("/") + path, body, token=token)
 
 
 def _post_json(
     url: str,
     payload: dict[str, Any],
     timeout: float = 10.0,
+    token: str | None = None,
 ) -> tuple[int, dict[str, Any]] | NetworkError:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
         method="POST",
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     try:
         with urlopen(request, timeout=timeout) as response:
@@ -693,11 +762,13 @@ def check_eligibility(
     competition_id: str,
     group_id: str,
     username: str,
+    token: str | None = None,
 ) -> EligibilityResult | NetworkError:
     url = f"{server_url.rstrip('/')}{_eligibility_path(competition_id)}"
     result = _post_json(
         url,
         {"group_id": group_id, "username": username},
+        token=token,
     )
     if isinstance(result, NetworkError):
         return result
@@ -721,10 +792,11 @@ def submit(
     competition_id: str,
     payload: SubmissionPayload,
     client_result: ClientResult,
+    token: str | None = None,
 ) -> SubmissionAccepted | SubmissionRejected | NetworkError:
     url = f"{server_url.rstrip('/')}{_submission_path(competition_id)}"
     body = {**payload.to_dict(), "client_result": client_result.to_dict()}
-    result = _post_json(url, body)
+    result = _post_json(url, body, token=token)
     if isinstance(result, NetworkError):
         return result
 
@@ -754,11 +826,14 @@ def post_admin(server_url: str, path: str, *, token: str) -> dict[str, Any]:
         raise ValueError(f"HTTP {exc.code}: {detail}") from exc
 
 
-def post_json(url: str, body: dict[str, Any]) -> dict[str, Any]:
+def post_json(url: str, body: dict[str, Any], *, token: str | None = None) -> dict[str, Any]:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = Request(
         url,
         data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:
@@ -777,14 +852,17 @@ def _build_fields(settings: RuntimeSettings) -> list[TextField]:
     return [
         TextField("User ID", settings.username, pygame.Rect(x, y, FIELD_W, FIELD_H)),
         TextField("Group ID", settings.group_id, pygame.Rect(x + 250, y, 178, FIELD_H)),
-        TextField("Server URL", server_url, pygame.Rect(x, y + 58, 428, FIELD_H)),
-        TextField("Admin Token", admin_token, pygame.Rect(x, y + 116, 428, FIELD_H), True),
+        TextField("Password", "", pygame.Rect(x, y + 58, 190, FIELD_H), True),
+        TextField("Skin ID", "0", pygame.Rect(x + 204, y + 58, 88, FIELD_H)),
+        TextField("Max Speed", str(settings.max_speed), pygame.Rect(x + 306, y + 58, 122, FIELD_H)),
+        TextField("Server URL", server_url, pygame.Rect(x, y + 116, 428, FIELD_H)),
+        TextField("Admin Token", admin_token, pygame.Rect(x, y + 174, 428, FIELD_H), True),
     ]
 
 
 def _build_result_fields() -> list[TextField]:
     x = PANEL.x + 18
-    y = PANEL.y + 470
+    y = PANEL.y + 606
     return [
         TextField("Completed", "false", pygame.Rect(x, y, 118, FIELD_H)),
         TextField("Lap Ticks", "", pygame.Rect(x + 132, y, 118, FIELD_H)),

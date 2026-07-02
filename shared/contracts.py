@@ -15,6 +15,11 @@ EXPECTED_WEIGHT_LENGTHS = [rows * cols for rows, cols in EXPECTED_WEIGHT_SHAPES]
 EXPECTED_BIAS_LENGTHS = [rows * cols for rows, cols in EXPECTED_BIAS_SHAPES]
 DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 DEFAULT_EVOLUTION_SEED = 3057
+DEFAULT_SKIN_ID = 0
+DEFAULT_MAX_SPEED = 10.0
+ALLOWED_SKIN_IDS = (0, 1)
+MIN_SUBMISSION_MAX_SPEED = 5.0
+MAX_SUBMISSION_MAX_SPEED = 30.0
 
 
 def _float_layers(raw_layers: Any, expected_lengths: list[int], field_name: str) -> list[list[float]]:
@@ -149,6 +154,8 @@ class SubmissionPayload:
     username: str
     weights: list[list[float]]
     biases: list[list[float]]
+    skin_id: int = DEFAULT_SKIN_ID
+    max_speed: float = DEFAULT_MAX_SPEED
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SubmissionPayload":
@@ -158,15 +165,53 @@ class SubmissionPayload:
             raise ValueError("group_id must not be empty")
         if not username:
             raise ValueError("username must not be empty")
+        skin_raw = data.get("skin_id")
+        if skin_raw is None:
+            skin_raw = DEFAULT_SKIN_ID
+        max_speed_raw = data.get("max_speed")
+        if max_speed_raw is None:
+            max_speed_raw = data.get("maxSpeed")
+        if max_speed_raw is None:
+            max_speed_raw = DEFAULT_MAX_SPEED
         return cls(
             group_id=group_id,
             username=username,
             weights=_float_layers(data.get("weights"), EXPECTED_WEIGHT_LENGTHS, "weights"),
             biases=_float_layers(data.get("biases"), EXPECTED_BIAS_LENGTHS, "biases"),
+            skin_id=_coerce_skin_id(skin_raw),
+            max_speed=_coerce_submission_max_speed(max_speed_raw),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _coerce_skin_id(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("skin_id must be 0 or 1")
+    try:
+        skin_id = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("skin_id must be 0 or 1") from exc
+    if skin_id not in ALLOWED_SKIN_IDS:
+        raise ValueError("skin_id must be 0 or 1")
+    return skin_id
+
+
+def _coerce_submission_max_speed(value: Any) -> float:
+    if isinstance(value, bool):
+        raise ValueError("max_speed must be a number from 5 to 30")
+    try:
+        max_speed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_speed must be a number from 5 to 30") from exc
+    if (
+        not math.isfinite(max_speed)
+        or max_speed < MIN_SUBMISSION_MAX_SPEED
+        or max_speed > MAX_SUBMISSION_MAX_SPEED
+    ):
+        raise ValueError("max_speed must be a finite number from 5 to 30")
+    return max_speed
 
 
 @dataclass(frozen=True, slots=True)

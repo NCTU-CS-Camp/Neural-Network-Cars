@@ -32,6 +32,7 @@ class SubmissionStatus(StrEnum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    DELETED = "deleted"
 
 
 @dataclass(frozen=True, slots=True)
