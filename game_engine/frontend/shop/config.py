@@ -23,8 +23,8 @@ TIER_PROBABILITIES: dict[str, float] = {
 GUARANTEE_TIERS: tuple[str, ...] = ("SSR", "SR", "S", "A")
 
 # --- Gacha costs (coins) ---
-SINGLE_PULL_COST: int = 10
-TEN_PULL_COST: int = 90  # slight discount vs 10x single (author tunes)
+SINGLE_PULL_COST: int = 1
+TEN_PULL_COST: int = 2  # slight discount vs 10x single (author tunes)
 TEN_PULL_COUNT: int = 10
 
 # --- Earning rewards (coins) ---

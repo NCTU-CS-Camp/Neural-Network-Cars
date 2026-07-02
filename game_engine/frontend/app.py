@@ -42,6 +42,10 @@ from game_engine.frontend.profile_store import (
     clear_login_profile,
     load_login_profile,
 )
+from game_engine.frontend.shop.screen import run_shop_screen
+from game_engine.frontend.shop import wallet
+from game_engine.frontend.shop.config import GENERATION_REWARD
+from game_engine.frontend.shop.renderer import apply_equipped_skin
 from game_engine.frontend.scenes import AppShell
 from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
@@ -130,6 +134,8 @@ def run():
                         map_difficulty,
                         parent_record,
                     )
+            elif choice == "shop":
+                run_shop_screen(screen)
             else:
                 run_validation_list_screen(screen, profile.server_url)
     except AppQuit:
@@ -151,6 +157,7 @@ def run_training_loop(
     fitness_config = fitness_strategy.config
 
     assets = load_game_assets()
+    apply_equipped_skin(assets)
     game_display = screen
     clock = pygame.time.Clock()
 
@@ -354,7 +361,7 @@ def run_training_loop(
         return True
 
     def restart_training():
-        nonlocal nn_cars
+        nonlocal nn_cars, last_awarded_generation, finish_awarded_this_gen
         new_seed = secrets.randbits(32)
         while new_seed == session.evolution_seed:
             new_seed = secrets.randbits(32)
@@ -371,6 +378,10 @@ def run_training_loop(
         ]
         apply_track_spawn(reset_player=True, reset_images=True)
         restart_generation_timer()
+        # Re-sync coin trackers: restart_with_seed resets session.generation,
+        # so realign the baseline or generation/finish rewards would stall.
+        last_awarded_generation = session.generation
+        finish_awarded_this_gen = False
 
     def draw_fitness_leaders(target):
         if not nn_cars:
@@ -426,6 +437,7 @@ def run_training_loop(
         submit_status = result.message
 
     def redraw_game_window():
+        nonlocal finish_awarded_this_gen
         # Draw map + cars on the 1600×900 virtual canvas.
         map_canvas.blit(bg, (0, 0))
 
@@ -434,6 +446,9 @@ def run_training_loop(
                 step_result = simulator.step(nn_car, fitness_strategy.score_frame)
                 if step_result.telemetry.collided:
                     session.mark_collision(nn_car)
+                if step_result.telemetry.finished_now and not finish_awarded_this_gen:
+                    wallet.award_training_finish(map_difficulty)
+                    finish_awarded_this_gen = True
 
         for nn_car in nn_cars:
             nn_car.draw(map_canvas)
@@ -548,6 +563,9 @@ def run_training_loop(
     simulator.reset_population(nn_cars)
     car.refresh_track_state(track)
 
+    last_awarded_generation = session.generation
+    finish_awarded_this_gen = False
+
     while True:
         leave_requested = False
 
@@ -612,6 +630,10 @@ def run_training_loop(
             return
 
         redraw_game_window()
+        if session.generation > last_awarded_generation:
+            wallet.award(GENERATION_REWARD * (session.generation - last_awarded_generation))
+            last_awarded_generation = session.generation
+            finish_awarded_this_gen = False
         if session.should_end_generation(generation_elapsed_seconds()):
             breed_selected()
         clock.tick(settings.fps)

@@ -56,6 +56,8 @@ from game_engine.frontend.competition_client import (
 )
 from game_engine.frontend.competition_client import submit as submit_to_competition_server
 from game_engine.frontend.profile_store import save_login_profile
+from game_engine.frontend.shop import wallet as shop_wallet
+from game_engine.frontend.shop.renderer import apply_equipped_skin
 from game_engine.frontend.widgets import Button, Dropdown, Slider, TextInput
 from shared.contracts import (
     ClientResult,
@@ -96,7 +98,7 @@ class AppQuit(Exception):
 
 
 GROUP_COUNT = 10
-MenuChoice = Literal["training", "validation", "clear_user"]
+MenuChoice = Literal["training", "validation", "shop", "clear_user"]
 TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None, int]
 
 BONUS_FITNESS_PLACEHOLDERS = [
@@ -237,6 +239,13 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
         hover_color=(145, 40, 40),
         border_color=(190, 70, 70),
     )
+    shop_button = Button(
+        "商店",
+        pygame.Rect(width // 2 - 160, height // 2 + 210, 320, 56),
+        fill_color=(30, 70, 60),
+        hover_color=(40, 100, 85),
+        border_color=(70, 170, 140),
+    )
 
     while True:
         for event in pygame.event.get():
@@ -248,11 +257,14 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
                     return "validation"
                 if clear_user_button.contains(event.pos):
                     return "clear_user"
+                if shop_button.contains(event.pos):
+                    return "shop"
 
         mouse_pos = pygame.mouse.get_pos()
         training_button.update_hover(mouse_pos)
         validation_button.update_hover(mouse_pos)
         clear_user_button.update_hover(mouse_pos)
+        shop_button.update_hover(mouse_pos)
 
         screen.fill(BLACK)
         screen.blit(
@@ -262,6 +274,7 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
         training_button.draw(screen, font)
         validation_button.draw(screen, font)
         clear_user_button.draw(screen, font)
+        shop_button.draw(screen, font)
 
         pygame.display.update()
         clock.tick(30)
@@ -1054,6 +1067,7 @@ def _run_record_validation_screen(screen: pygame.Surface, record: TrainingRecord
     if outcome is None:
         return
     client_result, survival_ticks = outcome
+    shop_wallet.award_validation(map_id, client_result)
     _validation_result_screen(screen, map_id, client_result, survival_ticks)
 
 
@@ -1366,6 +1380,7 @@ def _run_validation_tournament_screen(
     The first non-colliding candidate to complete the route ends validation.
     """
     assets = load_game_assets()
+    apply_equipped_skin(assets)
     candidates = _build_candidates(
         parent_a,
         parent_b,
