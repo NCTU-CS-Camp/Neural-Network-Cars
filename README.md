@@ -88,9 +88,14 @@ Client 使用的 API 位址由專案根目錄的 `.env` 設定：
 
 ```dotenv
 COMPETITION_SERVER_URL=http://127.0.0.1:8000
+DEBUG=0
 ```
 
 請先複製 `.env.example` 為 `.env`，再依本機環境修改 IP、protocol 與 port。`.env`、`settings.json`、`profile.json`、`records.json` 與隨機賽道輸出皆為本機執行期資料，不納入版本控制。登入畫面不允許使用者修改此位址；若作業系統環境變數中也有 `COMPETITION_SERVER_URL`，環境變數優先。
+
+Upload candidate tournament 預設使用 `DEBUG=0`，只顯示進度條。設為
+`DEBUG=1` 時會顯示實際賽道與所有候選車，並以 `PICK` 標示目前依官方
+ranking 最可能被選中上傳的車。
 
 `main.py` 保留為訓練用 simulator。競賽提交請使用符合 v2 `client_result` 契約的
 competition client；repository 內提供 `competition_main.py` 作為人工訓練與測試提交入口。

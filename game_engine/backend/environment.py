@@ -10,6 +10,7 @@ from shared.contracts import DEFAULT_SERVER_URL
 
 ENV_PATH = PROJECT_ROOT / ".env"
 SERVER_URL_ENV_VAR = "COMPETITION_SERVER_URL"
+DEBUG_ENV_VAR = "DEBUG"
 
 
 def _read_env(path: Path) -> dict[str, str]:
@@ -53,3 +54,18 @@ def load_server_url(
             f"{SERVER_URL_ENV_VAR} must start with http:// or https://"
         )
     return server_url.rstrip("/")
+
+
+def load_debug_mode(
+    path: Path = ENV_PATH,
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    environment = os.environ if environ is None else environ
+    value = (
+        environment.get(DEBUG_ENV_VAR)
+        or _read_env(path).get(DEBUG_ENV_VAR)
+        or "0"
+    ).strip()
+    if value not in {"0", "1"}:
+        raise ValueError(f"{DEBUG_ENV_VAR} must be 0 or 1")
+    return value == "1"

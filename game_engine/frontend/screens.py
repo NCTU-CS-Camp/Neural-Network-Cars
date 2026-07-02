@@ -30,6 +30,7 @@ from game_engine.backend.competition_track import (
     CompetitionRunTracker,
     reconstruct_route_cells,
 )
+from game_engine.backend.environment import load_debug_mode
 from game_engine.backend.fitness_preset_store import FitnessPresetStore
 from game_engine.backend.record_store import RecordStore
 from game_engine.backend.serialization import apply_weight_payload, export_weight_payload
@@ -1746,6 +1747,37 @@ def _draw_progress_screen(
     pygame.display.update()
 
 
+def _current_winner_index(trackers: list[Any]) -> int:
+    results = _client_results_from_trackers(trackers)
+    return min(
+        range(len(results)),
+        key=lambda index: results[index].ranking_key(),
+    )
+
+
+def _draw_candidate_pick_marker(
+    target: pygame.Surface,
+    candidate: Car,
+    result: ClientResult,
+    font: pygame.font.Font,
+) -> None:
+    center = (round(candidate.x), round(candidate.y))
+    radius = round(max(candidate.width, candidate.height) / 2) + 10
+    pygame.draw.circle(target, F1_RED, center, radius, width=3)
+
+    metric = (
+        format_ticks_as_seconds(result.lap_ticks)
+        if result.completed
+        else f"{result.max_progress:.0f}px"
+    )
+    label = font.render(f"PICK  {metric}", True, INK)
+    badge_rect = label.get_rect(
+        center=(center[0], center[1] - radius - label.get_height())
+    ).inflate(16, 6)
+    pygame.draw.rect(target, F1_RED, badge_rect)
+    target.blit(label, label.get_rect(center=badge_rect.center))
+
+
 def _simulate_candidates(
     screen: pygame.Surface,
     track_front: pygame.Surface,
@@ -1759,6 +1791,7 @@ def _simulate_candidates(
     stop_on_first_completion: bool = False,
     max_speed: int = MAX_SPEED,
     render_live: bool = True,
+    highlight_current_winner: bool = False,
 ) -> SimulationOutcome | None:
     """Race every candidate on one track until all are eliminated/finished or
     the frame limit hits. A completion requires ordered checkpoint traversal
@@ -1768,7 +1801,9 @@ def _simulate_candidates(
     once every remaining candidate is either crashed or stalled. Returns each
     candidate's survival tick count and whether it was eliminated by collision
     (or None if the user pressed ESC). When `render_live` is False the track
-    and cars are not drawn; a progress bar is shown instead."""
+    and cars are not drawn; a progress bar is shown instead. When
+    `highlight_current_winner` is enabled, the current leader under the official
+    upload ranking is marked on the live track."""
     clock = pygame.time.Clock()
     font = _font(20)
 
@@ -1836,9 +1871,19 @@ def _simulate_candidates(
             previous_positions[index] = car.center
 
         if render_live:
+            assert canvas is not None
             canvas.blit(track_front, (0, 0))
             for car in candidates:
                 car.draw(canvas)
+            if highlight_current_winner and trackers:
+                winner_index = _current_winner_index(trackers)
+                current_results = _client_results_from_trackers(trackers)
+                _draw_candidate_pick_marker(
+                    canvas,
+                    candidates[winner_index],
+                    current_results[winner_index],
+                    font,
+                )
             overlay = (
                 f"{title}  {format_ticks_as_seconds(tick)} / {format_ticks_as_seconds(frame_limit)}"
                 f"  存活 {sum(active)}  完成 {sum(completed_flags)}  撞車 {sum(collided_flags)}"
@@ -1888,6 +1933,7 @@ def _run_candidate_tournament_screen(
     max_speed: int = MAX_SPEED,
 ) -> tuple[Car, ClientResult, float, SimulationOutcome] | None:
     assets = load_game_assets()
+    debug_mode = load_debug_mode()
     competition_map = load_competition_map(competition_id)
     track_front = pygame.image.load(competition_map.front_path)
     track_back = pygame.image.load(competition_map.back_path)
@@ -1912,14 +1958,17 @@ def _run_candidate_tournament_screen(
         FRAME_LIMIT,
         trackers,
         title=f"Competition：{competition_id}",
-        render_live=False,
+        render_live=debug_mode,
+        highlight_current_winner=debug_mode,
         max_speed=max_speed,
     )
     if outcome is None:
         return None
 
     client_results = _client_results_from_trackers(trackers)
-    winner_index = min(range(len(candidates)), key=lambda i: client_results[i].ranking_key())
+    # Upload selection must use official lap/progress metrics, never training
+    # fitness. Keep this shared with the DEBUG-mode PICK marker.
+    winner_index = _current_winner_index(trackers)
     # survival_rate = cars that never crashed (finished OR still survived time limit)
     survival_rate = 1 - sum(outcome.collided) / len(candidates)
     return candidates[winner_index], client_results[winner_index], survival_rate, outcome

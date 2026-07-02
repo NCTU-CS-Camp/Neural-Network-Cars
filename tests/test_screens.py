@@ -212,6 +212,144 @@ def test_validation_uses_regular_car_sprite(monkeypatch) -> None:
     assert captured["sprite"] is regular_sprite
 
 
+def test_current_upload_winner_uses_official_ranking() -> None:
+    trackers = [
+        SimpleNamespace(
+            completed=False,
+            lap_ticks=None,
+            max_progress=120.0,
+            ticks_to_max_progress=30,
+        ),
+        SimpleNamespace(
+            completed=False,
+            lap_ticks=None,
+            max_progress=180.0,
+            ticks_to_max_progress=50,
+        ),
+    ]
+
+    assert screens._current_winner_index(trackers) == 1
+
+    trackers[0].completed = True
+    trackers[0].lap_ticks = 90
+    assert screens._current_winner_index(trackers) == 0
+
+
+def test_upload_prefers_progress_over_fitness(monkeypatch) -> None:
+    farther_car = SimpleNamespace(fitness_score=1.0)
+    fitter_car = SimpleNamespace(fitness_score=999.0)
+    trackers = iter(
+        [
+            SimpleNamespace(
+                completed=False,
+                lap_ticks=None,
+                max_progress=500.0,
+                ticks_to_max_progress=100,
+            ),
+            SimpleNamespace(
+                completed=False,
+                lap_ticks=None,
+                max_progress=100.0,
+                ticks_to_max_progress=20,
+            ),
+        ]
+    )
+
+    monkeypatch.setattr(screens, "load_debug_mode", lambda: False)
+    monkeypatch.setattr(
+        screens,
+        "load_game_assets",
+        lambda: SimpleNamespace(white_small_car=pygame.Surface((17, 35))),
+    )
+    monkeypatch.setattr(
+        screens,
+        "load_competition_map",
+        lambda _: SimpleNamespace(
+            front_path="front.png",
+            back_path="back.png",
+            spawn={"x": 0.0, "y": 0.0, "angle": 180.0},
+            new_tracker=lambda: next(trackers),
+        ),
+    )
+    monkeypatch.setattr(
+        screens,
+        "_build_candidates",
+        lambda *args, **kwargs: [farther_car, fitter_car],
+    )
+    monkeypatch.setattr(pygame.image, "load", lambda _: pygame.Surface((10, 10)))
+    monkeypatch.setattr(
+        screens,
+        "_simulate_candidates",
+        lambda *args, **kwargs: screens.SimulationOutcome(
+            survival=[900, 900],
+            collided=[False, False],
+            completed=[False, False],
+        ),
+    )
+
+    result = screens._run_candidate_tournament_screen(
+        pygame.Surface((10, 10)),
+        "easy",
+        object(),
+        object(),
+        [6, 6, 4],
+        5,
+    )
+
+    assert result is not None
+    winner_car, client_result, _, _ = result
+    assert winner_car is farther_car
+    assert client_result.max_progress == 500.0
+
+
+@pytest.mark.parametrize("debug_mode", [False, True])
+def test_upload_debug_mode_controls_live_render(monkeypatch, debug_mode: bool) -> None:
+    captured: dict[str, bool] = {}
+    monkeypatch.setattr(screens, "load_debug_mode", lambda: debug_mode)
+    monkeypatch.setattr(
+        screens,
+        "load_game_assets",
+        lambda: SimpleNamespace(white_small_car=pygame.Surface((17, 35))),
+    )
+    monkeypatch.setattr(
+        screens,
+        "load_competition_map",
+        lambda _: SimpleNamespace(
+            front_path="front.png",
+            back_path="back.png",
+            spawn={"x": 0.0, "y": 0.0, "angle": 180.0},
+            new_tracker=lambda: object(),
+        ),
+    )
+    monkeypatch.setattr(screens, "_build_candidates", lambda *args, **kwargs: [object()])
+    monkeypatch.setattr(pygame.image, "load", lambda _: pygame.Surface((10, 10)))
+
+    def capture_render_mode(*args, **kwargs):
+        captured["render_live"] = kwargs["render_live"]
+        captured["highlight_current_winner"] = kwargs[
+            "highlight_current_winner"
+        ]
+        return None
+
+    monkeypatch.setattr(screens, "_simulate_candidates", capture_render_mode)
+
+    assert (
+        screens._run_candidate_tournament_screen(
+            pygame.Surface((10, 10)),
+            "easy",
+            object(),
+            object(),
+            [6, 6, 4],
+            5,
+        )
+        is None
+    )
+    assert captured == {
+        "render_live": debug_mode,
+        "highlight_current_winner": debug_mode,
+    }
+
+
 @pytest.mark.parametrize(
     ("position", "expected"),
     [
