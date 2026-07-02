@@ -472,9 +472,9 @@ def run_training_loop(
         _ng_lbl_s   = _bar_mono.render("NEXT GEN", True, DIM)
         _ng_val_s   = _next_gen_mono.render(f"{remaining_seconds:.3f}s", True, YELLOW)
         _spd_lbl_s  = _bar_mono.render("MAX SPD", True, DIM)
-        _spd_val_s  = _next_gen_mono.render(str(settings.max_speed), True, CYAN)
+        _spd_val_s  = _next_gen_mono.render(str(settings.max_speed), True, YELLOW)
         _seed_lbl_s = _bar_mono.render("NN SEED", True, DIM)
-        _seed_val_s = _next_gen_mono.render(str(session.evolution_seed), True, CYAN)
+        _seed_val_s = _next_gen_mono.render(str(session.evolution_seed), True, YELLOW)
 
         # Lay out right-to-left: NEXT GEN → MAX SPD → NN SEED
         _cur = _ng_right
