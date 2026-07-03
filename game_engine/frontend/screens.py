@@ -116,12 +116,12 @@ _REASON_MESSAGES = {
 # Deliberately low: uploading an already-trained record should mostly resubmit
 # that record's car, not breed something new from it.
 UPLOAD_MUTATION_RATE = 5
-SUBMISSION_POPULATION_SIZE = 100
+SUBMISSION_POPULATION_SIZE = 50
 
 # Validation breeds a fresh generation from the record's two parents to probe
 # generalization, so it mutates more aggressively than the upload resubmit path.
 VALIDATION_MUTATION_RATE = 15
-VALIDATION_POPULATION_SIZE = 100
+VALIDATION_POPULATION_SIZE = 50
 VALID_FITNESS_INPUT_COLOR = LINE
 INVALID_FITNESS_INPUT_COLOR = (255, 90, 90)
 UTC_PLUS_8 = timezone(timedelta(hours=8))
@@ -610,7 +610,7 @@ def run_training_config_screen(
     start_mode: str = "fresh"
     selected_record: TrainingRecord | None = None
     last_valid_max_speed = str(max(5, min(30, default_max_speed)))
-    last_valid_auto_breed = str(max(30, min(90, default_auto_breed_seconds)))
+    last_valid_auto_breed = str(max(10, min(90, default_auto_breed_seconds)))
     saved_slider_values: dict[str, int] = {}
     record_scroll_offset: int = 0
     custom_presets = FitnessPresetStore().list_presets()
@@ -781,7 +781,7 @@ def run_training_config_screen(
                     for vi in value_inputs.values()
                 )
                 and max_speed_input.text.isdigit() and 5 <= int(max_speed_input.text) <= 30
-                and auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90
+                and auto_breed_input.text.isdigit() and 10 <= int(auto_breed_input.text) <= 90
             )
 
         resize = False
@@ -815,7 +815,7 @@ def run_training_config_screen(
                     saved_slider_values = {n: s.value for n, s in all_sliders.items()}
                     if max_speed_input.text.isdigit() and 5 <= int(max_speed_input.text) <= 30:
                         last_valid_max_speed = max_speed_input.text
-                    if auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90:
+                    if auto_breed_input.text.isdigit() and 10 <= int(auto_breed_input.text) <= 90:
                         last_valid_auto_breed = auto_breed_input.text
                     record_scroll_offset = record_scrollbar.offset
                     resize = True
@@ -865,7 +865,7 @@ def run_training_config_screen(
                     else:
                         max_speed_input.text = last_valid_max_speed
                 if not auto_breed_input.active:
-                    if auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90:
+                    if auto_breed_input.text.isdigit() and 10 <= int(auto_breed_input.text) <= 90:
                         last_valid_auto_breed = auto_breed_input.text
                     else:
                         auto_breed_input.text = last_valid_auto_breed
@@ -954,7 +954,7 @@ def run_training_config_screen(
             max_speed_is_valid = max_speed_input.text.isdigit() and 5 <= int(max_speed_input.text) <= 30
             max_speed_input.border_color = VALID_FITNESS_INPUT_COLOR if max_speed_is_valid else INVALID_FITNESS_INPUT_COLOR
             max_speed_input.active_border_color = CYAN if max_speed_is_valid else INVALID_FITNESS_INPUT_COLOR
-            auto_breed_is_valid = auto_breed_input.text.isdigit() and 30 <= int(auto_breed_input.text) <= 90
+            auto_breed_is_valid = auto_breed_input.text.isdigit() and 10 <= int(auto_breed_input.text) <= 90
             auto_breed_input.border_color = VALID_FITNESS_INPUT_COLOR if auto_breed_is_valid else INVALID_FITNESS_INPUT_COLOR
             auto_breed_input.active_border_color = CYAN if auto_breed_is_valid else INVALID_FITNESS_INPUT_COLOR
 
@@ -970,7 +970,7 @@ def run_training_config_screen(
             speed_label = font.render("Max Speed (5–30)", True, DIM)
             screen.blit(speed_label, speed_label.get_rect(midright=(max_speed_input.rect.left - M // 2, max_speed_input.rect.centery)))
             max_speed_input.draw(screen, mono_speed)
-            auto_breed_label = font.render("Auto Breed (30–90s)", True, DIM)
+            auto_breed_label = font.render("Auto Breed (10–90s)", True, DIM)
             screen.blit(auto_breed_label, auto_breed_label.get_rect(midright=(auto_breed_input.rect.left - M // 2, auto_breed_input.rect.centery)))
             auto_breed_input.draw(screen, mono_speed)
             for diff_id, label, thumb, card_rect in map_cards:

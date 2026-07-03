@@ -16,8 +16,8 @@ LAYER_SIZES = [2, 3, 1]
 
 
 def test_submission_and_validation_population_sizes() -> None:
-    assert SUBMISSION_POPULATION_SIZE == 100
-    assert VALIDATION_POPULATION_SIZE == 100
+    assert SUBMISSION_POPULATION_SIZE == 50
+    assert VALIDATION_POPULATION_SIZE == 50
     candidates = _build_candidates(
         Car(LAYER_SIZES),
         Car(LAYER_SIZES),
@@ -25,7 +25,7 @@ def test_submission_and_validation_population_sizes() -> None:
         mutation_rate=0,
     )
 
-    assert len(candidates) == 100
+    assert len(candidates) == 50
 
 
 def test_submission_candidates_follow_parent_seed_reproducibly() -> None:

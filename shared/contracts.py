@@ -52,7 +52,7 @@ class RuntimeSettings:
     nickname: str = "player1"
     server_url: str = DEFAULT_SERVER_URL
     fps: int = 30
-    population_size: int = 50
+    population_size: int = 300
     mutation_rate: int = 90
     show_player: bool = True
     show_debug_overlay: bool = True
@@ -87,7 +87,7 @@ class RuntimeSettings:
             ),
             max_speed=max(5, min(30, int(data.get("max_speed", defaults.max_speed)))),
             auto_breed_seconds=max(
-                30, min(90, int(data.get("auto_breed_seconds", defaults.auto_breed_seconds)))
+                10, min(90, int(data.get("auto_breed_seconds", defaults.auto_breed_seconds)))
             ),
         )
 
