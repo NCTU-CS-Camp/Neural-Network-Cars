@@ -19,6 +19,7 @@ profile.json
 records.json
 settings.json
 shop_state.json
+configs/fitness_presets.json
 
 # Runtime-generated random track outputs
 Images/Tracks/randomGeneratedTrack.json
