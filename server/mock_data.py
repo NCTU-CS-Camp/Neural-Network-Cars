@@ -27,8 +27,8 @@ def build_mock_payload(index: int, seed: int) -> SubmissionPayload:
 
 def build_mock_result(index: int) -> ClientResult:
     if index % 4 == 0:
-        return ClientResult(True, 300 + index * 5, 4_000.0, 300 + index * 5)
-    return ClientResult(False, None, 500.0 + index * 150.0, 120 + index * 10)
+        return ClientResult(True, 300 + index * 5, 100.0, 300 + index * 5)
+    return ClientResult(False, None, min(99.0, 10.0 + index * 7.5), 120 + index * 10)
 
 
 def create_mock_submissions(

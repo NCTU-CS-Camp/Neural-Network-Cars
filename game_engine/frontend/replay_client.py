@@ -851,7 +851,7 @@ def _entry_result(client_result: dict[str, Any]) -> tuple[str, str]:
     """(value, unit) for a podium/tower result: lap seconds when completed, else progress."""
     if client_result.get("completed"):
         return f"{int(client_result['lap_ticks']) / FPS:.3f}", "SEC"
-    return f"{float(client_result['max_progress']):.0f}", "PROG"
+    return f"{float(client_result['max_progress']):.1f}", "%"
 
 
 def _user_font(
@@ -1312,7 +1312,7 @@ def _draw_tower_row(
         else:
             text, color = f"+{(int(client_result['lap_ticks']) - leader_ticks) / FPS:.3f}", SILVER
     else:
-        text, color = f"{float(client_result['max_progress']):.0f}", DIM
+        text, color = f"{float(client_result['max_progress']):.1f}%", DIM
     interval = fonts["row_int"].render(text, True, color)
     screen.blit(interval, (x + width - interval.get_width() - 6, y + 8))
 

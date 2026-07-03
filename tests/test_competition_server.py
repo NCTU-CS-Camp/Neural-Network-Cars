@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ from server.competition_config import STAGNATION_TICKS
 from server.competition_maps import get_competition_map
 from server.evaluation_worker import BatchWorker
 from server.storage import CompetitionStorage
+from server.storage import LEGACY_PIXEL_PROGRESS_SCHEMA_VERSION, SCHEMA_VERSION
 from shared.contracts import ALLOWED_SKIN_IDS
 
 
@@ -34,7 +36,7 @@ def make_payload(
     username: str = "tester",
     completed: bool = False,
     lap_ticks: int | None = None,
-    max_progress: float = 1_000.0,
+    max_progress: float = 25.0,
     ticks_to_max_progress: int = 300,
 ) -> dict:
     if completed and lap_ticks is None:
@@ -415,7 +417,7 @@ def test_batch_boundary_seals_queued_submissions_and_persists_snapshot(tmp_path)
 
     storage.set_phase_one_batch_minutes(2)
     payload = SubmissionPayload("1", "ada", [[0.0] * 36, [0.0] * 24], [[0.0] * 6, [0.0] * 4])
-    storage.create_submission("easy", payload, ClientResult(False, None, 1_200.0, 300))
+    storage.create_submission("easy", payload, ClientResult(False, None, 30.0, 300))
 
     assert storage.seal_phase_one_batches(now=clock.current) == 0
     clock.advance(minutes=1)
@@ -428,6 +430,66 @@ def test_batch_boundary_seals_queued_submissions_and_persists_snapshot(tmp_path)
     assert snapshot["snapshot"]["submission_ids"] == [leaderboard[0]["submission_id"]]
     assert snapshot["window_start"].endswith("10:00:00+00:00")
     assert snapshot["window_end"].endswith("10:02:00+00:00")
+
+
+def test_legacy_pixel_progress_is_migrated_without_resetting_submissions(tmp_path):
+    clock = Clock()
+    database = tmp_path / "competition.db"
+    storage = CompetitionStorage(database, clock=clock)
+    from shared.contracts import ClientResult, SubmissionPayload
+
+    total_length = get_competition_map("easy").total_length_px
+    payload = SubmissionPayload(
+        "1",
+        "ada",
+        [[0.0] * 36, [0.0] * 24],
+        [[0.0] * 6, [0.0] * 4],
+    )
+    submission = storage.create_submission(
+        "easy",
+        payload,
+        ClientResult(False, None, 25.0, 300),
+    )
+    assert storage.seal_due_batches(now=clock.current, force=True) == 1
+
+    with sqlite3.connect(database) as connection:
+        old_result = {
+            "completed": False,
+            "lap_ticks": None,
+            "max_progress": total_length * 0.25,
+            "ticks_to_max_progress": 300,
+        }
+        connection.execute(
+            "UPDATE submissions SET client_result_json = ? WHERE submission_id = ?",
+            (json.dumps(old_result), submission["submission_id"]),
+        )
+        batch_id, snapshot_json = connection.execute(
+            "SELECT batch_id, snapshot_json FROM batches"
+        ).fetchone()
+        old_snapshot = json.loads(snapshot_json)
+        old_snapshot["leaderboard"][0]["client_result"] = old_result
+        connection.execute(
+            "UPDATE batches SET snapshot_json = ? WHERE batch_id = ?",
+            (json.dumps(old_snapshot), batch_id),
+        )
+        connection.execute(
+            "UPDATE competition_schema SET version = ?",
+            (LEGACY_PIXEL_PROGRESS_SCHEMA_VERSION,),
+        )
+
+    migrated = CompetitionStorage(database, clock=clock)
+    leaderboard = migrated.leaderboard("easy")
+    snapshot = migrated.latest_snapshot("easy")
+
+    assert leaderboard[0]["submission_id"] == submission["submission_id"]
+    assert leaderboard[0]["client_result"]["max_progress"] == 25.0
+    assert snapshot is not None
+    assert snapshot["snapshot"]["leaderboard"][0]["client_result"]["max_progress"] == 25.0
+    with sqlite3.connect(database) as connection:
+        version = connection.execute(
+            "SELECT version FROM competition_schema"
+        ).fetchone()[0]
+    assert version == SCHEMA_VERSION
 
 
 def test_process_due_batch_endpoint_does_not_force_current_window(tmp_path):
@@ -445,7 +507,7 @@ def test_process_due_batch_endpoint_does_not_force_current_window(tmp_path):
 def test_ranking_uses_client_result_and_keeps_individual_historical_best(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
-        first = submit(client, "easy", username="ada", max_progress=2_000.0)
+        first = submit(client, "easy", username="ada", max_progress=80.0)
         submit(client, "easy", group_id="2", username="ada", completed=True, lap_ticks=520)
         submit(client, "easy", group_id="3", username="ben", completed=True, lap_ticks=480)
         assert process_now(client) == 3
@@ -539,10 +601,10 @@ def test_server_does_not_log_received_submission_payload(tmp_path, capsys):
 def test_admin_soft_delete_removes_submission_and_recomputes_best(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
-        first = submit(client, "easy", username="ada", max_progress=2_000.0)
+        first = submit(client, "easy", username="ada", max_progress=80.0)
         process_now(client)
         clock.advance(minutes=1)
-        second = submit(client, "easy", username="ada", max_progress=1_000.0)
+        second = submit(client, "easy", username="ada", max_progress=40.0)
         process_now(client)
 
         deleted = client.delete(
@@ -611,8 +673,8 @@ def test_ranking_prefers_completion_then_lap_ticks_then_progress_then_time(tmp_p
     with make_client(tmp_path, clock) as client:
         submit(client, "hard", username="slow_finish", completed=True, lap_ticks=600)
         submit(client, "hard", username="fast_finish", completed=True, lap_ticks=500)
-        submit(client, "hard", username="far", max_progress=3_000.0, ticks_to_max_progress=400)
-        submit(client, "hard", username="near", max_progress=2_000.0, ticks_to_max_progress=100)
+        submit(client, "hard", username="far", max_progress=75.0, ticks_to_max_progress=400)
+        submit(client, "hard", username="near", max_progress=50.0, ticks_to_max_progress=100)
         process_now(client)
         leaderboard = client.get("/v2/competitions/hard/leaderboard").json()
 
@@ -739,12 +801,22 @@ def test_submission_validation_rejects_bad_client_result_shape_and_non_finite_ge
             headers={"Content-Type": "application/json", **headers},
         )
 
+        bad_percentage = make_payload()
+        bad_percentage["client_result"]["max_progress"] = 100.01
+        percentage_response = client.post(
+            "/v2/competitions/easy/submissions",
+            json=bad_percentage,
+            headers=headers,
+        )
+
     assert result_response.status_code == 400
     assert "lap_ticks" in result_response.json()["detail"]
     assert shape_response.status_code == 400
     assert "weights[0]" in shape_response.json()["detail"]
     assert finite_response.status_code == 400
     assert "finite" in finite_response.json()["detail"]
+    assert percentage_response.status_code == 422
+    assert "max_progress" in str(percentage_response.json()["detail"])
 
 
 def test_public_endpoints_do_not_expose_models_and_protected_replay_returns_top_15(tmp_path):

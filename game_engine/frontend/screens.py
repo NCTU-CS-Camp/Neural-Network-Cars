@@ -1413,8 +1413,9 @@ def _upload_result_lines(record: TrainingRecord) -> list[str]:
             progress_text = f"耗時 {format_ticks_as_seconds(r.get('lap_ticks'))}"
         else:
             mp = r.get("max_progress") or 0.0
-            total_length = _competition_total_length_px(comp_id)
-            if total_length:
+            if r.get("max_progress_unit") == "percent":
+                progress_text = f"最遠進度 {mp:.1f}%"
+            elif total_length := _competition_total_length_px(comp_id):
                 progress_text = f"最遠進度 {min(100.0, mp / total_length * 100):.1f}%"
             else:
                 progress_text = f"最遠進度 {mp:.1f} 像素"
@@ -1864,7 +1865,7 @@ def _check_eligibility_screen(
         font = _font()
         width, height = screen.get_size()
         back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
-        start_button = Button("開始評測", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
+        start_button = Button("開始評分", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
 
         resize = False
         while not resize:
@@ -2359,6 +2360,9 @@ def _submit_result_screen(
         )
     )
     survival_text = f"存活率：{survival_rate:.0%}"
+    if not _total_length:
+        raise ValueError(f"無法取得 {competition_id} 賽道總長度")
+    submission_result = client_result.as_progress_percentage(_total_length)
 
     while True:  # outer: rebuild on VIDEORESIZE
         font = _font()
@@ -2397,7 +2401,7 @@ def _submit_result_screen(
                             server_url,
                             competition_id,
                             payload,
-                            client_result,
+                            submission_result,
                             token=token,
                         )
                         submitted = True
@@ -2408,9 +2412,10 @@ def _submit_result_screen(
                         else:
                             upload_status = "network_error"
                         record.upload_results[competition_id] = {
-                            "completed": client_result.completed,
-                            "lap_ticks": client_result.lap_ticks,
-                            "max_progress": client_result.max_progress,
+                            "completed": submission_result.completed,
+                            "lap_ticks": submission_result.lap_ticks,
+                            "max_progress": submission_result.max_progress,
+                            "max_progress_unit": "percent",
                             "survival_rate": survival_rate,
                             "status": upload_status,
                             "uploaded_at": datetime.now(UTC_PLUS_8).isoformat(timespec="seconds"),

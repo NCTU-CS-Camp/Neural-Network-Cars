@@ -53,13 +53,13 @@ def test_manual_client_result_supports_completed_and_incomplete_results():
     completed = build_manual_client_result(
         completed="true",
         lap_ticks="412",
-        max_progress="4380.5",
+        max_progress="100.0",
         ticks_to_max_progress="412",
     )
     incomplete = build_manual_client_result(
         completed="false",
         lap_ticks="",
-        max_progress="1250.5",
+        max_progress="28.5",
         ticks_to_max_progress="840",
     )
 
@@ -67,7 +67,7 @@ def test_manual_client_result_supports_completed_and_incomplete_results():
     assert completed.lap_ticks == 412
     assert incomplete.completed is False
     assert incomplete.lap_ticks is None
-    assert incomplete.max_progress == 1250.5
+    assert incomplete.max_progress == 28.5
 
 
 def test_manual_client_result_rejects_inconsistent_lap_ticks():
@@ -78,6 +78,20 @@ def test_manual_client_result_rejects_inconsistent_lap_ticks():
             max_progress="10",
             ticks_to_max_progress="4",
         )
+
+
+def test_client_result_converts_pixel_progress_to_api_percentage():
+    result = ClientResult(
+        completed=False,
+        lap_ticks=None,
+        max_progress=989.0322580645161,
+        ticks_to_max_progress=98,
+    )
+
+    converted = result.as_progress_percentage(4_000.0)
+
+    assert converted.max_progress == 24.725806
+    assert converted.ticks_to_max_progress == 98
 
 
 def test_parse_bool_accepts_ui_friendly_values():
@@ -117,6 +131,7 @@ def test_generated_client_result_is_test_only_incomplete_result():
     assert result.lap_ticks is None
     assert math.isfinite(result.max_progress)
     assert result.max_progress >= 0.0
+    assert result.max_progress <= 100.0
     assert 0 <= result.ticks_to_max_progress <= FRAME_LIMIT
 
 

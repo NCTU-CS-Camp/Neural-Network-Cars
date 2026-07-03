@@ -29,7 +29,8 @@ from server.models import (
 from shared.contracts import ClientResult, SubmissionPayload
 
 
-SCHEMA_VERSION = "trusted-client-auth-metadata"
+LEGACY_PIXEL_PROGRESS_SCHEMA_VERSION = "trusted-client-auth-metadata"
+SCHEMA_VERSION = "trusted-client-auth-metadata-progress-percent"
 SESSION_LIFETIME = timedelta(hours=12)
 
 
@@ -73,7 +74,13 @@ class CompetitionStorage:
                 "CREATE TABLE IF NOT EXISTS competition_schema (version TEXT NOT NULL)"
             )
             row = connection.execute("SELECT version FROM competition_schema LIMIT 1").fetchone()
-            if row is None or row["version"] != SCHEMA_VERSION:
+            if row is not None and row["version"] == LEGACY_PIXEL_PROGRESS_SCHEMA_VERSION:
+                self._migrate_progress_to_percentage(connection)
+                connection.execute(
+                    "UPDATE competition_schema SET version = ?",
+                    (SCHEMA_VERSION,),
+                )
+            elif row is None or row["version"] != SCHEMA_VERSION:
                 self._replace_schema(connection)
 
             columns = {
@@ -108,6 +115,54 @@ class CompetitionStorage:
                     PHASE_ONE_BATCH_MINUTES,
                 ),
             )
+
+    def _migrate_progress_to_percentage(self, connection: sqlite3.Connection) -> None:
+        """Convert pre-percentage submission and snapshot progress without losing data."""
+        totals = {
+            identifier.value: get_competition_map(identifier).total_length_px
+            for identifier in CompetitionId
+        }
+
+        rows = connection.execute(
+            "SELECT submission_id, competition_id, client_result_json FROM submissions"
+        ).fetchall()
+        for row in rows:
+            result = json.loads(row["client_result_json"])
+            total_length = totals[str(row["competition_id"])]
+            result["max_progress"] = self._pixel_progress_percentage(
+                result.get("max_progress", 0.0),
+                total_length,
+            )
+            connection.execute(
+                "UPDATE submissions SET client_result_json = ? WHERE submission_id = ?",
+                (json.dumps(result), row["submission_id"]),
+            )
+
+        batch_rows = connection.execute(
+            "SELECT batch_id, competition_id, snapshot_json FROM batches"
+        ).fetchall()
+        for row in batch_rows:
+            snapshot = json.loads(row["snapshot_json"])
+            total_length = totals[str(row["competition_id"])]
+            for entry in snapshot.get("leaderboard", []):
+                result = entry.get("client_result")
+                if isinstance(result, dict):
+                    result["max_progress"] = self._pixel_progress_percentage(
+                        result.get("max_progress", 0.0),
+                        total_length,
+                    )
+            connection.execute(
+                "UPDATE batches SET snapshot_json = ? WHERE batch_id = ?",
+                (json.dumps(snapshot), row["batch_id"]),
+            )
+
+    @staticmethod
+    def _pixel_progress_percentage(value: Any, total_length_px: float) -> float:
+        progress_px = float(value)
+        return round(
+            min(100.0, max(0.0, progress_px / total_length_px * 100.0)),
+            6,
+        )
 
     def _replace_schema(self, connection: sqlite3.Connection) -> None:
         connection.executescript(

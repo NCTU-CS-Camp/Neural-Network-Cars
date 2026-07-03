@@ -183,7 +183,7 @@ Competition test main 的操作：
 - `E`、`H`、`F`：切換 Easy、Hard、Final competition map；切圖會保留目前 weights。
 - 左鍵選兩台車、`B` 手動 breed；或按 `G` 自動挑目前分數最高的兩台車 breed。
 - `V`：用目前 best car 在選定 competition map 上跑一次，產生 test-only `client_result`。
-- `O`：切換 manual result override，可手動輸入 completed、lap ticks、max progress 與 ticks。
+- `O`：切換 manual result override，可手動輸入 completed、lap ticks、`max_progress` 百分比（`0–100`）與 ticks。
 - `U`：先呼叫 eligibility API；可提交時才送出目前 best car weights、`client_result`、`skin_id` 與 `max_speed`。
 - 訓練紀錄會保存開始訓練時已裝備的商店 `skin_id`；稍後從該紀錄 Upload 時會沿用這個皮膚。
 - `P`：用 admin token 呼叫 `Run Snapshot Now`，讓 queued submissions 立即進 leaderboard/replay。
@@ -196,7 +196,7 @@ Easy/Hard 對同一 `(group_id, username)` 各自有一段 cooldown，長度由 
 
 - Easy/Hard：每個 `(group_id, username)` 只保留歷史最佳 completed submission。
 - Final：每個 `group_id` 只顯示小組最佳 model；username 顯示實際代表提交者。
-- 完成模型依圈速排序；未完成模型依最大 progress、到達該 progress 的 tick 排序。
+- 完成模型依圈速排序；未完成模型依最大圈進度百分比（`0–100`）、到達該進度的 tick 排序。
 - queued submission 會在下一個 snapshot 後才進入排行榜。
 - Public leaderboard 不需登入；登入後頁面底部 sticky bar 會顯示目前 tab 的個人成績、next submission time 與 submission history；Final tab 會顯示小組代表成績、代表提交者與自己的最新提交。
 - Group 顯示統一使用 `Group 8` 這種格式。

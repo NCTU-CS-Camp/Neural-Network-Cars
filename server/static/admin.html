@@ -63,7 +63,7 @@
     const token = document.getElementById("token"), loginStatus = document.getElementById("login-status"), adminContent = document.getElementById("admin-content"), stage = document.getElementById("stage"), interval = document.getElementById("interval"), output = document.getElementById("output"), stateEl = document.getElementById("state"), mapsEl = document.getElementById("maps"), usersEl = document.getElementById("users"), submissionsEl = document.getElementById("submissions");
     function headers() { return {"Content-Type":"application/json", "X-Admin-Token":token.value}; }
     function escapeHtml(v){ return String(v).replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[c]); }
-    function resultText(r){ return r.completed ? `${(Number(r.lap_ticks)/30).toFixed(3)}s` : `${Number(r.max_progress).toFixed(0)} prog`; }
+    function resultText(r){ return r.completed ? `${(Number(r.lap_ticks)/30).toFixed(3)}s` : `${Number(r.max_progress).toFixed(1)}%`; }
     function groupLabel(groupId){ return `Group ${escapeHtml(groupId)}`; }
     function setLoginStatus(message, isError=false) { loginStatus.textContent = message; loginStatus.classList.toggle("error", isError); }
     async function call(url, options) { const response = await fetch(url, options); const text = await response.text(); output.textContent = `${response.status} ${response.statusText}\n${text}`; await load(); }

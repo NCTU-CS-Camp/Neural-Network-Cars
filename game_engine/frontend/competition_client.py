@@ -659,7 +659,7 @@ def evaluate_car_result(
                     lap_ticks=tracker.lap_ticks,
                     max_progress=tracker.max_progress,
                     ticks_to_max_progress=tracker.ticks_to_max_progress,
-                )
+                ).as_progress_percentage(tracker.total_length_px)
             test_car.feedforward()
             test_car.takeAction()
         except (IndexError, pygame.error):
@@ -673,7 +673,7 @@ def evaluate_car_result(
         lap_ticks=None,
         max_progress=max_progress,
         ticks_to_max_progress=ticks_to_max_progress,
-    )
+    ).as_progress_percentage(tracker.total_length_px)
 
 
 def build_manual_client_result(

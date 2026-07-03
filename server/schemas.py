@@ -44,7 +44,7 @@ class ClientResultIn(BaseModel):
 
     completed: bool
     lap_ticks: int | None
-    max_progress: float
+    max_progress: float = Field(ge=0, le=100)
     ticks_to_max_progress: int
 
     def to_client_result(self) -> ClientResult:

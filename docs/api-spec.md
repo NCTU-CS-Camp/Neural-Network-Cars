@@ -73,13 +73,14 @@ Request body:
   "client_result": {
     "completed": false,
     "lap_ticks": null,
-    "max_progress": 1250.5,
+    "max_progress": 28.5,
     "ticks_to_max_progress": 840
   }
 }
 ```
 
-All genes and progress values must be finite. Incomplete runs require `lap_ticks: null`;
+All genes and progress values must be finite. `max_progress` is the percentage of
+the lap reached and must be between `0` and `100`. Incomplete runs require `lap_ticks: null`;
 completed runs require a positive `lap_ticks`. Tick values cannot exceed 900.
 `skin_id` is optional and defaults to `0`; valid values are shop catalog IDs `0` through `21`. Replay resolves non-default IDs through `game_engine.frontend.shop.renderer` and the assets under `Images/Skins/`.
 `max_speed` or `maxSpeed` is optional and defaults to `10.0`; valid range is 5 through 30.

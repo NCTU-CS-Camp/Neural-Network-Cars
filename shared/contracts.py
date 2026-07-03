@@ -266,9 +266,9 @@ class ClientResult:
             raise ValueError(
                 "client_result.max_progress must be a finite number"
             ) from exc
-        if not math.isfinite(max_progress) or max_progress < 0:
+        if not math.isfinite(max_progress) or not 0 <= max_progress <= 100:
             raise ValueError(
-                "client_result.max_progress must be finite and non-negative"
+                "client_result.max_progress must be a finite percentage from 0 to 100"
             )
 
         ticks_raw = data.get("ticks_to_max_progress")
@@ -291,6 +291,21 @@ class ClientResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def as_progress_percentage(self, total_length_px: float) -> ClientResult:
+        """Convert a locally tracked pixel distance to the API's 0-100 percentage."""
+        if not math.isfinite(total_length_px) or total_length_px <= 0:
+            raise ValueError("total track length must be finite and positive")
+        percentage = round(
+            min(100.0, max(0.0, self.max_progress / total_length_px * 100.0)),
+            6,
+        )
+        return ClientResult(
+            completed=self.completed,
+            lap_ticks=self.lap_ticks,
+            max_progress=percentage,
+            ticks_to_max_progress=self.ticks_to_max_progress,
+        )
 
     def ranking_key(self) -> tuple[int, int, float, int]:
         """Lower keys rank ahead of higher keys."""

@@ -9,7 +9,7 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 ## Current State
 
 - FastAPI v2 server lives in `server/app.py`.
-- SQLite persistence and ranking live in `server/storage.py`; schema version is `trusted-client-auth-metadata`.
+- SQLite persistence and ranking live in `server/storage.py`; schema version is `trusted-client-auth-metadata-progress-percent` and upgrades the previous pixel-based `max_progress` data in place.
 - Fixed competition maps are loaded from `maps/kaggle_easy.*`, `maps/kaggle_hard.*`, and `maps/kaggle_final.*` through `server/competition_maps.py`.
 - Shared payload contracts live in `shared/contracts.py`.
 - Phase 1 has independent `easy` and `hard` competitions keyed by `(group_id, username)`.
@@ -52,7 +52,7 @@ Submission adds `client_result`:
 {
   "completed": false,
   "lap_ticks": null,
-  "max_progress": 1250.5,
+    "max_progress": 28.5,
   "ticks_to_max_progress": 840
 }
 ```
@@ -85,12 +85,13 @@ Validation rules:
 - Completed runs require positive `lap_ticks`.
 - Incomplete runs require `lap_ticks: null`.
 - Tick values must not exceed the configured frame limit.
+- `max_progress` is a lap percentage from `0` through `100`, not a pixel distance.
 
 Ranking order:
 
 - Completed submissions rank before incomplete submissions.
 - Completed submissions sort by lowest `lap_ticks`.
-- Incomplete submissions sort by highest `max_progress`.
+- Incomplete submissions sort by highest `max_progress` percentage.
 - Ties use lowest `ticks_to_max_progress`, earliest accepted submission time, then submission ID.
 - Easy/Hard keep each `(group_id, username)` identity's historical best.
 - Final keeps each `group_id` identity's historical best non-deleted completed submission, while individual members still have separate cooldowns.
