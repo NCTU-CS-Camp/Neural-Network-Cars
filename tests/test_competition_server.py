@@ -128,6 +128,15 @@ def process_now(client: TestClient) -> int:
     return int(response.json()["processed"])
 
 
+def process_due(client: TestClient) -> int:
+    response = client.post(
+        "/v2/admin/batches/process-due",
+        headers={"X-Admin-Token": "secret"},
+    )
+    assert response.status_code == 200
+    return int(response.json()["processed"])
+
+
 def test_batch_worker_retries_after_transient_failure(caplog):
     recovered = threading.Event()
 
@@ -418,6 +427,18 @@ def test_batch_boundary_seals_queued_submissions_and_persists_snapshot(tmp_path)
     assert snapshot["snapshot"]["submission_ids"] == [leaderboard[0]["submission_id"]]
     assert snapshot["window_start"].endswith("10:00:00+00:00")
     assert snapshot["window_end"].endswith("10:02:00+00:00")
+
+
+def test_process_due_batch_endpoint_does_not_force_current_window(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        submit(client, "easy", username="ada")
+
+        assert process_due(client) == 0
+
+        clock.advance(minutes=1)
+
+        assert process_due(client) == 1
 
 
 def test_ranking_uses_client_result_and_keeps_individual_historical_best(tmp_path):
@@ -954,7 +975,7 @@ def test_replay_stopped_car_sprite_draws_with_alpha():
     assert surface.get_at((40, 40)).a == 112
 
 
-def test_snapshot_lights_overlay_does_not_render_numeric_countdown():
+def test_snapshot_lights_overlay_does_not_render_text():
     from game_engine.frontend.replay_client import (
         ReplayStatus,
         _draw_snapshot_lights_overlay,
@@ -992,7 +1013,20 @@ def test_snapshot_lights_overlay_does_not_render_numeric_countdown():
         fonts,  # type: ignore[arg-type]
     )
 
-    assert panel_font.rendered == ["SNAPSHOT", "SNAPSHOT READY"]
+    assert panel_font.rendered == []
+
+
+def test_snapshot_countdown_keeps_final_second_lit(monkeypatch):
+    from game_engine.frontend import replay_client
+
+    target = datetime(2026, 7, 3, 10, 5, tzinfo=UTC)
+    state = {"config": {"next_snapshot_at": target.isoformat()}}
+
+    monkeypatch.setattr(replay_client.time, "time", lambda: target.timestamp() - 0.9)
+    assert replay_client._snapshot_countdown_text(state) == "0:01"
+
+    monkeypatch.setattr(replay_client.time, "time", lambda: target.timestamp())
+    assert replay_client._snapshot_countdown_text(state) == "0:00"
 
 
 def test_phase_one_draw_ticks_both_sides_without_short_circuit():
@@ -1038,6 +1072,52 @@ def test_phase_one_draw_ticks_both_sides_without_short_circuit():
     assert finished is False
     assert easy.ticks == 1
     assert hard.ticks == 1
+
+
+def test_phase_one_draw_can_pause_ticks_during_snapshot_sync():
+    from game_engine.frontend.replay_client import ReplayStatus, _draw_phase_one, _fonts
+
+    class Track:
+        front = pygame.Surface((1600, 900))
+
+    class Session:
+        competition_id = "demo"
+        track = Track()
+        cars = []
+        leaderboard = []
+        leaderboard_signature = ()
+        leaderboard_revealed = True
+        reveal_highlight_until = 0.0
+        has_cars = True
+        stopped = False
+
+        def __init__(self) -> None:
+            self.ticks = 0
+
+        def tick(self) -> bool:
+            self.ticks += 1
+            return False
+
+    pygame.init()
+    screen = pygame.Surface((1600, 900))
+    fonts = _fonts()
+    easy = Session()
+    hard = Session()
+
+    finished = _draw_phase_one(  # type: ignore[arg-type]
+        screen,
+        easy,
+        hard,
+        fonts,
+        ReplayStatus("等待新快照", snapshot_countdown="0:00", snapshot_waiting=True),
+        0.0,
+        {},
+        tick=False,
+    )
+
+    assert finished is False
+    assert easy.ticks == 0
+    assert hard.ticks == 0
 
 
 def test_snapshot_boundary_wait_triggers_once_for_sessions_with_cars():
@@ -1117,6 +1197,72 @@ def test_snapshot_boundary_wait_ignores_empty_sessions_only():
         None,
         wall_time=wall_time,
     ) == boundary
+
+
+def test_snapshot_boundary_restart_replays_current_state_without_pending(monkeypatch):
+    from game_engine.frontend import replay_client
+
+    loaded: list[str] = []
+
+    def fake_load_replay_sessions(
+        state: dict[str, Any],
+        assets: object,
+        revealed_signatures: dict[str, object],
+    ) -> dict[str, object]:
+        del assets, revealed_signatures
+        loaded.append(str(state["name"]))
+        return {"easy": state["name"]}
+
+    monkeypatch.setattr(replay_client, "load_replay_sessions", fake_load_replay_sessions)
+
+    state, sessions, pending, hold_until, wait_boundary = (
+        replay_client._restart_snapshot_boundary_cycle(
+            {"name": "current"},
+            None,
+            object(),  # type: ignore[arg-type]
+            {},  # type: ignore[arg-type]
+        )
+    )
+
+    assert state == {"name": "current"}
+    assert sessions == {"easy": "current"}
+    assert pending is None
+    assert hold_until is None
+    assert wait_boundary is None
+    assert loaded == ["current"]
+
+
+def test_snapshot_boundary_restart_prefers_pending_state(monkeypatch):
+    from game_engine.frontend import replay_client
+
+    loaded: list[str] = []
+
+    def fake_load_replay_sessions(
+        state: dict[str, Any],
+        assets: object,
+        revealed_signatures: dict[str, object],
+    ) -> dict[str, object]:
+        del assets, revealed_signatures
+        loaded.append(str(state["name"]))
+        return {"easy": state["name"]}
+
+    monkeypatch.setattr(replay_client, "load_replay_sessions", fake_load_replay_sessions)
+
+    state, sessions, pending, hold_until, wait_boundary = (
+        replay_client._restart_snapshot_boundary_cycle(
+            {"name": "current"},
+            {"name": "pending"},
+            object(),  # type: ignore[arg-type]
+            {},  # type: ignore[arg-type]
+        )
+    )
+
+    assert state == {"name": "pending"}
+    assert sessions == {"easy": "pending"}
+    assert pending is None
+    assert hold_until is None
+    assert wait_boundary is None
+    assert loaded == ["pending"]
 
 
 def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):

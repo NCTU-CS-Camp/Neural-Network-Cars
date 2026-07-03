@@ -71,6 +71,8 @@ CAR_RAMP: list[Color] = [RED, OFFWHITE, SILVER, GOLD, (142, 145, 153), RED_BRIGH
 REPLAY_PROGRESS_DISTANCE_PX = 24.0
 REPLAY_HOLD_SECONDS = 3.0
 REPLAY_FETCH_SECONDS = 5.0
+SNAPSHOT_SYNC_RETRY_SECONDS = 0.5
+SNAPSHOT_SYNC_TIMEOUT_SECONDS = 6.0
 LEADERBOARD_REVEAL_HIGHLIGHT_SECONDS = 2.0
 VIRTUAL_SIZE = SCREEN_SIZE
 SNAPSHOT_WAIT_LABEL = "等待新快照"
@@ -230,6 +232,13 @@ def run(
     hold_until: float | None = None
     last_handled_snapshot_boundary: str | None = None
     snapshot_wait_boundary: str | None = None
+    snapshot_sync_base_identity: tuple[
+        str,
+        int,
+        tuple[tuple[str, LeaderboardSignature], ...],
+    ] | None = None
+    snapshot_sync_deadline: float | None = None
+    snapshot_sync_next_attempt_at = 0.0
 
     try:
         while True:
@@ -268,7 +277,57 @@ def run(
                             return
 
             now = time.monotonic()
-            if now >= next_fetch_at:
+            if snapshot_wait_boundary is not None:
+                if now >= snapshot_sync_next_attempt_at:
+                    try:
+                        process_due_snapshots(replay_url, replay_token)
+                        incoming_state = fetch_replay_state(replay_url, replay_token)
+                        incoming_identity = _replay_payload_identity(incoming_state)
+                        base_identity = snapshot_sync_base_identity
+                        incoming_boundary = _snapshot_boundary_iso(incoming_state)
+                        server_reached_boundary = (
+                            incoming_boundary != snapshot_wait_boundary
+                        )
+                        sync_timed_out = (
+                            snapshot_sync_deadline is not None
+                            and now >= snapshot_sync_deadline
+                        )
+                        if (
+                            base_identity is None
+                            or incoming_identity != base_identity
+                            or server_reached_boundary
+                            or sync_timed_out
+                        ):
+                            state = incoming_state
+                            sessions = load_replay_sessions(
+                                state,
+                                assets,
+                                revealed_signatures,
+                            )
+                            pending_state = None
+                            hold_until = None
+                            snapshot_wait_boundary = None
+                            snapshot_sync_base_identity = None
+                            snapshot_sync_deadline = None
+                        else:
+                            state = incoming_state
+                            snapshot_sync_next_attempt_at = (
+                                now + SNAPSHOT_SYNC_RETRY_SECONDS
+                            )
+                        next_fetch_at = now + REPLAY_FETCH_SECONDS
+                        status = "RUNNING"
+                    except (
+                        HTTPError,
+                        URLError,
+                        TimeoutError,
+                        json.JSONDecodeError,
+                        ValueError,
+                    ) as exc:
+                        status = f"Replay feed unavailable: {exc}"
+                        snapshot_sync_next_attempt_at = (
+                            now + SNAPSHOT_SYNC_RETRY_SECONDS
+                        )
+            elif now >= next_fetch_at:
                 try:
                     incoming_state = fetch_replay_state(replay_url, replay_token)
                     next_fetch_at = now + REPLAY_FETCH_SECONDS
@@ -282,17 +341,7 @@ def run(
                         pending_state = None
                         hold_until = None
                     elif _replay_payload_identity(incoming_state) != _replay_payload_identity(state):
-                        if snapshot_wait_boundary is not None:
-                            state = incoming_state
-                            sessions = load_replay_sessions(
-                                state,
-                                assets,
-                                revealed_signatures,
-                            )
-                            pending_state = None
-                            hold_until = None
-                            snapshot_wait_boundary = None
-                        elif _has_runnable_sessions(sessions):
+                        if _has_runnable_sessions(sessions):
                             pending_state = incoming_state
                         else:
                             state = incoming_state
@@ -306,11 +355,6 @@ def run(
                     else:
                         state = incoming_state
                         pending_state = None
-                        if (
-                            snapshot_wait_boundary is not None
-                            and _snapshot_boundary_iso(state) != snapshot_wait_boundary
-                        ):
-                            snapshot_wait_boundary = None
                     status = "RUNNING"
                 except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, ValueError) as exc:
                     status = f"Replay feed unavailable: {exc}"
@@ -326,17 +370,26 @@ def run(
                 if wait_boundary is not None:
                     last_handled_snapshot_boundary = wait_boundary
                     if pending_state is not None:
-                        state = pending_state
-                        sessions = load_replay_sessions(
+                        (
                             state,
+                            sessions,
+                            pending_state,
+                            hold_until,
+                            snapshot_wait_boundary,
+                        ) = _restart_snapshot_boundary_cycle(
+                            state,
+                            pending_state,
                             assets,
                             revealed_signatures,
                         )
-                        pending_state = None
-                        hold_until = None
-                        snapshot_wait_boundary = None
+                        snapshot_sync_base_identity = None
+                        snapshot_sync_deadline = None
                     else:
                         snapshot_wait_boundary = wait_boundary
+                        snapshot_sync_base_identity = _replay_payload_identity(state)
+                        snapshot_sync_deadline = now + SNAPSHOT_SYNC_TIMEOUT_SECONDS
+                        snapshot_sync_next_attempt_at = now
+                        hold_until = None
 
             virtual_screen.fill(BACKGROUND)
             if state is None:
@@ -364,6 +417,7 @@ def run(
                         display_status,
                         now,
                         revealed_signatures,
+                        tick=snapshot_wait_boundary is None,
                     )
                     hold_until, cycle_done = _handle_finished_cycle(
                         finished,
@@ -408,6 +462,7 @@ def run(
                         display_status,
                         now,
                         revealed_signatures,
+                        tick=snapshot_wait_boundary is None,
                     )
                     if runnable_sessions:
                         hold_until, cycle_done = _handle_finished_cycle(
@@ -489,6 +544,18 @@ def fetch_replay_state(server_url: str, token: str) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
+def process_due_snapshots(server_url: str, token: str) -> int:
+    request = Request(
+        server_url.rstrip("/") + "/v2/admin/batches/process-due",
+        data=b"",
+        headers={"X-Admin-Token": token},
+        method="POST",
+    )
+    with urlopen(request, timeout=5.0) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return int(payload.get("processed", 0))
+
+
 def _replay_status(
     stage: str,
     sessions: tuple[ReplaySession, ...],
@@ -542,8 +609,8 @@ def _snapshot_countdown_text(state: dict[str, Any]) -> str:
     except ValueError:
         return "-"
     remaining = max(0.0, target_time.timestamp() - time.time())
-    minutes = int(remaining // 60)
-    seconds = int(remaining % 60)
+    remaining_seconds = math.ceil(remaining) if remaining > 0 else 0
+    minutes, seconds = divmod(remaining_seconds, 60)
     return f"{minutes}:{seconds:02d}"
 
 
@@ -636,6 +703,27 @@ def _start_next_replay_cycle(
         None,
         None,
     )
+
+
+def _restart_snapshot_boundary_cycle(
+    state: dict[str, Any],
+    pending_state: dict[str, Any] | None,
+    assets: GameAssets,
+    revealed_signatures: dict[str, LeaderboardSignature],
+) -> tuple[
+    dict[str, Any] | None,
+    dict[str, ReplaySession],
+    dict[str, Any] | None,
+    None,
+    None,
+]:
+    next_state, sessions, next_pending, hold_until = _start_next_replay_cycle(
+        state,
+        pending_state,
+        assets,
+        revealed_signatures,
+    )
+    return next_state, sessions, next_pending, hold_until, None
 
 
 def load_replay_sessions(
@@ -832,6 +920,8 @@ def _draw_phase_one(
     status: ReplayStatus,
     now: float,
     revealed_signatures: dict[str, LeaderboardSignature],
+    *,
+    tick: bool = True,
 ) -> bool:
     _draw_header(screen, fonts, "PHASE 1", status)
     # Two symmetric columns (design PHASE1): map on top, then podium band + tower + footer.
@@ -853,6 +943,8 @@ def _draw_phase_one(
             rows=5,
             now=now,
         )
+    if not tick:
+        return False
     easy_finished = easy.tick()
     hard_finished = hard.tick()
     _reveal_leaderboard_if_stopped(easy, now, revealed_signatures)
@@ -867,6 +959,8 @@ def _draw_final(
     status: ReplayStatus,
     now: float,
     revealed_signatures: dict[str, LeaderboardSignature],
+    *,
+    tick: bool = True,
 ) -> bool:
     _draw_header(screen, fonts, "FINAL", status)
     accent = ACCENT["final"]
@@ -883,6 +977,8 @@ def _draw_final(
         rows=7,
         now=now,
     )
+    if not tick:
+        return False
     finished = session.tick()
     _reveal_leaderboard_if_stopped(session, now, revealed_signatures)
     return finished
@@ -1096,9 +1192,6 @@ def _draw_snapshot_lights_overlay(
         color = RED_BRIGHT if index < lit else BORDER
         pygame.draw.circle(screen, DARK_TEXT, center, radius + 5)
         pygame.draw.circle(screen, color, center, radius)
-    label_text = "SNAPSHOT READY" if status.snapshot_waiting else "SNAPSHOT"
-    label = fonts["panel"].render(label_text, True, WHITE)
-    screen.blit(label, (rect.centerx - label.get_width() // 2, y + 34))
 
 
 def _snapshot_seconds_from_status(status: ReplayStatus) -> float | None:
