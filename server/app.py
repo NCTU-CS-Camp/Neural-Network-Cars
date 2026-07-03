@@ -437,6 +437,13 @@ def create_app(
         require_admin(x_admin_token)
         return {"processed": worker.process_now()}
 
+    @app.post("/v2/admin/batches/process-due")
+    def admin_process_due_batches(
+        x_admin_token: str | None = Header(default=None),
+    ) -> dict[str, int]:
+        require_admin(x_admin_token)
+        return {"processed": worker.process_due()}
+
     @app.post("/v2/admin/replay/restart")
     def admin_restart_replay(
         x_admin_token: str | None = Header(default=None),

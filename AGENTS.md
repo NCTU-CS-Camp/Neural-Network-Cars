@@ -13,11 +13,12 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 - Fixed competition maps are loaded from `maps/kaggle_easy.*`, `maps/kaggle_hard.*`, and `maps/kaggle_final.*` through `server/competition_maps.py`.
 - Shared payload contracts live in `shared/contracts.py`.
 - Phase 1 has independent `easy` and `hard` competitions keyed by `(group_id, username)`.
-- Final is group-based; cooldown is keyed by `group_id`, and ranking keeps each group's best non-deleted completed snapshot entry.
+- Final is group-based for leaderboard/replay, but cooldown is keyed by `(group_id, username)`; ranking keeps each group's best non-deleted completed snapshot entry.
 - Student identity now requires admin-created classroom accounts. Public student actions use `Authorization: Bearer <token>` from `POST /v2/auth/login`; the request body identity must match the token.
 - Submissions persist optional replay metadata: `skin_id` (shop catalog IDs `0` through `21`) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
 - Training records snapshot the equipped shop `skin_id` when training starts; later Upload submissions reuse that recorded ID rather than the currently equipped skin.
 - Admin can create/update plaintext temporary passwords, bulk import users, enable/disable accounts, and soft-delete individual submissions.
+- Test classroom accounts are provided as CSV in `docs/test-users.csv`; they are imported manually through the admin bulk import UI, not auto-created at startup.
 - Public browser leaderboard is served at `/leaderboard`.
 - Admin page is served at `/admin`.
 - Admin UI initially shows only the token form; protected content is revealed after `GET /v2/admin/state` succeeds.
@@ -92,7 +93,7 @@ Ranking order:
 - Incomplete submissions sort by highest `max_progress`.
 - Ties use lowest `ticks_to_max_progress`, earliest accepted submission time, then submission ID.
 - Easy/Hard keep each `(group_id, username)` identity's historical best.
-- Final keeps each `group_id` identity's historical best non-deleted completed submission.
+- Final keeps each `group_id` identity's historical best non-deleted completed submission, while individual members still have separate cooldowns.
 
 ## API Surface
 
@@ -169,7 +170,7 @@ Current alignment gaps:
 
 Phase 1 Easy/Hard submissions enter storage as `queued` while stage is `phase_one`. Final submissions also enter storage as `queued` while stage is `final`; the same snapshot worker seals the active stage's queued submissions.
 
-`BatchWorker` in `server/evaluation_worker.py` polls periodically and calls `CompetitionStorage.seal_due_batches()`. Normal sealing uses the previous UTC boundary for the persisted snapshot interval as the cutoff. Admin demo sealing uses `POST /v2/admin/batches/run-now`, which force-seals currently queued submissions for the active stage. Admin can set the interval to 1, 2, or 5 minutes through `POST /v2/admin/config`; the selected interval controls Easy/Hard individual cooldown and Final group cooldown.
+`BatchWorker` in `server/evaluation_worker.py` polls periodically and calls `CompetitionStorage.seal_due_batches()`. Normal sealing uses the previous UTC boundary for the persisted snapshot interval as the cutoff. Admin demo sealing uses `POST /v2/admin/batches/run-now`, which force-seals currently queued submissions for the active stage. Admin can set the interval to 1, 2, or 5 minutes through `POST /v2/admin/config`; the selected interval controls Easy/Hard and Final individual cooldowns.
 
 Current batch behavior:
 
@@ -198,6 +199,7 @@ Known batching gaps:
 - New snapshots and admin stage changes are adopted only at a safe replay boundary, after the current replay cycle finishes.
 - The first replay cycle for a newly seen leaderboard hides that competition's leaderboard, then reveals it after the corresponding Easy/Hard/Final session stops; later cycles for the same snapshot show the leaderboard normally.
 - Once all replay cars are finished/crashed/stalled, the replay holds for 3 seconds and then either adopts pending replay data or restarts the current payload.
+- If the snapshot countdown reaches zero while runnable replay sessions are actively running, the client restarts the current payload from spawn once for that snapshot boundary and shows `等待新快照，先重播目前排名`; pending new snapshots still wait for a safe reveal boundary.
 - Browser leaderboard displays a live countdown for the active stage/tab and last update time.
 - Replay header uses large status/timing text for projection. `COMPETITION_REPLAY_FONT_PATH` can force a CJK-capable font if the OS fallback is insufficient.
 - The server still trusts submitted `client_result`; replay completion never overwrites ranking metrics.

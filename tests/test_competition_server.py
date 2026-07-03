@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pygame
@@ -122,6 +123,15 @@ def submit(client: TestClient, competition_id: str, **kwargs) -> dict:
 def process_now(client: TestClient) -> int:
     response = client.post(
         "/v2/admin/batches/run-now",
+        headers={"X-Admin-Token": "secret"},
+    )
+    assert response.status_code == 200
+    return int(response.json()["processed"])
+
+
+def process_due(client: TestClient) -> int:
+    response = client.post(
+        "/v2/admin/batches/process-due",
         headers={"X-Admin-Token": "secret"},
     )
     assert response.status_code == 200
@@ -339,6 +349,37 @@ def test_admin_can_import_users_and_plaintext_passwords_are_visible(tmp_path):
     assert "JSON import text is invalid" in invalid_json.json()["detail"]
 
 
+def test_test_users_csv_imports_one_hundred_login_accounts(tmp_path):
+    clock = Clock()
+    csv_text = Path("docs/test-users.csv").read_text(encoding="utf-8")
+    rows = csv_text.strip().splitlines()
+    with make_client(tmp_path, clock) as client:
+        imported = client.post(
+            "/v2/admin/users/import",
+            headers={"X-Admin-Token": "secret"},
+            json={"text": csv_text},
+        )
+        users = client.get(
+            "/v2/admin/users",
+            headers={"X-Admin-Token": "secret"},
+        )
+        login = client.post(
+            "/v2/auth/login",
+            json={
+                "group_id": "1",
+                "username": "Group01_User01",
+                "password": "Group01",
+            },
+        )
+
+    assert rows[0] == "group_id,username,password"
+    assert len(rows) == 101
+    assert imported.status_code == 200
+    assert imported.json()["imported"] == 100
+    assert len(users.json()) == 100
+    assert login.status_code == 200
+
+
 def test_phase_one_configured_interval_controls_cooldown(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
@@ -387,6 +428,18 @@ def test_batch_boundary_seals_queued_submissions_and_persists_snapshot(tmp_path)
     assert snapshot["snapshot"]["submission_ids"] == [leaderboard[0]["submission_id"]]
     assert snapshot["window_start"].endswith("10:00:00+00:00")
     assert snapshot["window_end"].endswith("10:02:00+00:00")
+
+
+def test_process_due_batch_endpoint_does_not_force_current_window(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        submit(client, "easy", username="ada")
+
+        assert process_due(client) == 0
+
+        clock.advance(minutes=1)
+
+        assert process_due(client) == 1
 
 
 def test_ranking_uses_client_result_and_keeps_individual_historical_best(tmp_path):
@@ -510,6 +563,39 @@ def test_admin_soft_delete_removes_submission_and_recomputes_best(tmp_path):
     ]
 
 
+def test_final_soft_delete_group_best_surfaces_next_best_group_submission(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        ada_headers = auth_headers(client, group_id="1", username="ada")
+        ben_headers = auth_headers(client, group_id="1", username="ben")
+        client.post(
+            "/v2/admin/stage",
+            headers={"X-Admin-Token": "secret"},
+            json={"stage": "final"},
+        )
+        slower = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=520),
+            headers=ada_headers,
+        ).json()
+        faster = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
+            headers=ben_headers,
+        ).json()
+        process_now(client)
+
+        deleted = client.delete(
+            f"/v2/admin/submissions/{faster['submission_id']}",
+            headers={"X-Admin-Token": "secret"},
+        )
+        leaderboard = client.get("/v2/competitions/final/leaderboard").json()
+
+    assert deleted.status_code == 200
+    assert leaderboard[0]["submission_id"] == slower["submission_id"]
+    assert leaderboard[0]["username"] == "ada"
+
+
 def test_chinese_username_round_trips_through_leaderboard(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
@@ -538,7 +624,7 @@ def test_ranking_prefers_completion_then_lap_ticks_then_progress_then_time(tmp_p
     ]
 
 
-def test_final_stage_queues_submissions_and_uses_group_cooldown(tmp_path):
+def test_final_stage_queues_submissions_and_uses_individual_cooldown_with_group_ranking(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
         ada_headers = auth_headers(client, group_id="1", username="ada")
@@ -559,7 +645,12 @@ def test_final_stage_queues_submissions_and_uses_group_cooldown(tmp_path):
             json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=520),
             headers=ada_headers,
         )
-        cooldown = client.post(
+        same_user_cooldown = client.post(
+            "/v2/finals/submissions",
+            json=make_payload(group_id="1", username="ada", completed=True, lap_ticks=500),
+            headers=ada_headers,
+        )
+        same_group_other_user = client.post(
             "/v2/finals/submissions",
             json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
             headers=ben_headers,
@@ -576,7 +667,7 @@ def test_final_stage_queues_submissions_and_uses_group_cooldown(tmp_path):
         clock.advance(minutes=1)
         better = client.post(
             "/v2/finals/submissions",
-            json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=400),
+            json=make_payload(group_id="1", username="ben", completed=True, lap_ticks=390),
             headers=ben_headers,
         )
         processed_better = process_now(client)
@@ -587,12 +678,14 @@ def test_final_stage_queues_submissions_and_uses_group_cooldown(tmp_path):
     assert first.status_code == 201
     assert first.json()["status"] == "queued"
     assert first.json()["next_submission_at"].endswith("10:02:00+00:00")
-    assert cooldown.status_code == 429
-    assert cooldown.json()["error"] == "submission_cooldown"
+    assert same_user_cooldown.status_code == 429
+    assert same_user_cooldown.json()["error"] == "submission_cooldown"
+    assert same_group_other_user.status_code == 201
     assert other.status_code == 201
     assert queued_leaderboard == []
-    assert processed == 2
-    assert [row["group_id"] for row in first_leaderboard] == ["2", "1"]
+    assert processed == 3
+    assert [row["group_id"] for row in first_leaderboard] == ["1", "2"]
+    assert first_leaderboard[0]["username"] == "ben"
     assert better.status_code == 201
     assert better.json()["status"] == "queued"
     assert processed_better == 1
@@ -908,6 +1001,60 @@ def test_replay_stopped_car_sprite_draws_with_alpha():
     assert surface.get_at((40, 40)).a == 112
 
 
+def test_snapshot_lights_overlay_does_not_render_text():
+    from game_engine.frontend.replay_client import (
+        ReplayStatus,
+        _draw_snapshot_lights_overlay,
+    )
+
+    class Session:
+        has_cars = True
+
+    class SpyFont:
+        def __init__(self) -> None:
+            self.rendered: list[str] = []
+
+        def render(self, text: str, antialias: bool, color: tuple[int, int, int]) -> pygame.Surface:
+            del antialias, color
+            self.rendered.append(text)
+            return pygame.Surface((max(1, len(text) * 8), 16), pygame.SRCALPHA)
+
+    pygame.init()
+    screen = pygame.Surface((220, 160), pygame.SRCALPHA)
+    panel_font = SpyFont()
+    fonts = {"panel": panel_font}
+
+    _draw_snapshot_lights_overlay(
+        screen,
+        pygame.Rect(0, 0, 220, 160),
+        Session(),  # type: ignore[arg-type]
+        ReplayStatus("Running replay", snapshot_countdown="0:03"),
+        fonts,  # type: ignore[arg-type]
+    )
+    _draw_snapshot_lights_overlay(
+        screen,
+        pygame.Rect(0, 0, 220, 160),
+        Session(),  # type: ignore[arg-type]
+        ReplayStatus("Waiting snapshot", snapshot_countdown="0:00", snapshot_waiting=True),
+        fonts,  # type: ignore[arg-type]
+    )
+
+    assert panel_font.rendered == []
+
+
+def test_snapshot_countdown_keeps_final_second_lit(monkeypatch):
+    from game_engine.frontend import replay_client
+
+    target = datetime(2026, 7, 3, 10, 5, tzinfo=UTC)
+    state = {"config": {"next_snapshot_at": target.isoformat()}}
+
+    monkeypatch.setattr(replay_client.time, "time", lambda: target.timestamp() - 0.9)
+    assert replay_client._snapshot_countdown_text(state) == "0:01"
+
+    monkeypatch.setattr(replay_client.time, "time", lambda: target.timestamp())
+    assert replay_client._snapshot_countdown_text(state) == "0:00"
+
+
 def test_phase_one_draw_ticks_both_sides_without_short_circuit():
     from game_engine.frontend.replay_client import ReplayStatus, _draw_phase_one, _fonts
 
@@ -951,6 +1098,197 @@ def test_phase_one_draw_ticks_both_sides_without_short_circuit():
     assert finished is False
     assert easy.ticks == 1
     assert hard.ticks == 1
+
+
+def test_phase_one_draw_can_pause_ticks_during_snapshot_sync():
+    from game_engine.frontend.replay_client import ReplayStatus, _draw_phase_one, _fonts
+
+    class Track:
+        front = pygame.Surface((1600, 900))
+
+    class Session:
+        competition_id = "demo"
+        track = Track()
+        cars = []
+        leaderboard = []
+        leaderboard_signature = ()
+        leaderboard_revealed = True
+        reveal_highlight_until = 0.0
+        has_cars = True
+        stopped = False
+
+        def __init__(self) -> None:
+            self.ticks = 0
+
+        def tick(self) -> bool:
+            self.ticks += 1
+            return False
+
+    pygame.init()
+    screen = pygame.Surface((1600, 900))
+    fonts = _fonts()
+    easy = Session()
+    hard = Session()
+
+    finished = _draw_phase_one(  # type: ignore[arg-type]
+        screen,
+        easy,
+        hard,
+        fonts,
+        ReplayStatus("等待新快照", snapshot_countdown="0:00", snapshot_waiting=True),
+        0.0,
+        {},
+        tick=False,
+    )
+
+    assert finished is False
+    assert easy.ticks == 0
+    assert hard.ticks == 0
+
+
+def test_snapshot_boundary_wait_triggers_once_for_sessions_with_cars():
+    from game_engine.frontend.replay_client import _snapshot_wait_boundary
+
+    class Session:
+        has_cars = True
+        stopped = False
+
+    boundary = "2026-07-03T10:05:00+00:00"
+    state = {"config": {"next_snapshot_at": boundary}}
+    sessions = {"easy": Session()}
+    wall_time = datetime.fromisoformat(boundary).timestamp() + 0.1
+
+    assert (
+        _snapshot_wait_boundary(
+            state,
+            sessions,  # type: ignore[arg-type]
+            None,
+            None,
+            wall_time=wall_time,
+        )
+        == boundary
+    )
+    assert (
+        _snapshot_wait_boundary(
+            state,
+            sessions,  # type: ignore[arg-type]
+            None,
+            boundary,
+            wall_time=wall_time,
+        )
+        is None
+    )
+
+
+def test_snapshot_boundary_wait_ignores_empty_sessions_only():
+    from game_engine.frontend.replay_client import _snapshot_wait_boundary
+
+    class RunningSession:
+        has_cars = True
+        stopped = False
+
+    class WaitingSession:
+        has_cars = False
+        stopped = False
+
+    class StoppedSession:
+        has_cars = True
+        stopped = True
+
+    boundary = "2026-07-03T10:05:00+00:00"
+    state = {"config": {"next_snapshot_at": boundary}}
+    wall_time = datetime.fromisoformat(boundary).timestamp() + 0.1
+
+    assert _snapshot_wait_boundary(
+        state,
+        {"easy": RunningSession()},  # type: ignore[arg-type]
+        123.0,
+        None,
+        wall_time=wall_time,
+    ) == boundary
+    assert (
+        _snapshot_wait_boundary(
+            state,
+            {"easy": WaitingSession()},  # type: ignore[arg-type]
+            None,
+            None,
+            wall_time=wall_time,
+        )
+        is None
+    )
+    assert _snapshot_wait_boundary(
+        state,
+        {"easy": StoppedSession()},  # type: ignore[arg-type]
+        None,
+        None,
+        wall_time=wall_time,
+    ) == boundary
+
+
+def test_snapshot_boundary_restart_replays_current_state_without_pending(monkeypatch):
+    from game_engine.frontend import replay_client
+
+    loaded: list[str] = []
+
+    def fake_load_replay_sessions(
+        state: dict[str, Any],
+        assets: object,
+        revealed_signatures: dict[str, object],
+    ) -> dict[str, object]:
+        del assets, revealed_signatures
+        loaded.append(str(state["name"]))
+        return {"easy": state["name"]}
+
+    monkeypatch.setattr(replay_client, "load_replay_sessions", fake_load_replay_sessions)
+
+    state, sessions, pending, hold_until, wait_boundary = (
+        replay_client._restart_snapshot_boundary_cycle(
+            {"name": "current"},
+            None,
+            object(),  # type: ignore[arg-type]
+            {},  # type: ignore[arg-type]
+        )
+    )
+
+    assert state == {"name": "current"}
+    assert sessions == {"easy": "current"}
+    assert pending is None
+    assert hold_until is None
+    assert wait_boundary is None
+    assert loaded == ["current"]
+
+
+def test_snapshot_boundary_restart_prefers_pending_state(monkeypatch):
+    from game_engine.frontend import replay_client
+
+    loaded: list[str] = []
+
+    def fake_load_replay_sessions(
+        state: dict[str, Any],
+        assets: object,
+        revealed_signatures: dict[str, object],
+    ) -> dict[str, object]:
+        del assets, revealed_signatures
+        loaded.append(str(state["name"]))
+        return {"easy": state["name"]}
+
+    monkeypatch.setattr(replay_client, "load_replay_sessions", fake_load_replay_sessions)
+
+    state, sessions, pending, hold_until, wait_boundary = (
+        replay_client._restart_snapshot_boundary_cycle(
+            {"name": "current"},
+            {"name": "pending"},
+            object(),  # type: ignore[arg-type]
+            {},  # type: ignore[arg-type]
+        )
+    )
+
+    assert state == {"name": "pending"}
+    assert sessions == {"easy": "pending"}
+    assert pending is None
+    assert hold_until is None
+    assert wait_boundary is None
+    assert loaded == ["pending"]
 
 
 def test_reset_preserves_stage_and_clears_submissions_and_snapshots(tmp_path):
@@ -1001,8 +1339,12 @@ def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
     assert "competitionUserToken" in page.text
     assert "My Runs" in page.text
     assert "Group ${" in page.text
+    assert "represented by" in page.text
     assert "Stage inactive" in page.text
     assert 'if(activeCompetition === "final" || !snapshotAt)' not in page.text
+    assert "function tag(username)" not in page.text
+    assert "replace(/[^a-z0-9]/gi" not in page.text
+    assert 'class="tag"' not in page.text
     assert "setInterval(renderTiming, 1000)" in page.text
     assert admin.status_code == 200
     assert "Run Snapshot Now" in admin.text

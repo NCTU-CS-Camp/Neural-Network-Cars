@@ -11,10 +11,11 @@ time, and the fixed Easy, Hard, and Final maps.
 
 - Phase 1 accepts `easy` and `hard` submissions from individual identities
   `(group_id, username)`.
-- Final accepts group submissions keyed by `group_id`; cooldown is group-based and the
-  leaderboard keeps each group's best non-deleted completed submission.
+- Final accepts submissions from individual identities `(group_id, username)`; cooldown is
+  per individual, while leaderboard/replay keep each group's best non-deleted completed
+  submission.
 - Configuration: 30 FPS, 900-frame limit, 180-tick stagnation limit, and an admin-selected
-  Phase 1 snapshot/cooldown interval of 1, 2, or 5 minutes.
+  snapshot/cooldown interval of 1, 2, or 5 minutes.
 
 ## Authentication
 
@@ -84,8 +85,8 @@ completed runs require a positive `lap_ticks`. Tick values cannot exceed 900.
 `max_speed` or `maxSpeed` is optional and defaults to `10.0`; valid range is 5 through 30.
 These two fields affect replay appearance/physics only and never change official ranking.
 
-Easy and Hard have separate individual cooldowns using the current snapshot interval.
-Final has group cooldown using the same interval. Cooldown failures return `429` with
+Easy, Hard, and Final have individual cooldowns using the current snapshot interval.
+Final ranking is still grouped by `group_id`. Cooldown failures return `429` with
 `error: submission_cooldown`; closed-stage submissions return `409`. Successful submissions
 enter `queued` state until the next snapshot seals the active stage.
 
