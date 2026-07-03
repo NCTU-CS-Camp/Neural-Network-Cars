@@ -39,6 +39,12 @@ class LoginIn(IdentityIn):
         return group_id, username, password
 
 
+class NicknameUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nickname: str = Field(min_length=1, max_length=20)
+
+
 class ClientResultIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -75,6 +81,7 @@ class SubmissionIn(IdentityIn):
 
 class AdminUserRequest(LoginIn):
     disabled: bool = False
+    nickname: str | None = Field(default=None, min_length=1, max_length=20)
 
 
 class AdminUserImportRequest(BaseModel):

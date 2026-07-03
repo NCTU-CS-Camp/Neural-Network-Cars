@@ -29,7 +29,7 @@ from shared.contracts import EXPECTED_LAYER_SIZES, SubmissionPayload
 
 
 Color = tuple[int, int, int]
-LeaderboardSignature = tuple[tuple[int, str], ...]
+LeaderboardSignature = tuple[tuple[int, str, str], ...]
 
 # ------------------------------------------------------------------ F1 "Podium Hero" palette
 # Presentation-only restyle (see docs / design handoff). The legacy names
@@ -145,7 +145,7 @@ class ReplayCar:
 
     @property
     def label(self) -> str:
-        return str(self.item.get("username", "unknown"))
+        return _display_name(self.item)
 
     def observe_position(self) -> None:
         current = (float(self.car.x), float(self.car.y))
@@ -617,7 +617,11 @@ def _snapshot_countdown_text(state: dict[str, Any]) -> str:
 
 def leaderboard_signature(leaderboard: list[dict[str, Any]]) -> LeaderboardSignature:
     return tuple(
-        (int(entry.get("rank", 0)), str(entry.get("submission_id", "")))
+        (
+            int(entry.get("rank", 0)),
+            str(entry.get("submission_id", "")),
+            str(entry.get("nickname") or entry.get("username") or ""),
+        )
         for entry in leaderboard
     )
 
@@ -852,6 +856,14 @@ def _entry_result(client_result: dict[str, Any]) -> tuple[str, str]:
     if client_result.get("completed"):
         return f"{int(client_result['lap_ticks']) / FPS:.3f}", "SEC"
     return f"{float(client_result['max_progress']):.1f}", "%"
+
+
+def _display_name(entry: dict[str, Any]) -> str:
+    return str(entry.get("nickname") or entry.get("username") or "unknown")
+
+
+def _identity_line(entry: dict[str, Any]) -> str:
+    return f"Group {entry.get('group_id', '?')} · {entry.get('username', 'unknown')}"
 
 
 def _user_font(
@@ -1095,7 +1107,7 @@ def _draw_map_panel(
         stopped = replay_car.crashed or replay_car.stalled or replay_car.finished
         _draw_replay_name_tag(
             screen,
-            str(replay_car.item.get("username", "unknown")),
+            replay_car.label,
             cx,
             cy,
             DIM if stopped else replay_car.color,
@@ -1234,7 +1246,7 @@ def _draw_phase_one_podium(
         pygame.draw.rect(screen, bg, card)
         pygame.draw.rect(screen, medal(pos), (card.x, card.y, card.width, 4))
         _draw_ghost_numeral(screen, card.right, card.y, pos, bg, fonts["pod_ghost"])
-        username = str(entry["username"])
+        username = _display_name(entry)
         username_font = _user_font(fonts, username, "pod_tag", "pod_sub_cjk")
         _blit_clipped(
             screen,
@@ -1243,7 +1255,7 @@ def _draw_phase_one_podium(
             card.y + 12,
             card_w - 20,
         )
-        sub = f"Group {entry['group_id']}"
+        sub = _identity_line(entry)
         sub_font = _user_font(fonts, sub, "pod_sub", "pod_sub_cjk")
         _blit_clipped(screen, sub_font.render(sub, True, MUTED2), card.x + 12, card.y + 42, card_w - 20)
         value, unit = _entry_result(entry["client_result"])
@@ -1269,8 +1281,16 @@ def _draw_final_podium(
         pygame.draw.rect(screen, medal(pos), (card.x, card.y, 4, card.height))
         num = fonts["pod_ghost_fin"].render(str(pos), True, medal(pos))
         screen.blit(num, (card.x + 18, card.centery - num.get_height() // 2))
-        screen.blit(fonts["pod_name"].render(f"Group {entry['group_id']}", True, WHITE), (card.x + 86, card.y + 10))
-        uname = str(entry["username"])
+        name = _display_name(entry)
+        name_font = _user_font(fonts, name, "pod_name", "pod_sub_cjk")
+        _blit_clipped(
+            screen,
+            name_font.render(name, True, WHITE),
+            card.x + 86,
+            card.y + 10,
+            rect.width - 220,
+        )
+        uname = _identity_line(entry)
         uname_font = _user_font(fonts, uname, "pod_sub", "pod_sub_cjk")
         _blit_clipped(screen, uname_font.render(uname, True, MUTED2), card.x + 86, card.y + 38, rect.width - 220)
         value, unit = _entry_result(entry["client_result"])
@@ -1300,10 +1320,7 @@ def _draw_tower_row(
     block = pygame.Rect(x, y + 3, 30, 24)
     pygame.draw.rect(screen, PANEL2, block)
     screen.blit(fonts["row_pos"].render(str(pos), True, MUTED), (block.x + 8, block.y + 4))
-    if competition_id == "final":
-        name = f"Group {entry['group_id']} · {entry['username']}"
-    else:
-        name = str(entry["username"])
+    name = _display_name(entry)
     name_font = _user_font(fonts, name, "row_name", "row_name_cjk")
     _blit_clipped(screen, name_font.render(name, True, MUTED if completed else DIM), x + 40, y + 8, width - 130)
     if completed:

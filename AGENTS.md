@@ -9,15 +9,17 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 ## Current State
 
 - FastAPI v2 server lives in `server/app.py`.
-- SQLite persistence and ranking live in `server/storage.py`; schema version is `trusted-client-auth-metadata-progress-percent` and upgrades the previous pixel-based `max_progress` data in place.
+- SQLite persistence and ranking live in `server/storage.py`; schema version is `trusted-client-auth-metadata-progress-percent-nickname` and upgrades the previous pixel-based `max_progress` and pre-nickname user data in place.
 - Fixed competition maps are loaded from `maps/kaggle_easy.*`, `maps/kaggle_hard.*`, and `maps/kaggle_final.*` through `server/competition_maps.py`.
 - Shared payload contracts live in `shared/contracts.py`.
 - Phase 1 has independent `easy` and `hard` competitions keyed by `(group_id, username)`.
 - Final is group-based for leaderboard/replay, but cooldown is keyed by `(group_id, username)`; ranking keeps each group's best non-deleted completed snapshot entry.
 - Student identity now requires admin-created classroom accounts. Public student actions use `Authorization: Bearer <token>` from `POST /v2/auth/login`; the request body identity must match the token.
+- User identity keys remain `(group_id, username)`, but accounts also have mutable `nickname` display metadata. Browser leaderboard and protected replay show nickname first, with `Group N` and `username` as secondary/audit text.
 - Submissions persist optional replay metadata: `skin_id` (shop catalog IDs `0` through `21`) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
 - Training records snapshot the equipped shop `skin_id` when training starts; later Upload submissions reuse that recorded ID rather than the currently equipped skin.
 - Admin can create/update plaintext temporary passwords, bulk import users, enable/disable accounts, and soft-delete individual submissions.
+- Admin user create/update/import supports optional `nickname`. Student nickname editing is exposed through bearer-token profile APIs, not through the browser leaderboard UI.
 - Test classroom accounts are provided as CSV in `docs/test-users.csv`; they are imported manually through the admin bulk import UI, not auto-created at startup.
 - Public browser leaderboard is served at `/leaderboard`.
 - Admin page is served at `/admin`.
@@ -105,6 +107,8 @@ GET  /v2/state
 GET  /v2/maps
 GET  /v2/maps/{competition_id}/preview
 POST /v2/auth/login
+GET  /v2/me
+PATCH /v2/me
 GET  /v2/me/submissions
 POST /v2/competitions/{easy|hard}/eligibility
 POST /v2/competitions/{easy|hard}/submissions
@@ -115,7 +119,7 @@ GET  /v2/competitions/{competition_id}/submissions/{submission_id}
 GET  /ws/events
 ```
 
-Student eligibility/submission endpoints require `Authorization: Bearer <token>`. Public leaderboard and public submission status endpoints remain readable without login and never expose weights or biases.
+Student eligibility/submission endpoints require `Authorization: Bearer <token>`. `GET /v2/me` returns `group_id`, `username`, `nickname`, and session expiry; `PATCH /v2/me` updates only the token user's nickname and publishes a leaderboard/replay update event. Public leaderboard and public submission status endpoints remain readable without login and never expose weights or biases.
 
 Protected admin/replay, all requiring `X-Admin-Token`:
 
@@ -196,7 +200,7 @@ Known batching gaps:
 - Local scoring and Pygame replay use sequential boundary checkpoint crossing to detect first-lap completion.
 - A replay car stops updating after first lap completion, collision, or stagnation.
 - Finished/crashed/stalled replay cars stay visible and dimmed; on-map username labels become gray.
-- The Pygame replay client fetches the protected replay payload every 5 seconds and compares stage, replay generation, and leaderboard signatures to detect new data without changing API shape.
+- The Pygame replay client fetches the protected replay payload every 5 seconds and compares stage, replay generation, leaderboard signatures, and displayed nicknames to detect new data without changing API shape.
 - New snapshots and admin stage changes are adopted only at a safe replay boundary, after the current replay cycle finishes.
 - The first replay cycle for a newly seen leaderboard hides that competition's leaderboard, then reveals it after the corresponding Easy/Hard/Final session stops; later cycles for the same snapshot show the leaderboard normally.
 - Once all replay cars are finished/crashed/stalled, the replay holds for 3 seconds and then either adopts pending replay data or restarts the current payload.

@@ -25,6 +25,7 @@ from server.schemas import (
     AdminUserRequest,
     IdentityIn,
     LoginIn,
+    NicknameUpdateRequest,
     SubmissionIn,
 )
 from server.storage import CompetitionStorage, SubmissionRejected
@@ -167,6 +168,34 @@ def create_app(
             competition_id=identifier,
         )
 
+    @app.get("/v2/me")
+    def me(authorization: str | None = Header(default=None)) -> dict[str, str]:
+        return require_user(authorization)
+
+    @app.patch("/v2/me")
+    def update_me(
+        body: NicknameUpdateRequest,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        identity = require_user(authorization)
+        try:
+            user = app_storage.update_user_nickname(
+                group_id=identity["group_id"],
+                username=identity["username"],
+                nickname=body.nickname,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+        if user is None:
+            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="user not found")
+        broadcaster.publish(app_storage.competition_update_payload())
+        return {
+            "group_id": user["group_id"],
+            "username": user["username"],
+            "nickname": user["nickname"],
+            "expires_at": identity.get("expires_at"),
+        }
+
     @app.get("/v2/admin/state")
     def admin_state(
         x_admin_token: str | None = Header(default=None),
@@ -208,6 +237,7 @@ def create_app(
                 group_id=group_id,
                 username=username,
                 password=password,
+                nickname=body.nickname,
                 disabled=body.disabled,
             )
         except ValueError as exc:
@@ -226,6 +256,7 @@ def create_app(
                     group_id=user["group_id"],
                     username=user["username"],
                     password=user["password"],
+                    nickname=user.get("nickname"),
                     disabled=bool(user.get("disabled", False)),
                 )
                 for user in users
@@ -488,13 +519,14 @@ def _admin_import_users(request: AdminUserImportRequest) -> list[dict[str, Any]]
         for user in request.users:
             group_id, username, password = user.clean_login()
             users.append(
-                {
-                    "group_id": group_id,
-                    "username": username,
-                    "password": password,
-                    "disabled": user.disabled,
-                }
-            )
+                    {
+                        "group_id": group_id,
+                        "username": username,
+                        "password": password,
+                        "nickname": user.nickname,
+                        "disabled": user.disabled,
+                    }
+                )
         return users
 
     raw_text = (request.text or "").strip()
@@ -518,6 +550,7 @@ def _admin_import_users(request: AdminUserImportRequest) -> list[dict[str, Any]]
                         "group_id": str(row["group_id"]).strip(),
                         "username": str(row["username"]).strip(),
                         "password": str(row["password"]).strip(),
+                        "nickname": _optional_text(row.get("nickname")),
                         "disabled": bool(row.get("disabled", False)),
                     }
                 )
@@ -533,6 +566,7 @@ def _admin_import_users(request: AdminUserImportRequest) -> list[dict[str, Any]]
                 "group_id": str(row["group_id"]).strip(),
                 "username": str(row["username"]).strip(),
                 "password": str(row["password"]).strip(),
+                "nickname": _optional_text(row.get("nickname")),
                 "disabled": str(row.get("disabled", "")).strip().lower()
                 in {"1", "true", "yes", "disabled"},
             }
@@ -548,13 +582,21 @@ def _admin_import_users(request: AdminUserImportRequest) -> list[dict[str, Any]]
                 "group_id": row[0].strip(),
                 "username": row[1].strip(),
                 "password": row[2].strip(),
-                "disabled": len(row) >= 4
-                and row[3].strip().lower() in {"1", "true", "yes", "disabled"},
+                "nickname": row[3].strip() if len(row) >= 4 and row[3].strip() else None,
+                "disabled": len(row) >= 5
+                and row[4].strip().lower() in {"1", "true", "yes", "disabled"},
             }
         )
     if not users:
         raise ValueError("no importable users found")
     return users
+
+
+def _optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _load_html(filename: str) -> str:

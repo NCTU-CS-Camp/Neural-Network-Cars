@@ -49,7 +49,7 @@
     .tab.active[data-competition="final"] { color:#08080C; background:var(--gold); }
     .loginbar { margin-top:14px; display:flex; flex-wrap:wrap; align-items:end; gap:10px; color:var(--muted); }
     .loginbar label { display:flex; flex-direction:column; gap:4px; font-size:11px; letter-spacing:.08em; text-transform:uppercase; }
-    .loginbar input { width:150px; padding:8px 10px; border:1px solid var(--border); background:var(--panel); color:var(--white); font-family:var(--ui); }
+    .loginbar input, .loginbar select { width:150px; padding:8px 10px; border:1px solid var(--border); background:var(--panel); color:var(--white); font-family:var(--ui); }
     .loginbar button, .mybar button { border:0; cursor:pointer; padding:9px 14px; background:var(--silver); color:#08080C; font-family:var(--disp); font-weight:900; }
     .loginbar .muted { font-size:13px; text-transform:none; letter-spacing:0; }
 
@@ -122,7 +122,18 @@
       <button class="tab" data-competition="final"><span>FINAL</span></button>
     </nav>
     <section class="loginbar" aria-label="Personal leaderboard login">
-      <label>Group ID<input id="me-group" autocomplete="username"></label>
+      <label>Group ID<select id="me-group" autocomplete="username">
+        <option value="1">Group 1</option>
+        <option value="2">Group 2</option>
+        <option value="3">Group 3</option>
+        <option value="4">Group 4</option>
+        <option value="5">Group 5</option>
+        <option value="6">Group 6</option>
+        <option value="7">Group 7</option>
+        <option value="8">Group 8</option>
+        <option value="9">Group 9</option>
+        <option value="10">Group 10</option>
+      </select></label>
       <label>Username<input id="me-username" autocomplete="username"></label>
       <label>Password<input id="me-password" type="password" autocomplete="current-password"></label>
       <button id="me-login">Login</button>
@@ -174,6 +185,8 @@
     function lapSeconds(ticks){ return (Number(ticks) / 30); }
     function resultText(r){ return r.completed ? `${lapSeconds(r.lap_ticks).toFixed(3)}s` : `${Number(r.max_progress).toFixed(1)}%`; }
     function groupLabel(groupId){ return `Group ${escapeHtml(groupId)}`; }
+    function playerName(item){ return escapeHtml(item.nickname || item.username); }
+    function identityLine(item){ return `${groupLabel(item.group_id)} · ${escapeHtml(item.username)}`; }
     function countdownText(iso){ if(!iso) return ""; const rem=Math.max(0,new Date(iso).getTime()-Date.now()); const s=Math.floor(rem/1000); return `${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; }
     function activeTabUsesSnapshots(){
       return (state?.stage === "phase_one" && (activeCompetition === "easy" || activeCompetition === "hard"))
@@ -192,8 +205,8 @@
 
     function podiumCard(item, klass){
       const isFinal = activeCompetition === "final";
-      const main = isFinal ? groupLabel(item.group_id) : escapeHtml(item.username);
-      const sub  = isFinal ? escapeHtml(item.username) : "individual";
+      const main = playerName(item);
+      const sub  = identityLine(item);
       const label = isFinal ? `GROUP ${escapeHtml(item.group_id)}` : (item.rank===1 ? "RACE WINNER" : (item.rank===2 ? "P2" : "P3"));
       const r = item.client_result;
       const value = r.completed ? lapSeconds(r.lap_ticks).toFixed(3) : Number(r.max_progress).toFixed(1);
@@ -224,8 +237,8 @@
         const r = item.client_result;
         const isLeader = item.rank === 1;
         const dnf = !r.completed;
-        const main = isFinal ? groupLabel(item.group_id) : escapeHtml(item.username);
-        const sub  = isFinal ? escapeHtml(item.username) : "individual";
+        const main = playerName(item);
+        const sub  = identityLine(item);
         return `<tr class="${isLeader?"leader":""} ${dnf?"dnf":""}">
           <td class="rank"><span class="posblk">${item.rank}</span></td>
           <td><div class="player">
@@ -247,10 +260,10 @@
       if(!response.ok){ meLoginStatus.textContent = `Login failed: ${response.status}`; return; }
       const data = await response.json();
       myToken = data.token;
-      myIdentity = {group_id:data.group_id, username:data.username};
+      myIdentity = {group_id:data.group_id, username:data.username, nickname:data.nickname};
       sessionStorage.setItem("competitionUserToken", myToken);
       sessionStorage.setItem("competitionUserIdentity", JSON.stringify(myIdentity));
-      meLoginStatus.textContent = `Logged in as ${groupLabel(data.group_id)} / ${escapeHtml(data.username)}`;
+      meLoginStatus.textContent = `Logged in as ${escapeHtml(data.nickname || data.username)} (${groupLabel(data.group_id)} / ${escapeHtml(data.username)})`;
       await refreshMe();
     }
 
@@ -269,11 +282,18 @@
       if(!myToken || !myIdentity){ renderMyBar(); return; }
       const path = activeCompetition === "final" ? "/v2/finals/eligibility" : `/v2/competitions/${activeCompetition}/eligibility`;
       const identityBody = JSON.stringify({group_id:myIdentity.group_id, username:myIdentity.username});
-      const [mine, eligibility] = await Promise.all([
+      const [profile, mine, eligibility] = await Promise.all([
+        fetch("/v2/me", {cache:"no-store", headers:authHeaders()}),
         fetch(`/v2/me/submissions?competition_id=${activeCompetition}`, {cache:"no-store", headers:authHeaders()}),
         fetch(path, {method:"POST", headers:authHeaders(), body:identityBody}),
       ]);
-      if(mine.status === 401 || eligibility.status === 401){ logoutMe(); return; }
+      if(profile.status === 401 || mine.status === 401 || eligibility.status === 401){ logoutMe(); return; }
+      if(profile.ok){
+        const data = await profile.json();
+        myIdentity = {group_id:data.group_id, username:data.username, nickname:data.nickname};
+        sessionStorage.setItem("competitionUserIdentity", JSON.stringify(myIdentity));
+        meLoginStatus.textContent = `Logged in as ${escapeHtml(data.nickname || data.username)} (${groupLabel(data.group_id)} / ${escapeHtml(data.username)})`;
+      }
       mySubmissions = mine.ok ? await mine.json() : [];
       myEligibility = eligibility.ok ? await eligibility.json() : null;
       renderMyBar();
@@ -292,11 +312,12 @@
         return item.group_id===myIdentity.group_id && item.username===myIdentity.username;
       });
       const latest = mySubmissions[0];
-      const representative = ranked && activeCompetition === "final" ? ` represented by ${ranked.username}` : "";
+      const representative = ranked && activeCompetition === "final" ? ` represented by ${ranked.nickname || ranked.username}` : "";
       const best = ranked ? `#${ranked.rank} ${resultText(ranked.client_result)}${representative}` : "not ranked yet";
       const nextAt = myEligibility?.next_submission_at ? new Date(myEligibility.next_submission_at).toLocaleTimeString() : "unknown";
       const latestText = latest ? `${latest.status} ${resultText(latest.client_result)}` : "no submissions";
-      mySummary.textContent = `${groupLabel(myIdentity.group_id)} / ${myIdentity.username} · ${activeCompetition.toUpperCase()} · best ${best} · latest ${latestText} · next ${nextAt}`;
+      const display = myIdentity.nickname || myIdentity.username;
+      mySummary.textContent = `${display} · ${groupLabel(myIdentity.group_id)} / ${myIdentity.username} · ${activeCompetition.toUpperCase()} · best ${best} · latest ${latestText} · next ${nextAt}`;
       if(!mySubmissions.length){
         myRows.innerHTML = '<tr><td colspan="4" class="empty">No submissions for this competition</td></tr>';
         return;
@@ -330,7 +351,7 @@
     if(myIdentity){
       meGroup.value = myIdentity.group_id;
       meUsername.value = myIdentity.username;
-      meLoginStatus.textContent = `Logged in as ${groupLabel(myIdentity.group_id)} / ${escapeHtml(myIdentity.username)}`;
+      meLoginStatus.textContent = `Logged in as ${escapeHtml(myIdentity.nickname || myIdentity.username)} (${groupLabel(myIdentity.group_id)} / ${escapeHtml(myIdentity.username)})`;
     }
     document.getElementById("me-login").addEventListener("click", ()=>loginMe().catch((e)=>{ meLoginStatus.textContent = `Login failed: ${e}`; }));
     document.getElementById("me-logout").addEventListener("click", logoutMe);

@@ -30,8 +30,10 @@ from shared.contracts import ClientResult, SubmissionPayload
 
 
 LEGACY_PIXEL_PROGRESS_SCHEMA_VERSION = "trusted-client-auth-metadata"
-SCHEMA_VERSION = "trusted-client-auth-metadata-progress-percent"
+PRE_NICKNAME_SCHEMA_VERSION = "trusted-client-auth-metadata-progress-percent"
+SCHEMA_VERSION = "trusted-client-auth-metadata-progress-percent-nickname"
 SESSION_LIFETIME = timedelta(hours=12)
+MAX_NICKNAME_LENGTH = 20
 
 
 class SubmissionRejected(Exception):
@@ -76,6 +78,13 @@ class CompetitionStorage:
             row = connection.execute("SELECT version FROM competition_schema LIMIT 1").fetchone()
             if row is not None and row["version"] == LEGACY_PIXEL_PROGRESS_SCHEMA_VERSION:
                 self._migrate_progress_to_percentage(connection)
+                self._migrate_user_nicknames(connection)
+                connection.execute(
+                    "UPDATE competition_schema SET version = ?",
+                    (SCHEMA_VERSION,),
+                )
+            elif row is not None and row["version"] == PRE_NICKNAME_SCHEMA_VERSION:
+                self._migrate_user_nicknames(connection)
                 connection.execute(
                     "UPDATE competition_schema SET version = ?",
                     (SCHEMA_VERSION,),
@@ -157,6 +166,30 @@ class CompetitionStorage:
             )
 
     @staticmethod
+    def _migrate_user_nicknames(connection: sqlite3.Connection) -> None:
+        tables = {
+            row["name"]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if "users" not in tables:
+            return
+        columns = {
+            column["name"]
+            for column in connection.execute("PRAGMA table_info(users)").fetchall()
+        }
+        if "nickname" not in columns:
+            connection.execute("ALTER TABLE users ADD COLUMN nickname TEXT")
+        connection.execute(
+            """
+            UPDATE users
+            SET nickname = username
+            WHERE nickname IS NULL OR TRIM(nickname) = ''
+            """
+        )
+
+    @staticmethod
     def _pixel_progress_percentage(value: Any, total_length_px: float) -> float:
         progress_px = float(value)
         return round(
@@ -211,6 +244,7 @@ class CompetitionStorage:
             CREATE TABLE users (
                 group_id TEXT NOT NULL,
                 username TEXT NOT NULL,
+                nickname TEXT NOT NULL,
                 password_plaintext TEXT NOT NULL,
                 disabled INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
@@ -324,11 +358,13 @@ class CompetitionStorage:
         group_id: str,
         username: str,
         password: str,
+        nickname: str | None = None,
         disabled: bool = False,
         now: datetime | None = None,
     ) -> dict[str, Any]:
         group_id = _clean_identity_part(group_id, "group_id")
         username = _clean_identity_part(username, "username")
+        cleaned_nickname = None if nickname is None else _clean_nickname(nickname)
         password = password.strip()
         if not password:
             raise ValueError("password must not be blank")
@@ -336,19 +372,29 @@ class CompetitionStorage:
         with self._lock, self._connect() as connection:
             existing = connection.execute(
                 """
-                SELECT created_at FROM users
+                SELECT created_at, nickname FROM users
                 WHERE group_id = ? AND username = ?
                 """,
                 (group_id, username),
             ).fetchone()
             created_at = existing["created_at"] if existing is not None else timestamp
+            stored_nickname = (
+                cleaned_nickname
+                if cleaned_nickname is not None
+                else (
+                    str(existing["nickname"])
+                    if existing is not None and existing["nickname"]
+                    else username
+                )
+            )
             connection.execute(
                 """
                 INSERT INTO users (
-                    group_id, username, password_plaintext, disabled, created_at, updated_at
+                    group_id, username, nickname, password_plaintext, disabled, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(group_id, username) DO UPDATE SET
+                    nickname = excluded.nickname,
                     password_plaintext = excluded.password_plaintext,
                     disabled = excluded.disabled,
                     updated_at = excluded.updated_at
@@ -356,6 +402,7 @@ class CompetitionStorage:
                 (
                     group_id,
                     username,
+                    stored_nickname,
                     password,
                     1 if disabled else 0,
                     created_at,
@@ -398,6 +445,36 @@ class CompetitionStorage:
                 WHERE group_id = ? AND username = ?
                 """,
                 (1 if disabled else 0, timestamp, group_id, username),
+            )
+            row = connection.execute(
+                """
+                SELECT * FROM users
+                WHERE group_id = ? AND username = ?
+                """,
+                (group_id, username),
+            ).fetchone()
+        return None if row is None else _public_user(row)
+
+    def update_user_nickname(
+        self,
+        *,
+        group_id: str,
+        username: str,
+        nickname: str,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        group_id = _clean_identity_part(group_id, "group_id")
+        username = _clean_identity_part(username, "username")
+        cleaned_nickname = _clean_nickname(nickname)
+        timestamp = (now or self.now()).isoformat()
+        with self._lock, self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE users
+                SET nickname = ?, updated_at = ?
+                WHERE group_id = ? AND username = ?
+                """,
+                (cleaned_nickname, timestamp, group_id, username),
             )
             row = connection.execute(
                 """
@@ -453,6 +530,7 @@ class CompetitionStorage:
             "expires_at": expires_at.isoformat(),
             "group_id": group_id,
             "username": username,
+            "nickname": str(row["nickname"] or username),
         }
 
     def authenticate_token(
@@ -471,7 +549,8 @@ class CompetitionStorage:
             )
             row = connection.execute(
                 """
-                SELECT sessions.group_id, sessions.username, users.disabled
+                SELECT sessions.group_id, sessions.username, sessions.expires_at,
+                       users.nickname, users.disabled
                 FROM user_sessions AS sessions
                 JOIN users
                   ON users.group_id = sessions.group_id
@@ -482,7 +561,13 @@ class CompetitionStorage:
             ).fetchone()
         if row is None or int(row["disabled"]):
             return None
-        return {"group_id": str(row["group_id"]), "username": str(row["username"])}
+        username = str(row["username"])
+        return {
+            "group_id": str(row["group_id"]),
+            "username": username,
+            "nickname": str(row["nickname"] or username),
+            "expires_at": str(row["expires_at"]),
+        }
 
     def eligibility(
         self,
@@ -659,7 +744,11 @@ class CompetitionStorage:
             row = connection.execute(
                 "SELECT * FROM submissions WHERE submission_id = ?", (submission_id,)
             ).fetchone()
-            return self._public_submission(self._submission_from_row(row))
+            submission = self._with_nickname_locked(
+                connection,
+                self._submission_from_row(row),
+            )
+            return self._public_submission(submission)
 
     def seal_phase_one_batches(
         self,
@@ -795,9 +884,9 @@ class CompetitionStorage:
                 """,
                 (identifier.value, submission_id),
             ).fetchone()
-        if row is None:
-            return None
-        submission = self._submission_from_row(row)
+            if row is None:
+                return None
+            submission = self._with_nickname_locked(connection, self._submission_from_row(row))
         return submission if include_model else self._public_submission(submission)
 
     def list_submissions(self) -> list[dict[str, Any]]:
@@ -805,7 +894,10 @@ class CompetitionStorage:
             rows = connection.execute(
                 "SELECT * FROM submissions ORDER BY submitted_at DESC, submission_id DESC"
             ).fetchall()
-        return [self._submission_from_row(row) for row in rows]
+            return [
+                self._with_nickname_locked(connection, self._submission_from_row(row))
+                for row in rows
+            ]
 
     def user_submissions(
         self,
@@ -831,7 +923,12 @@ class CompetitionStorage:
                 """,
                 params,
             ).fetchall()
-        return [self._public_submission(self._submission_from_row(row)) for row in rows]
+            return [
+                self._public_submission(
+                    self._with_nickname_locked(connection, self._submission_from_row(row))
+                )
+                for row in rows
+            ]
 
     def delete_submission(
         self,
@@ -891,7 +988,10 @@ class CompetitionStorage:
             """,
             (competition_id.value, SubmissionStatus.COMPLETED.value),
         ).fetchall()
-        submissions = [self._submission_from_row(row) for row in rows]
+        submissions = [
+            self._with_nickname_locked(connection, self._submission_from_row(row))
+            for row in rows
+        ]
         submissions.sort(key=self._ranking_key)
 
         best_by_identity: dict[tuple[str, ...], dict[str, Any]] = {}
@@ -966,6 +1066,7 @@ class CompetitionStorage:
                         "submission_id": submission["submission_id"],
                         "group_id": submission["group_id"],
                         "username": submission["username"],
+                        "nickname": entry.get("nickname", submission["username"]),
                         "skin_id": submission["skin_id"],
                         "max_speed": submission["max_speed"],
                         "client_result": submission["client_result"],
@@ -1036,6 +1137,38 @@ class CompetitionStorage:
         }
 
     @staticmethod
+    def _nickname_locked(
+        connection: sqlite3.Connection,
+        *,
+        group_id: str,
+        username: str,
+    ) -> str:
+        row = connection.execute(
+            """
+            SELECT nickname FROM users
+            WHERE group_id = ? AND username = ?
+            """,
+            (group_id, username),
+        ).fetchone()
+        if row is None:
+            return username
+        return str(row["nickname"] or username)
+
+    def _with_nickname_locked(
+        self,
+        connection: sqlite3.Connection,
+        submission: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            **submission,
+            "nickname": self._nickname_locked(
+                connection,
+                group_id=str(submission["group_id"]),
+                username=str(submission["username"]),
+            ),
+        }
+
+    @staticmethod
     def _phase_one_batch_minutes_locked(connection: sqlite3.Connection) -> int:
         row = connection.execute(
             """
@@ -1055,6 +1188,7 @@ class CompetitionStorage:
                 "competition_id",
                 "group_id",
                 "username",
+                "nickname",
                 "skin_id",
                 "max_speed",
                 "client_result",
@@ -1075,10 +1209,22 @@ def _clean_identity_part(value: str, field_name: str) -> str:
     return cleaned
 
 
+def _clean_nickname(value: str) -> str:
+    cleaned = str(value).strip()
+    if not cleaned:
+        raise ValueError("nickname must not be blank")
+    if len(cleaned) > MAX_NICKNAME_LENGTH:
+        raise ValueError(f"nickname must be at most {MAX_NICKNAME_LENGTH} characters")
+    if any(ord(char) < 32 or ord(char) == 127 for char in cleaned):
+        raise ValueError("nickname must not contain control characters")
+    return cleaned
+
+
 def _public_user(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "group_id": row["group_id"],
         "username": row["username"],
+        "nickname": row["nickname"] or row["username"],
         "password_plaintext": row["password_plaintext"],
         "disabled": bool(row["disabled"]),
         "created_at": row["created_at"],

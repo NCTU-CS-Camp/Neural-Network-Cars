@@ -43,15 +43,16 @@
         <div class="two">
           <div>
             <div class="row"><div><label for="user-group">Group ID</label><input id="user-group" placeholder="8"></div><div><label for="user-name">Username</label><input id="user-name" placeholder="player1"></div></div>
-            <div class="row" style="margin-top:12px"><div><label for="user-password">Temporary password</label><input id="user-password" placeholder="plaintext password"></div><button id="save-user">Save User</button></div>
+            <div class="row" style="margin-top:12px"><div><label for="user-nickname">Nickname</label><input id="user-nickname" maxlength="20" placeholder="display name"></div><div><label for="user-password">Temporary password</label><input id="user-password" placeholder="plaintext password"></div></div>
+            <div class="actions" style="margin-top:12px"><button id="save-user">Save User</button></div>
           </div>
           <div>
             <label for="bulk-users">Bulk import CSV or JSON</label>
-            <textarea id="bulk-users" placeholder="group_id,username,password&#10;1,ada,pw1"></textarea>
+            <textarea id="bulk-users" placeholder="group_id,username,password,nickname&#10;1,ada,pw1,Ada"></textarea>
             <button id="import-users">Import Users</button>
           </div>
         </div>
-        <div style="overflow:auto; margin-top:16px"><table><thead><tr><th>Group</th><th>User</th><th>Password</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users"></tbody></table></div>
+        <div style="overflow:auto; margin-top:16px"><table><thead><tr><th>Group</th><th>User</th><th>Nickname</th><th>Password</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users"></tbody></table></div>
       </section>
       <section><h2>Competition Maps</h2><div class="maps" id="maps"></div></section>
       <section><h2>Operations</h2><div class="actions"><button id="run-batch">Run Snapshot Now</button><button class="secondary" id="restart-replay">Restart Replay</button><button class="danger" id="reset">Reset Competition Data</button></div></section>
@@ -68,7 +69,18 @@
     function setLoginStatus(message, isError=false) { loginStatus.textContent = message; loginStatus.classList.toggle("error", isError); }
     async function call(url, options) { const response = await fetch(url, options); const text = await response.text(); output.textContent = `${response.status} ${response.statusText}\n${text}`; await load(); }
     function renderState(data) { const snapshotInterval = data.config.snapshot_interval_minutes || data.config.phase_one_batch_minutes; stage.value = data.stage; interval.value = String(snapshotInterval); stateEl.innerHTML = `<div class="metric"><strong>${data.stage.replace("_", " ")}</strong><span>active stage</span></div><div class="metric"><strong>${data.config.version}</strong><span>configuration</span></div><div class="metric"><strong>${snapshotInterval} min</strong><span>snapshot interval</span></div>`; mapsEl.innerHTML = data.competitions.map((map) => `<article class="map"><header>${map.competition_id.toUpperCase()} · ${map.map_id}</header><img alt="${map.name}" src="/v2/maps/${map.competition_id}/preview"></article>`).join(""); }
-    function renderUsers(users) { usersEl.innerHTML = users.map((user)=>`<tr><td>${groupLabel(user.group_id)}</td><td>${escapeHtml(user.username)}</td><td>${escapeHtml(user.password_plaintext)}</td><td>${user.disabled ? "disabled" : "enabled"}</td><td class="inline"><button data-action="enable" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}">Enable</button><button class="secondary" data-action="disable" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}">Disable</button></td></tr>`).join("") || '<tr><td colspan="5">No users</td></tr>'; }
+    function renderUsers(users) { usersEl.innerHTML = users.map((user)=>`<tr>
+      <td>${groupLabel(user.group_id)}</td>
+      <td>${escapeHtml(user.username)}</td>
+      <td><input data-nickname-input="${escapeHtml(user.group_id)}:${escapeHtml(user.username)}" maxlength="20" value="${escapeHtml(user.nickname || user.username)}"></td>
+      <td>${escapeHtml(user.password_plaintext)}</td>
+      <td>${user.disabled ? "disabled" : "enabled"}</td>
+      <td class="inline">
+        <button data-action="save-nickname" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}" data-password="${escapeHtml(user.password_plaintext)}" data-disabled="${user.disabled ? "1" : "0"}">Save Nickname</button>
+        <button data-action="enable" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}">Enable</button>
+        <button class="secondary" data-action="disable" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}">Disable</button>
+      </td>
+    </tr>`).join("") || '<tr><td colspan="6">No users</td></tr>'; }
     function renderSubmissions(rows) { submissionsEl.innerHTML = rows.map((item)=>`<tr><td>${escapeHtml(item.submission_id)}</td><td>${escapeHtml(item.competition_id)}</td><td>${groupLabel(item.group_id)}</td><td>${escapeHtml(item.username)}</td><td>${escapeHtml(item.status)}</td><td>${resultText(item.client_result)}</td><td><button class="danger" data-delete="${escapeHtml(item.submission_id)}">Delete</button></td></tr>`).join("") || '<tr><td colspan="7">No submissions</td></tr>'; }
     async function load() { const [stateResponse, usersResponse, submissionsResponse] = await Promise.all([fetch("/v2/admin/state", {cache:"no-store", headers:headers()}), fetch("/v2/admin/users", {cache:"no-store", headers:headers()}), fetch("/v2/admin/submissions", {cache:"no-store", headers:headers()})]); if (!stateResponse.ok) throw new Error(`${stateResponse.status} ${stateResponse.statusText}`); renderState(await stateResponse.json()); renderUsers(usersResponse.ok ? await usersResponse.json() : []); renderSubmissions(submissionsResponse.ok ? await submissionsResponse.json() : []); }
     async function unlockAdmin() { try { await load(); sessionStorage.setItem("competitionAdminToken", token.value); adminContent.classList.remove("hidden"); setLoginStatus("Admin unlocked."); } catch (error) { adminContent.classList.add("hidden"); sessionStorage.removeItem("competitionAdminToken"); setLoginStatus(`Invalid admin token: ${error}`, true); } }
@@ -77,9 +89,20 @@
     token.addEventListener("keydown", (event) => { if (event.key === "Enter") unlockAdmin(); });
     document.getElementById("set-stage").addEventListener("click", () => call("/v2/admin/stage", {method:"POST", headers:headers(), body:JSON.stringify({stage:stage.value})}));
     document.getElementById("set-config").addEventListener("click", () => call("/v2/admin/config", {method:"POST", headers:headers(), body:JSON.stringify({snapshot_interval_minutes:Number(interval.value)})}));
-    document.getElementById("save-user").addEventListener("click", () => call("/v2/admin/users", {method:"POST", headers:headers(), body:JSON.stringify({group_id:document.getElementById("user-group").value, username:document.getElementById("user-name").value, password:document.getElementById("user-password").value})}));
+    document.getElementById("save-user").addEventListener("click", () => call("/v2/admin/users", {method:"POST", headers:headers(), body:JSON.stringify({group_id:document.getElementById("user-group").value, username:document.getElementById("user-name").value, password:document.getElementById("user-password").value, nickname:document.getElementById("user-nickname").value || undefined})}));
     document.getElementById("import-users").addEventListener("click", () => call("/v2/admin/users/import", {method:"POST", headers:headers(), body:JSON.stringify({text:document.getElementById("bulk-users").value})}));
-    usersEl.addEventListener("click", (event) => { const target = event.target; if (!(target instanceof HTMLButtonElement)) return; const {action, group, user} = target.dataset; if (!action || !group || !user) return; call(`/v2/admin/users/${encodeURIComponent(group)}/${encodeURIComponent(user)}/${action}`, {method:"POST", headers:headers()}); });
+    usersEl.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement)) return;
+      const {action, group, user} = target.dataset;
+      if (!action || !group || !user) return;
+      if (action === "save-nickname") {
+        const field = usersEl.querySelector(`[data-nickname-input="${CSS.escape(`${group}:${user}`)}"]`);
+        call("/v2/admin/users", {method:"POST", headers:headers(), body:JSON.stringify({group_id:group, username:user, password:target.dataset.password, nickname:field ? field.value : user, disabled:target.dataset.disabled === "1"})});
+        return;
+      }
+      call(`/v2/admin/users/${encodeURIComponent(group)}/${encodeURIComponent(user)}/${action}`, {method:"POST", headers:headers()});
+    });
     submissionsEl.addEventListener("click", (event) => { const target = event.target; if (!(target instanceof HTMLButtonElement) || !target.dataset.delete) return; if (confirm(`Delete submission ${target.dataset.delete}?`)) call(`/v2/admin/submissions/${encodeURIComponent(target.dataset.delete)}`, {method:"DELETE", headers:headers()}); });
     document.getElementById("run-batch").addEventListener("click", () => call("/v2/admin/batches/run-now", {method:"POST", headers:headers()}));
     document.getElementById("restart-replay").addEventListener("click", () => call("/v2/admin/replay/restart", {method:"POST", headers:headers()}));

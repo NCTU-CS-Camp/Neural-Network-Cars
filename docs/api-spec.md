@@ -34,12 +34,30 @@ Request:
 Response:
 
 ```json
-{ "token": "...", "expires_at": "...", "group_id": "1", "username": "player1" }
+{
+  "token": "...",
+  "expires_at": "...",
+  "group_id": "1",
+  "username": "player1",
+  "nickname": "Player One"
+}
 ```
 
 The token lives for 12 hours. Eligibility and submission requests must include
 `Authorization: Bearer <token>`, and the body `group_id`/`username` must match the token
 identity.
+
+Identity keys never change: `(group_id, username)` is still the submission, cooldown, and
+ranking identity. `nickname` is mutable display metadata. Students can read or update it with:
+
+```text
+GET   /v2/me
+PATCH /v2/me    { "nickname": "Player One" }
+```
+
+Nicknames are trimmed, must contain 1 through 20 visible characters, and cannot contain
+control characters. Leaderboard and replay display `nickname` as the primary player name,
+with `Group N` and `username` kept as secondary/audit text.
 
 ## Eligibility And Submission
 
@@ -96,6 +114,8 @@ enter `queued` state until the next snapshot seals the active stage.
 ```text
 GET /v2/competitions/{easy|hard|final}/leaderboard
 GET /v2/competitions/{competition_id}/submissions/{submission_id}
+GET /v2/me
+PATCH /v2/me
 GET /v2/me/submissions?competition_id=easy|hard|final
 GET /v2/maps
 GET /v2/maps/{competition_id}/preview
@@ -109,7 +129,9 @@ earliest tick to that progress, earliest accepted submission, then submission ID
 Public responses never contain weights or biases. WebSocket events use
 `competition_snapshot_updated` and contain stage, config, and public leaderboards.
 `/v2/me/submissions` requires the same bearer token and returns only that user's public
-submission history.
+submission history. Public submission, leaderboard, and replay-facing entries include
+`nickname`, `group_id`, and `username`; they never include weights or biases except through
+the protected replay endpoint.
 
 ## Protected Admin And Replay APIs
 
@@ -120,8 +142,8 @@ GET  /v2/admin/submissions
 GET  /v2/admin/state
 GET  /v2/admin/replay
 GET  /v2/admin/users
-POST /v2/admin/users              { "group_id", "username", "password", "disabled"? }
-POST /v2/admin/users/import       CSV/JSON user import
+POST /v2/admin/users              { "group_id", "username", "password", "nickname"?, "disabled"? }
+POST /v2/admin/users/import       CSV/JSON user import; CSV may include nickname
 POST /v2/admin/users/{group_id}/{username}/disable
 POST /v2/admin/users/{group_id}/{username}/enable
 POST /v2/admin/stage              { "stage": "phase_one" | "final" }
