@@ -163,46 +163,66 @@ MenuChoice = Literal["training", "validation", "clear_user", "shop"]
 TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None, int, int]
 CUSTOM_PRESET_LABEL = "自訂（未儲存）"
 
+FITNESS_PARAMETER_LABELS: dict[str, str] = {
+    "speed": "速度",
+    "progress": "前進進度",
+    "centered": "保持中央",
+    "alignment": "方向對齊",
+    "safety": "安全距離",
+    "stall": "停滯",
+    "spin": "原地打轉",
+    "wrong_way": "逆向行駛",
+    "time": "耗時",
+    "crash": "撞車",
+}
+
+FITNESS_PRESET_LABELS: dict[str, str] = {
+    "BeginnerMix": "新手綜合",
+    "ProgressFirst": "進度優先",
+    "SafeFinish": "安全完賽",
+    "Equal50Debug": "全部設為 50",
+}
+
 FITNESS_TOOLTIPS: dict[str, list[str]] = {
     "progress": [
         "說明：量化車輛沿著賽道中心線向終點推進的有效距離。",
-        "tips：數值太高會讓車輛可能在彎道或牆邊出現高頻率的摩擦或原地打轉。",
+        "提示：數值太高可能會讓車輛在彎道或牆邊頻繁摩擦或原地打轉。",
     ],
     "speed": [
         "說明：獎勵車子行進過程中的絕對速度或瞬時加速度，可以縮短單圈時間。",
-        "tips：數值過高會導致車輛追求速度而在入彎前缺乏減速控制。",
+        "提示：數值過高會讓車輛只追求速度，入彎前來不及減速。",
     ],
     "alignment": [
         "說明：計算車頭朝向與賽道切線向量兩者是否方向一致的程度。",
-        "tips：調高數值時行車軌跡會比較穩，但也可能讓車子變得過於保守而在過彎時減速。",
+        "提示：調高後行車軌跡會比較穩，但也可能讓車子過彎時太保守。",
     ],
     "centered": [
         "說明：量化車輛中心點與賽道中線之間的側向橫移距離，距離越低、獎勵越高。",
-        "tips：數值太高可能會使小車喪失尋找最佳賽車路線的能力，讓車子不敢切彎，過彎效率變差。",
+        "提示：數值太高會讓車子不敢切彎，降低過彎效率。",
     ],
     "safety": [
         "說明：利用感測器偵測距離，獎勵車身與左右兩側賽道邊牆維持在特定安全距離以上。",
-        "tips：數值過高會讓車輛產生邊界恐懼症，在遇到較窄的彎道時會因為怕靠近牆壁而極度減速或停下。",
+        "提示：數值過高時，車輛可能會因為怕靠近牆壁而大幅減速或停下。",
     ],
     "stall": [
         "說明：當車輛速度在特定幀數內接近零且未前進時施加的懲罰。",
-        "tips：可以用來懲罰在訓練初期因為害怕撞牆而選擇在原地不停旋轉的車輛。",
+        "提示：可淘汰訓練初期因怕撞牆而停在原地打轉的車輛。",
     ],
     "spin": [
         "說明：偵測車輛角速度過高，或在很小的空間內卻大幅改動行進方向卻無有效位移的懲罰。",
-        "tips：可以用來懲罰為了刷 progress 獎勵而在賽道原地打轉的行為。",
+        "提示：可懲罰為了取得前進獎勵而在賽道原地打轉的行為。",
     ],
     "wrong_way": [
         "說明：當車輛逆向行駛時會觸發懲罰。",
-        "tips：若小車碰撞後反彈或打滑導致逆向，這個懲罰可以讓車輛演化時快速淘汰逆向行駛的基因。",
+        "提示：可在演化時快速淘汰撞車反彈或打滑後逆向行駛的車輛。",
     ],
     "time": [
         "說明：與訓練時間成正比的持續性小幅度扣分。",
-        "tips：引入時間成本的概念，懲罰那些雖然可以跑完、但車速極慢的保守小車個體。",
+        "提示：可懲罰雖然能跑完、但速度很慢的保守車輛。",
     ],
     "crash": [
         "說明：車身邊界與賽道護欄發生碰撞時立即觸發並中止該輪模擬。",
-        "tips：調得越高車輛的駕駛方式就越趨向防撞，而撞到邊界會降低該個體的優勢。",
+        "提示：調得越高，車輛越重視防撞；撞到邊界時也會被扣更多分。",
     ],
 }
 
@@ -243,7 +263,7 @@ def _draw_coin_balance(
     right: int | None = None,
     top: int = 16,
 ) -> None:
-    text = font.render(f"COINS  {balance}", True, YELLOW)
+    text = font.render(f"金幣  {balance}", True, YELLOW)
     card = pygame.Rect(0, 0, text.get_width() + 20, text.get_height() + 10)
     card.topright = (right if right is not None else screen.get_width() - 20, top)
     pygame.draw.rect(screen, CARBON, card)
@@ -287,7 +307,7 @@ def _wrap_text(font: pygame.font.Font, text: str, max_width: int) -> list[str]:
 def format_ticks_as_seconds(ticks: int | None, fps: int = FPS) -> str:
     if ticks is None:
         return "--"
-    return f"{ticks / fps:.3f}s"
+    return f"{ticks / fps:.1f} 秒"
 
 
 def _parse_timestamp_utc8(timestamp: str) -> datetime | None:
@@ -317,14 +337,25 @@ def format_full_timestamp_utc8(timestamp: str) -> str:
 
 def _fitness_parameter_lines(fitness_config: FitnessConfig) -> tuple[str, str]:
     penalties = "  ".join(
-        f"{name}:{fitness_config.get_weight(name):g}"
+        f"{FITNESS_PARAMETER_LABELS[name]}:{fitness_config.get_weight(name):g}"
         for name in ("crash", "spin", "stall", "time", "wrong_way")
     )
     rewards = "  ".join(
-        f"{name}:{fitness_config.get_weight(name):g}"
+        f"{FITNESS_PARAMETER_LABELS[name]}:{fitness_config.get_weight(name):g}"
         for name in ("alignment", "centered", "progress", "safety", "speed")
     )
-    return f"Penalties  {penalties}", f"Rewards    {rewards}"
+    return f"懲罰  {penalties}", f"獎勵  {rewards}"
+
+
+def _fitness_preset_label(name: str) -> str:
+    return FITNESS_PRESET_LABELS.get(name, name)
+
+
+def _fitness_preset_name(label: str) -> str:
+    return next(
+        (name for name, translated in FITNESS_PRESET_LABELS.items() if translated == label),
+        label,
+    )
 
 
 def _match_preset_name(
@@ -341,7 +372,7 @@ def _match_preset_name(
             return preset.preset_name
     for name in fitness_strategy_names():
         if get_fitness_strategy(name).config.weights == current_weights:
-            return name
+            return _fitness_preset_label(name)
     return CUSTOM_PRESET_LABEL
 
 
@@ -355,8 +386,8 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
     while True:  # outer: rebuild on VIDEORESIZE
         W, H = screen.get_size()
         font = _font(max(16, H // 40))
-        head40 = _head_font(max(28, H // 20))
-        mono14 = _mono_font(max(12, H // 55))
+        head40 = _font(max(28, H // 20))
+        mono14 = _font(max(12, H // 55))
         M = max(40, W // 30)
         btn_y = H * 32 // 100
         group_btn_w = max(44, (W - M * 2) // 12)
@@ -431,8 +462,8 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             login_button.update_hover(mouse_pos)
 
             screen.fill(BG)
-            screen.blit(head40.render("DRIVER SIGN-IN", True, INK), (M, H * 12 // 100))
-            screen.blit(mono14.render("NEURAL NETWORK CARS", True, DIM), (M, H * 20 // 100))
+            screen.blit(head40.render("駕駛登入", True, INK), (M, H * 12 // 100))
+            screen.blit(mono14.render("神經網路賽車", True, DIM), (M, H * 20 // 100))
             screen.blit(font.render("選擇組別 (1-10)", True, DIM), (M, btn_y - font.get_height() - 6))
             for button in group_buttons:
                 button.draw(screen, font)
@@ -459,14 +490,14 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
 
     while True:  # outer: rebuild controls after VIDEORESIZE
         font = _font()
-        head22 = _head_font(22)
+        head22 = _font(22)
         width, height = screen.get_size()
         training_button = Button(
-            "TRAINING",
+            "訓練",
             pygame.Rect(width // 2 - 360, height // 2 - 100, 320, 200),
         )
         validation_button = Button(
-            "VALIDATION",
+            "驗證",
             pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200),
         )
         clear_user_button = Button(
@@ -512,7 +543,7 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
             screen.fill(BG)
             name_surf = font.render(profile.username, True, INK)
             screen.blit(name_surf, (60, 52))
-            group_surf = head22.render(f" Group {profile.group_id} ", True, INK)
+            group_surf = head22.render(f" 第 {profile.group_id} 組 ", True, INK)
             group_bg = pygame.Rect(
                 60 + name_surf.get_width() + 12,
                 52, group_surf.get_width() + 2, group_surf.get_height()
@@ -578,7 +609,7 @@ def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
             pygame.draw.rect(screen, F1_RED, pygame.Rect(panel.x, panel.y, panel_w, 4))
             title = title_font.render("確定要清除使用者資料？", True, INK)
             warning_lines = (
-                "profile、訓練紀錄與自訂 preset 都會刪除，",
+                "個人資料、訓練紀錄與自訂預設組合都會刪除，",
                 "金幣、已獲得皮膚等商店進度也無法復原。",
             )
             screen.blit(title, title.get_rect(center=(width // 2, height // 2 - 50)))
@@ -622,8 +653,6 @@ def run_training_config_screen(
         font = _font(max(14, H // 50))
         title_font = _font(max(16, H // 40))
         subtitle_font = _font(max(15, H // 45))
-        head_title = _head_font(max(14, H // 42))
-        head_fitness = _head_font(max(13, H // 56))
         mono_speed = _mono_font(max(14, H // 50))
         mono_value = _mono_font(max(13, H // 56))
 
@@ -636,7 +665,7 @@ def run_training_config_screen(
 
         back_button = Button("← 返回", pygame.Rect(M, M, max(100, W // 14), max(36, H // 24)))
         speed_field_w = max(64, W // 24)
-        speed_label_w = font.size("Max Speed (5–30)")[0]
+        speed_label_w = font.size("最高速度（5–30）")[0]
         max_speed_input = TextInput(
             pygame.Rect(left_w - M - speed_field_w, M, speed_field_w, back_button.rect.height),
             text=last_valid_max_speed,
@@ -671,8 +700,8 @@ def run_training_config_screen(
             pygame.image.load(str(TRAINING_DIFFICULTY_MAPS[2][0])), (THUMB_W, THUMB_H)
         )
         map_cards: list[tuple[int, str, pygame.Surface | None, pygame.Rect]] = [
-            (1, "Easy",   easy_thumb, pygame.Rect(M,                   card_area_top, CARD_W, CARD_H)),
-            (2, "Hard",   hard_thumb, pygame.Rect(M * 2 + CARD_W,     card_area_top, CARD_W, CARD_H)),
+            (1, "簡單",   easy_thumb, pygame.Rect(M,                   card_area_top, CARD_W, CARD_H)),
+            (2, "困難",   hard_thumb, pygame.Rect(M * 2 + CARD_W,     card_area_top, CARD_W, CARD_H)),
             (3, "隨機",   None,       pygame.Rect(M * 3 + CARD_W * 2, card_area_top, CARD_W, CARD_H)),
         ]
 
@@ -691,9 +720,10 @@ def run_training_config_screen(
         delete_preset_btn_w = max(70, right_w // 6)
         preset_dropdown = Dropdown(
             pygame.Rect(right_x + M, fitness_top, right_w - M * 3 - delete_preset_btn_w, dropdown_h),
-            fitness_strategy_names() + tuple(preset.preset_name for preset in custom_presets),
-            placeholder="載入 Fitness preset",
-            selected=selected_strategy.name,
+            tuple(_fitness_preset_label(name) for name in fitness_strategy_names())
+            + tuple(preset.preset_name for preset in custom_presets),
+            placeholder="載入評分預設組合",
+            selected=_fitness_preset_label(selected_strategy.name),
         )
         delete_preset_button = Button(
             "刪除",
@@ -769,7 +799,7 @@ def run_training_config_screen(
             visible_items=scrollable_rows,
             offset=record_scroll_offset,
         )
-        go_button = Button("GO", pygame.Rect(M + M // 2, action_y, left_w - M * 3, btn_h))
+        go_button = Button("開始訓練", pygame.Rect(M + M // 2, action_y, left_w - M * 3, btn_h))
         current_custom_preset: CustomFitnessPreset | None = None
 
         def go_enabled() -> bool:
@@ -840,8 +870,10 @@ def run_training_config_screen(
                             name=matched_custom.preset_name,
                             config=matched_custom.fitness_config.copy(),
                         )
-                    elif selected_strategy_name in fitness_strategy_names():
-                        selected_strategy = get_fitness_strategy(selected_strategy_name)
+                    else:
+                        builtin_name = _fitness_preset_name(selected_strategy_name)
+                        if builtin_name in fitness_strategy_names():
+                            selected_strategy = get_fitness_strategy(builtin_name)
                     for name, slider in all_sliders.items():
                         slider.value = int(selected_strategy.config.get_weight(name))
                         value_inputs[name].text = str(slider.value)
@@ -928,7 +960,9 @@ def run_training_config_screen(
                     ):
                         FitnessPresetStore().delete_preset(current_custom_preset.preset_id)
                         custom_presets = FitnessPresetStore().list_presets()
-                        preset_dropdown.options = fitness_strategy_names() + tuple(
+                        preset_dropdown.options = tuple(
+                            _fitness_preset_label(name) for name in fitness_strategy_names()
+                        ) + tuple(
                             p.preset_name for p in custom_presets
                         )
                         preset_dropdown.selected = _match_preset_name(
@@ -965,12 +999,12 @@ def run_training_config_screen(
             back_button.draw(screen, font)
 
             # Left-top: map cards
-            map_title = head_title.render("CAR SETUP", True, INK)
+            map_title = font.render("車輛設定", True, INK)
             screen.blit(map_title, map_title.get_rect(midleft=(back_button.rect.right + M, back_button.rect.centery)))
-            speed_label = font.render("Max Speed (5–30)", True, DIM)
+            speed_label = font.render("最高速度（5–30）", True, DIM)
             screen.blit(speed_label, speed_label.get_rect(midright=(max_speed_input.rect.left - M // 2, max_speed_input.rect.centery)))
             max_speed_input.draw(screen, mono_speed)
-            auto_breed_label = font.render("Auto Breed (10–90s)", True, DIM)
+            auto_breed_label = font.render("自動繁殖（10–90 秒）", True, DIM)
             screen.blit(auto_breed_label, auto_breed_label.get_rect(midright=(auto_breed_input.rect.left - M // 2, auto_breed_input.rect.centery)))
             auto_breed_input.draw(screen, mono_speed)
             for diff_id, label, thumb, card_rect in map_cards:
@@ -1010,8 +1044,8 @@ def run_training_config_screen(
             pygame.draw.rect(screen, CARBON, fit_panel)
             pygame.draw.rect(screen, LINE, fit_panel, 1)
             pygame.draw.rect(screen, CYAN, pygame.Rect(fit_panel.x, fit_panel.y, 3, fit_panel.height))
-            screen.blit(head_fitness.render("FITNESS TELEMETRY", True, CYAN),
-                        (right_x + M + 4, sliders_top - head_fitness.get_height() - M // 4))
+            screen.blit(font.render("評分參數", True, CYAN),
+                        (right_x + M + 4, sliders_top - font.get_height() - M // 4))
             hovered_tip: str | None = None
             hovered_tip_pos: tuple[int, int] = (0, 0)
             icon_r = max(7, mono_value.get_height() // 2 - 1)
@@ -1019,8 +1053,8 @@ def run_training_config_screen(
                 is_bonus = name in BONUS_FITNESS_PLACEHOLDERS
                 label_color = F1_GREEN if is_bonus else F1_RED
                 slider.handle_color = CYAN if is_bonus else F1_RED
-                label_y = slider.rect.centery - font.size(name)[1] // 2
-                label_surf = font.render(name, True, label_color)
+                label_y = slider.rect.centery - font.size(FITNESS_PARAMETER_LABELS[name])[1] // 2
+                label_surf = font.render(FITNESS_PARAMETER_LABELS[name], True, label_color)
                 screen.blit(label_surf, (slider_label_x, label_y))
                 # "?" tooltip icon — fixed column just left of all sliders
                 icon_cx = slider_x - icon_r - 8
@@ -1089,9 +1123,9 @@ def run_save_confirm_screen(
         no_button = Button("不存", pygame.Rect(width // 2 - 90, height // 2, 160, 56))
         cancel_button = Button("取消", pygame.Rect(width // 2 + 80, height // 2, 160, 56))
         checkbox_label = (
-            "另存為 Fitness 預選組合"
+            "另存為評分預設組合"
             if preset_savable
-            else "另存為 Fitness 預選組合（此組合已存在，無需另存）"
+            else "另存為評分預設組合（此組合已存在，無需另存）"
         )
         save_as_preset_checkbox = Checkbox(
             pygame.Rect(width // 2 - 260, height // 2 + 80, 28, 28),
@@ -1319,7 +1353,35 @@ def _run_record_submission_screen(
     )
 
 
-_COMPETITION_LABEL: dict[str, str] = {"easy": "Easy", "hard": "Hard", "final": "Final", "legacy": "Legacy"}
+_COMPETITION_LABEL: dict[str, str] = {
+    "easy": "簡單",
+    "hard": "困難",
+    "final": "決賽",
+    "legacy": "舊版",
+    "random": "隨機",
+}
+
+_STATUS_LABEL: dict[str, str] = {
+    "queued": "已排隊",
+    "running": "處理中",
+    "completed": "已完成",
+    "rejected": "已拒絕",
+    "network_error": "網路錯誤",
+}
+
+_STAGE_LABEL: dict[str, str] = {
+    "phase_one": "第一階段",
+    "final": "決賽",
+    "closed": "已關閉",
+}
+
+
+def _display_status(status: object) -> str:
+    value = str(status)
+    if value.startswith("rejected:"):
+        reason = value.partition(":")[2]
+        return f"已拒絕：{_REASON_MESSAGES.get(reason, reason)}"
+    return _STATUS_LABEL.get(value, value)
 
 _competition_total_length_cache: dict[str, float | None] = {}
 
@@ -1342,7 +1404,7 @@ def _upload_result_lines(record: TrainingRecord) -> list[str]:
     lines: list[str] = []
     for comp_id, r in record.upload_results.items():
         label = _COMPETITION_LABEL.get(comp_id, comp_id)
-        status = r.get("status") or "--"
+        status = _display_status(r.get("status") or "--")
         completed = r.get("completed")
         if completed:
             progress_text = f"耗時 {format_ticks_as_seconds(r.get('lap_ticks'))}"
@@ -1352,7 +1414,7 @@ def _upload_result_lines(record: TrainingRecord) -> list[str]:
             if total_length:
                 progress_text = f"最遠進度 {min(100.0, mp / total_length * 100):.1f}%"
             else:
-                progress_text = f"最遠進度 {mp:.1f}px"
+                progress_text = f"最遠進度 {mp:.1f} 像素"
         sr = r.get("survival_rate") or 0.0
         uploaded_at = format_timestamp_utc8(r["uploaded_at"]) if r.get("uploaded_at") else "--"
         lines.append(
@@ -1376,8 +1438,7 @@ def run_validation_list_screen(
     while True:  # outer: rebuild on VIDEORESIZE
         font = _font(22)
         detail_font = _font(19)
-        head32 = _head_font(32)
-        head28 = _head_font(28)
+        head32 = _font(32)
         mono16 = _mono_font(19)
         line_gap = 6
         width, height = screen.get_size()
@@ -1413,15 +1474,15 @@ def run_validation_list_screen(
                 row_y = list_top + index * (row_height + row_gap)
                 button_y = row_y + (row_height - 44) // 2
                 validate_button = Button(
-                    "Validate",
+                    "驗證",
                     pygame.Rect(content_right - 380, button_y, 110, 44),
                 )
                 upload_button = Button(
-                    "Upload",
+                    "提交",
                     pygame.Rect(content_right - 260, button_y, 110, 44),
                 )
                 delete_button = Button(
-                    "Delete",
+                    "刪除",
                     pygame.Rect(content_right - 140, button_y, 110, 44),
                 )
                 validate_button.update_hover(mouse_pos)
@@ -1473,7 +1534,7 @@ def run_validation_list_screen(
                 break
 
             screen.fill(BG)
-            title = head32.render("RESULTS · VALIDATION", True, INK)
+            title = head32.render("訓練紀錄與驗證", True, INK)
             screen.blit(title, title.get_rect(midleft=(back_button.rect.right + margin, back_button.rect.centery)))
             _draw_coin_balance(
                 screen,
@@ -1490,19 +1551,19 @@ def run_validation_list_screen(
                 rank_colors = {1: F1_RED, 2: CYAN, 3: YELLOW}
                 rank_color = rank_colors.get(rank, DIM)
                 pygame.draw.rect(screen, rank_color, pygame.Rect(card_rect.x, card_rect.y, 3, card_rect.height))
-                rank_surf = head28.render(f"P{rank}", True, rank_color)
+                rank_surf = font.render(f"第 {rank} 名", True, rank_color)
                 screen.blit(rank_surf, rank_surf.get_rect(midleft=(card_rect.x + 12, card_rect.centery)))
                 text_x = card_rect.x + 56
                 performance = (
                     f"{record.best_fitness_score:.1f}"
                     if record.best_fitness_score is not None
-                    else "N/A"
+                    else "無資料"
                 )
                 metadata = (
                     f"{record.record_name}  |  "
                     f"{format_timestamp_utc8(record.saved_at)}  |  "
-                    f"NN Seed: {record.mlp_init_seed}  |  "
-                    f"Max Speed: {record.max_speed}"
+                    f"神經網路隨機碼：{record.mlp_init_seed}  |  "
+                    f"最高速度：{record.max_speed}"
                 )
                 content_width = validate_button.rect.left - text_x - margin
                 metadata = _ellipsize(font, metadata, content_width)
@@ -1513,7 +1574,7 @@ def run_validation_list_screen(
                 screen.blit(metadata_surf, (text_x, y_cursor))
                 y_cursor += metadata_surf.get_height() + line_gap
 
-                fitness_surf = mono16.render(f"Best Fitness: {performance}", True, CYAN)
+                fitness_surf = font.render(f"最佳評分：{performance}", True, CYAN)
                 screen.blit(fitness_surf, (text_x, y_cursor))
                 y_cursor += fitness_surf.get_height() + line_gap
 
@@ -1565,8 +1626,8 @@ def _pick_validation_map_screen(screen: pygame.Surface) -> str | None:
             pygame.image.load(str(VALIDATION_DIFFICULTY_MAPS["hard"][0])), (THUMB_W, THUMB_H)
         )
         cards: list[tuple[str, str, pygame.Surface | None, pygame.Rect]] = [
-            ("easy", "Easy", easy_thumb, pygame.Rect(M, card_area_top, CARD_W, CARD_H)),
-            ("hard", "Hard", hard_thumb, pygame.Rect(M * 2 + CARD_W, card_area_top, CARD_W, CARD_H)),
+            ("easy", "簡單", easy_thumb, pygame.Rect(M, card_area_top, CARD_W, CARD_H)),
+            ("hard", "困難", hard_thumb, pygame.Rect(M * 2 + CARD_W, card_area_top, CARD_W, CARD_H)),
             ("random", "隨機", None, pygame.Rect(M * 3 + CARD_W * 2, card_area_top, CARD_W, CARD_H)),
         ]
 
@@ -1600,7 +1661,7 @@ def _pick_validation_map_screen(screen: pygame.Surface) -> str | None:
                 right=W - M,
                 top=M,
             )
-            screen.blit(font.render("選擇 Validation 地圖", True, INK),
+            screen.blit(font.render("選擇驗證地圖", True, INK),
                         (M, back_button.rect.bottom + M))
             for map_id, label, thumb, rect in cards:
                 hovered = rect.collidepoint(mouse_pos)
@@ -1739,7 +1800,7 @@ def _pick_competition_screen(screen: pygame.Surface) -> str | None:
         font = _font()
         width, height = screen.get_size()
         back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
-        options = [("Easy", "easy"), ("Hard", "hard"), ("Final", "final")]
+        options = [("簡單", "easy"), ("困難", "hard"), ("決賽", "final")]
         buttons = [
             (competition_id, Button(label, pygame.Rect(width // 2 - 480 + i * 340, height // 2 - 80, 300, 160)))
             for i, (label, competition_id) in enumerate(options)
@@ -1825,14 +1886,16 @@ def _check_eligibility_screen(
                 start_button.update_hover(mouse_pos)
 
             screen.fill(BG)
-            screen.blit(font.render(f"資格檢查：{competition_id}", True, INK), (60, 140))
+            competition_label = _COMPETITION_LABEL.get(competition_id, competition_id)
+            screen.blit(font.render(f"資格檢查：{competition_label}", True, INK), (60, 140))
             back_button.draw(screen, font)
 
             if isinstance(result, NetworkError):
                 screen.blit(font.render(f"連線失敗：{result.message}", True, F1_RED), (60, 220))
             elif result.eligible:
                 screen.blit(font.render(
-                    f"可以提交。stage={result.stage}，version={result.competition_config_version}",
+                    f"可以提交。目前階段：{_STAGE_LABEL.get(result.stage, result.stage)}，"
+                    f"設定版本：{result.competition_config_version}",
                     True, F1_GREEN,
                 ), (60, 220))
                 start_button.fill_color = F1_RED
@@ -1878,8 +1941,7 @@ def _draw_progress_screen(
     width, height = screen.get_size()
     cx = width // 2
     cy = height // 2
-    head = _head_font(32)
-    mono_big = _mono_font(42)
+    head = _font(32)
     # The count labels below ("存活中"/"完成"/"撞車") are Chinese — SpaceMono
     # has no CJK glyphs, so use the CJK-capable font for this row instead.
     mono_sm = _font(18)
@@ -1905,7 +1967,7 @@ def _draw_progress_screen(
 
     # Large time display
     time_str = f"{format_ticks_as_seconds(tick)}  /  {format_ticks_as_seconds(frame_limit)}"
-    time_surf = mono_big.render(time_str, True, CYAN)
+    time_surf = font.render(time_str, True, CYAN)
     screen.blit(time_surf, time_surf.get_rect(center=(cx, cy - 30)))
 
     # Progress bar
@@ -1958,6 +2020,7 @@ def _simulate_candidates(
 
     configure_car(track_back, car_image, max_speed)
     for car in candidates:
+        car.max_speed = float(max_speed)
         car.set_collision_surface(track_back)
         car.reset_state(spawn["x"], spawn["y"], spawn["angle"], car_image=car_image)
 
@@ -1975,7 +2038,7 @@ def _simulate_candidates(
     dst_x, dst_y = (SCR_W - dst_w) // 2, (SCR_H - dst_h) // 2
     canvas = pygame.Surface((MAP_W, MAP_H)) if render_live else None
 
-    esc_button = Button("← 返回 (ESC)", pygame.Rect(SCR_W - 200, 16, 180, 40)) if render_live else None
+    esc_button = Button("← 返回（ESC）", pygame.Rect(SCR_W - 200, 16, 180, 40)) if render_live else None
 
     tick = 0
     while tick < frame_limit and any(active):
@@ -2099,7 +2162,7 @@ def _run_candidate_tournament_screen(
         assets.white_small_car,
         FRAME_LIMIT,
         trackers,
-        title=f"Competition: {competition_id}",
+        title=f"競賽評測：{_COMPETITION_LABEL.get(competition_id, competition_id)}",
         render_live=False,
         max_speed=max_speed,
     )
@@ -2169,7 +2232,7 @@ def _run_validation_tournament_screen(
         assets.white_small_car,
         VALIDATION_FRAME_LIMIT,
         trackers,
-        title=f"Validation: {map_id}",
+        title=f"驗證：{_COMPETITION_LABEL.get(map_id, map_id)}",
         stop_on_first_completion=True,
         max_speed=max_speed,
         coin_balance=shop_wallet.balance(),
@@ -2199,23 +2262,22 @@ def _validation_result_screen(
         progress_text = (
             f"{min(100.0, client_result.max_progress / total_length_px * 100):.1f}%"
             if total_length_px
-            else f"{client_result.max_progress:.1f} px"
+            else f"{client_result.max_progress:.1f} 像素"
         )
         rows = [
-            ("completed",       str(client_result.completed),                           False),
+            ("是否完賽",          "是" if client_result.completed else "否",               True),
             ("完賽時間",          format_ticks_as_seconds(client_result.lap_ticks),       True),
-            ("max_progress",    progress_text,                                          False),
+            ("最遠進度",          progress_text,                                          True),
             ("到達最遠進度時間", format_ticks_as_seconds(client_result.ticks_to_max_progress), True),
         ]
         note = ""
     else:
         rows = [("存活時間", format_ticks_as_seconds(survival_ticks), True)]
-        note = "此地圖尚無 checkpoint，progress／完賽指標暫不適用"
+        note = "此地圖尚無檢查點，前進進度與完賽指標暫不適用"
 
     while True:  # outer: rebuild on VIDEORESIZE
         font = _font()
         mono = _mono_font(18)
-        head32 = _head_font(32)
         width, height = screen.get_size()
         back_button = Button("← 返回列表", pygame.Rect(60, 40, 180, 48))
 
@@ -2238,9 +2300,10 @@ def _validation_result_screen(
             screen.fill(BG)
             _draw_coin_balance(screen, mono, coin_balance, right=width - 60, top=40)
             x_title = 60
-            head_surf = head32.render("VALIDATION ", True, INK)
+            head_surf = font.render("驗證", True, INK)
             screen.blit(head_surf, (x_title, 110))
-            screen.blit(font.render(f"成績：{map_id}", True, DIM), (x_title + head_surf.get_width(), 116))
+            map_label = _COMPETITION_LABEL.get(map_id, map_id)
+            screen.blit(font.render(f"成績：{map_label}", True, DIM), (x_title + head_surf.get_width() + 8, 116))
             panel_x, panel_y = 60, 180
             panel_w, panel_h = max(500, width // 3), len(rows) * 52 + 24
             pygame.draw.rect(screen, CARBON, pygame.Rect(panel_x, panel_y, panel_w, panel_h))
@@ -2250,7 +2313,8 @@ def _validation_result_screen(
                 y = panel_y + 12 + i * 52
                 lbl_font = font if is_cjk_label else mono
                 screen.blit(lbl_font.render(label, True, DIM), (panel_x + 12, y))
-                screen.blit(mono.render(value, True, CYAN), (panel_x + 12, y + 24))
+                value_font = mono if value.isascii() else font
+                screen.blit(value_font.render(value, True, CYAN), (panel_x + 12, y + 24))
             if note:
                 screen.blit(font.render(note, True, YELLOW), (60, panel_y + panel_h + 20))
             back_button.draw(screen, font)
@@ -2281,7 +2345,7 @@ def _submit_result_screen(
     _progress_text = (
         f"{min(100.0, client_result.max_progress / _total_length * 100):.1f}%"
         if _total_length
-        else f"{client_result.max_progress:.1f}px"
+        else f"{client_result.max_progress:.1f} 像素"
     )
     summary = (
         f"完賽！耗時 {format_ticks_as_seconds(client_result.lap_ticks)}"
@@ -2295,7 +2359,7 @@ def _submit_result_screen(
 
     while True:  # outer: rebuild on VIDEORESIZE
         font = _font()
-        head32 = _head_font(32)
+        head32 = _font(32)
         width, height = screen.get_size()
         back_button = Button("返回", pygame.Rect(60, 40, 120, 48))
         submit_button = Button("送出", pygame.Rect(width // 2 - 100, height // 2 + 80, 200, 56))
@@ -2360,7 +2424,8 @@ def _submit_result_screen(
                 submit_button.update_hover(mouse_pos)
 
             screen.fill(BG)
-            screen.blit(head32.render(f"Local Winner: {competition_id}", True, INK), (60, 140))
+            competition_label = _COMPETITION_LABEL.get(competition_id, competition_id)
+            screen.blit(head32.render(f"本機評測優勝者：{competition_label}", True, INK), (60, 140))
             screen.blit(font.render(completed_text, True, INK), (60, 200))
             screen.blit(font.render(summary, True, CYAN), (60, 236))
             screen.blit(font.render(survival_text, True, DIM), (60, 272))
@@ -2370,10 +2435,10 @@ def _submit_result_screen(
                 submit_button.draw(screen, font)
 
             if isinstance(response, SubmissionAccepted):
-                status = response.body.get("status", "queued")
+                status = _display_status(response.body.get("status", "queued"))
                 submission_id = response.body.get("submission_id", "")
                 screen.blit(font.render(
-                    f"已送出！submission_id={submission_id}，狀態：{status}", True, F1_GREEN
+                    f"已送出！提交編號：{submission_id}，狀態：{status}", True, F1_GREEN
                 ), (60, 320))
             elif isinstance(response, SubmissionRejected):
                 reason_text = _REASON_MESSAGES.get(response.error, response.error)

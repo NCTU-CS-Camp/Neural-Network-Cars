@@ -15,6 +15,7 @@ from game_engine.backend.assets import GameAssets, load_game_assets
 from game_engine.backend.car import Car, configure_car, set_collision_map
 from game_engine.backend.competition_track import CompetitionRunTracker
 from game_engine.backend.settings import (
+    FONT_PATH,
     HIDDEN_LAYER,
     INPUT_LAYER,
     MAX_SPEED,
@@ -31,6 +32,8 @@ from shared.contracts import ClientResult, RuntimeSettings, SubmissionPayload
 
 CompetitionName = str
 LAYER_SIZES = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
+
+COMPETITION_LABELS = {"easy": "簡單", "hard": "困難", "final": "決賽"}
 
 
 @dataclass(slots=True)
@@ -135,7 +138,7 @@ class CompetitionTrainingClient:
     aux_car: Car | None = None
     generated_result: ClientResult | None = None
     manual_override: bool = False
-    status: str = "Ready. Train, press V to score, press U to submit."
+    status: str = "已就緒。按 V 計算成績，按 U 提交最佳車輛。"
     field_index: int = 0
     fitness_strategy: Any = None
     fields: list[TextField] = field(default_factory=list)
@@ -163,7 +166,7 @@ class CompetitionTrainingClient:
 
     @property
     def server_url(self) -> str:
-        return (self.fields[2].value.strip() or self.settings.server_url).rstrip("/")
+        return (self.fields[5].value.strip() or self.settings.server_url).rstrip("/")
 
     @property
     def admin_token(self) -> str:
@@ -200,7 +203,8 @@ class CompetitionTrainingClient:
             self.session.reset_generation()
         self.reset_positions(reset_images=True)
         self.generated_result = None
-        self.status = f"Loaded {competition_id.upper()} map."
+        label = COMPETITION_LABELS.get(competition_id, competition_id)
+        self.status = f"已載入{label}地圖。"
 
     def reset_positions(self, *, reset_images: bool = False) -> None:
         if self.competition_map is None or self.collision is None or self.cars is None:
@@ -267,8 +271,8 @@ class CompetitionTrainingClient:
             return True
         elif key == pygame.K_o:
             self.manual_override = not self.manual_override
-            mode = "manual override" if self.manual_override else "generated result"
-            self.status = f"Result mode: {mode}."
+            mode = "手動輸入" if self.manual_override else "自動計算"
+            self.status = f"成績模式：{mode}。"
             return True
         elif key == pygame.K_v:
             self.score_best_car()
@@ -346,7 +350,7 @@ class CompetitionTrainingClient:
             car for car in self.session.selected_cars if car in self.cars
         ]
         self.session.alive_count = len([car for car in self.cars if not car.collided])
-        self.status = f"Kept {len(self.cars)} cars."
+        self.status = f"已保留 {len(self.cars)} 台車。"
 
     def manual_breed(self) -> None:
         if self.cars is None or self.aux_car is None:
@@ -360,19 +364,19 @@ class CompetitionTrainingClient:
             assets=self.assets,
         )
         if self.session.generation == before:
-            self.status = "Select exactly two cars before manual breed."
+            self.status = "手動繁殖前請剛好選擇兩台車。"
             return
         self.reset_positions(reset_images=False)
-        self.status = f"Generation {self.session.generation}: manual breed."
+        self.status = f"第 {self.session.generation} 代：已完成手動繁殖。"
 
     def auto_breed(self) -> None:
         if self.cars is None or len(self.cars) < 2:
-            self.status = "Need at least two cars to auto-breed."
+            self.status = "自動繁殖至少需要兩台車。"
             return
         ranked = sorted(self.cars, key=rank_car, reverse=True)
         self.session.selected_cars = ranked[:2]
         self.manual_breed()
-        self.status = f"Generation {self.session.generation}: auto-bred top two cars."
+        self.status = f"第 {self.session.generation} 代：已用前兩名自動繁殖。"
 
     def reset_population(self) -> None:
         self.cars = [Car(LAYER_SIZES) for _ in range(self.session.population_size)]
@@ -380,7 +384,7 @@ class CompetitionTrainingClient:
         self.session.reset_generation()
         self.reset_positions(reset_images=True)
         self.generated_result = None
-        self.status = "Population reset."
+        self.status = "車輛群體已重設。"
 
     def best_car(self) -> Car | None:
         if not self.cars:
@@ -390,7 +394,7 @@ class CompetitionTrainingClient:
     def score_best_car(self) -> None:
         best = self.best_car()
         if best is None:
-            self.status = "No cars to score."
+            self.status = "沒有可計算成績的車輛。"
             return
         try:
             self.generated_result = evaluate_car_result(
@@ -399,10 +403,10 @@ class CompetitionTrainingClient:
                 max_speed=self.submission_max_speed,
             )
         except ValueError as exc:
-            self.status = f"Scoring failed: {exc}"
+            self.status = f"成績計算失敗：{exc}"
             return
         self._sync_result_fields(self.generated_result)
-        self.status = "Generated client_result from best car."
+        self.status = "已根據最佳車輛產生評測結果。"
 
     def current_client_result(self) -> ClientResult:
         if self.manual_override:
@@ -415,13 +419,13 @@ class CompetitionTrainingClient:
         if self.generated_result is None:
             self.score_best_car()
         if self.generated_result is None:
-            raise ValueError("no generated client_result available")
+            raise ValueError("尚未產生評測結果")
         return self.generated_result
 
     def submit_best_car(self) -> None:
         best = self.best_car()
         if best is None:
-            self.status = "No cars to submit."
+            self.status = "沒有可提交的車輛。"
             return
         try:
             if not self.user_token and not self.login_user():
@@ -434,9 +438,9 @@ class CompetitionTrainingClient:
                 token=self.user_token,
             )
             if not eligibility.get("eligible"):
-                reason = eligibility.get("reason", "not eligible")
+                reason = eligibility.get("reason", "不符合資格")
                 next_at = eligibility.get("next_submission_at", "")
-                self.status = f"Not eligible: {reason} {next_at}"
+                self.status = f"目前無法提交：{reason} {next_at}"
                 return
             result = self.current_client_result()
             submission = submit_car(
@@ -452,13 +456,13 @@ class CompetitionTrainingClient:
                 timeout=8.0,
             )
         except (ValueError, HTTPError, URLError, TimeoutError) as exc:
-            self.status = f"Submit failed: {exc}"
+            self.status = f"提交失敗：{exc}"
             return
         self.status = submission.message
 
     def login_user(self) -> bool:
         if not self.password:
-            self.status = "Password required before login."
+            self.status = "登入前請輸入密碼。"
             return False
         try:
             response = post_json(
@@ -470,21 +474,21 @@ class CompetitionTrainingClient:
                 },
             )
         except (HTTPError, URLError, ValueError, TimeoutError) as exc:
-            self.status = f"Login failed: {exc}"
+            self.status = f"登入失敗：{exc}"
             self.user_token = None
             return False
         token = response.get("token")
         if not token:
-            self.status = "Login failed: missing token."
+            self.status = "登入失敗：伺服器未回傳登入憑證。"
             self.user_token = None
             return False
         self.user_token = str(token)
-        self.status = f"Logged in as Group {self.group_id} / {self.user_id}."
+        self.status = f"已登入：第 {self.group_id} 組／{self.user_id}。"
         return True
 
     def run_batch_now(self) -> None:
         if not self.admin_token:
-            self.status = "Admin token required to run batch now."
+            self.status = "立即執行批次需要管理員憑證。"
             return
         try:
             response = post_admin(
@@ -493,12 +497,12 @@ class CompetitionTrainingClient:
                 token=self.admin_token,
             )
         except (HTTPError, URLError, ValueError, TimeoutError) as exc:
-            self.status = f"Run batch failed: {exc}"
+            self.status = f"批次執行失敗：{exc}"
             return
-        self.status = f"Batch processed {response.get('processed', 0)} submissions."
+        self.status = f"批次已處理 {response.get('processed', 0)} 筆提交。"
 
     def _sync_result_fields(self, result: ClientResult) -> None:
-        self.result_fields[0].value = "true" if result.completed else "false"
+        self.result_fields[0].value = "是" if result.completed else "否"
         self.result_fields[1].value = "" if result.lap_ticks is None else str(result.lap_ticks)
         self.result_fields[2].value = f"{result.max_progress:.1f}"
         self.result_fields[3].value = str(result.ticks_to_max_progress)
@@ -538,9 +542,10 @@ class CompetitionTrainingClient:
         overlay.fill(PANEL_BG)
         self.screen.blit(overlay, PANEL.topleft)
         pygame.draw.rect(self.screen, BORDER, PANEL, width=1, border_radius=8)
-        self._text("Competition Test Main", PANEL.x + 18, PANEL.y + 18, self.title_font)
+        self._text("競賽測試工具", PANEL.x + 18, PANEL.y + 18, self.title_font)
+        competition_label = COMPETITION_LABELS.get(self.competition_id, self.competition_id)
         self._text(
-            f"Map: {self.competition_id.upper()}   Gen: {self.session.generation}",
+            f"地圖：{competition_label}   世代：{self.session.generation}",
             PANEL.x + 18,
             PANEL.y + 58,
             self.font,
@@ -550,7 +555,7 @@ class CompetitionTrainingClient:
         total = len(self.cars or [])
         selected = len(self.session.selected_cars)
         self._text(
-            f"Cars {total}  Alive {alive}  Selected {selected}",
+            f"車輛 {total}  存活 {alive}  已選 {selected}",
             PANEL.x + 18,
             PANEL.y + 84,
             self.small_font,
@@ -559,20 +564,20 @@ class CompetitionTrainingClient:
         for text_field in self.fields:
             text_field.draw(self.screen, self.small_font)
         y = PANEL.y + 382
-        self._text("Shortcuts", PANEL.x + 18, y, self.font)
+        self._text("快捷鍵", PANEL.x + 18, y, self.font)
         shortcuts = [
-            "E/H/F map   L lines   R reset",
-            "LMB select   RMB remove   C clean",
-            "B breed selected   G auto-breed",
-            "V score best   O manual result",
-            "I login   U submit best   P run batch",
-            "Tab moves between fields",
+            "E/H/F 切換地圖   L 感測線   R 重設",
+            "左鍵選擇   右鍵移除   C 清除撞車",
+            "B 繁殖已選車輛   G 自動繁殖",
+            "V 計算最佳成績   O 手動成績",
+            "I 登入   U 提交最佳車輛   P 執行批次",
+            "Tab 切換輸入欄位",
         ]
         for index, text in enumerate(shortcuts):
             self._text(text, PANEL.x + 18, y + 28 + index * 20, self.small_font, MUTED)
         y += 162
-        mode = "Manual override" if self.manual_override else "Generated result"
-        self._text(f"client_result: {mode}", PANEL.x + 18, y, self.font, GREEN)
+        mode = "手動輸入" if self.manual_override else "自動計算"
+        self._text(f"評測結果：{mode}", PANEL.x + 18, y, self.font, GREEN)
         for text_field in self.result_fields:
             text_field.draw(self.screen, self.small_font)
         y += 170
@@ -585,12 +590,12 @@ class CompetitionTrainingClient:
         try:
             result = self.current_client_result() if self.manual_override else self.generated_result
         except ValueError as exc:
-            return f"Invalid manual result: {exc}"
+            return f"手動成績無效：{exc}"
         if result is None:
-            return "Press V to generate a client_result."
+            return "請按 V 產生評測結果。"
         if result.completed:
-            return f"completed lap_ticks={result.lap_ticks}"
-        return f"incomplete progress={result.max_progress:.1f} tick={result.ticks_to_max_progress}"
+            return f"已完賽，圈速幀數：{result.lap_ticks}"
+        return f"未完賽，最遠進度：{result.max_progress:.1f}，幀數：{result.ticks_to_max_progress}"
 
     def _text(
         self,
@@ -603,23 +608,19 @@ class CompetitionTrainingClient:
         self.screen.blit(font.render(text, True, color), (x, y))
 
 
-def run(server_url: str | None = None) -> None:
+def run() -> None:
     pygame.init()
     settings = load_runtime_settings()
-    if server_url is not None:
-        settings.server_url = server_url
-    elif os.environ.get("COMPETITION_SERVER_URL"):
-        settings.server_url = str(os.environ["COMPETITION_SERVER_URL"])
     screen = pygame.display.set_mode(SCREEN_SIZE)
-    pygame.display.set_caption("Neural Cars Competition Test Main")
+    pygame.display.set_caption("神經網路賽車競賽測試")
     client = CompetitionTrainingClient(
         settings=settings,
         assets=load_game_assets(),
         screen=screen,
         clock=pygame.time.Clock(),
-        font=pygame.font.SysFont("Arial", 18),
-        small_font=pygame.font.SysFont("Arial", 15),
-        title_font=pygame.font.SysFont("Arial", 26, bold=True),
+        font=pygame.font.Font(str(FONT_PATH), 18),
+        small_font=pygame.font.Font(str(FONT_PATH), 15),
+        title_font=pygame.font.Font(str(FONT_PATH), 26),
         session=TrainingSession.from_settings(settings),
     )
     client.run()
@@ -696,11 +697,11 @@ def build_manual_client_result(
 
 def parse_bool(value: str) -> bool:
     lowered = value.strip().lower()
-    if lowered in {"1", "true", "t", "yes", "y", "completed"}:
+    if lowered in {"1", "true", "t", "yes", "y", "completed", "是", "已完賽"}:
         return True
-    if lowered in {"0", "false", "f", "no", "n", "incomplete", ""}:
+    if lowered in {"0", "false", "f", "no", "n", "incomplete", "", "否", "未完賽"}:
         return False
-    raise ValueError("completed must be true or false")
+    raise ValueError("是否完賽必須填「是」或「否」")
 
 
 def rank_car(car: Car) -> float:
@@ -750,7 +751,7 @@ def _post_json(
     except (URLError, TimeoutError, ConnectionError, OSError) as exc:
         return NetworkError(message=str(exc))
     except json.JSONDecodeError as exc:
-        return NetworkError(message=f"server 回應格式錯誤: {exc}")
+        return NetworkError(message=f"伺服器回應格式錯誤：{exc}")
 
 
 def _eligibility_path(competition_id: str) -> str:
@@ -779,7 +780,7 @@ def authenticate_user(
 
     status, body = result
     if status != 200:
-        detail = body.get("detail", "invalid credentials")
+        detail = body.get("detail", "帳號或密碼錯誤")
         return NetworkError(message=f"登入失敗（HTTP {status}）：{detail}")
 
     token = str(body.get("token", "")).strip()
@@ -787,9 +788,9 @@ def authenticate_user(
     response_group_id = str(body.get("group_id", "")).strip()
     response_username = str(body.get("username", "")).strip()
     if not token or not expires_at:
-        return NetworkError(message="登入失敗：server 回應缺少 token 或 expires_at")
+        return NetworkError(message="登入失敗：伺服器回應缺少登入憑證或到期時間")
     if response_group_id != group_id or response_username != username:
-        return NetworkError(message="登入失敗：server 回傳的使用者身分不一致")
+        return NetworkError(message="登入失敗：伺服器回傳的使用者身分不一致")
     return AuthenticatedSession(
         token=token,
         expires_at=expires_at,
@@ -822,7 +823,7 @@ def check_eligibility(
 
     status, body = result
     if status != 200:
-        return NetworkError(message=f"server 回應非預期狀態碼: {status}")
+        return NetworkError(message=f"伺服器回應了非預期狀態碼：{status}")
     return EligibilityResult(
         eligible=bool(body.get("eligible", False)),
         reason=body.get("reason"),
@@ -863,7 +864,7 @@ def submit(
             error=str(response_body.get("error", "rejected")),
             next_submission_at=response_body.get("next_submission_at"),
         )
-    return NetworkError(message=f"server 回應非預期狀態碼: {status}")
+    return NetworkError(message=f"伺服器回應了非預期狀態碼：{status}")
 
 
 def post_admin(server_url: str, path: str, *, token: str) -> dict[str, Any]:
@@ -902,16 +903,15 @@ def post_json(url: str, body: dict[str, Any], *, token: str | None = None) -> di
 def _build_fields(settings: RuntimeSettings) -> list[TextField]:
     x = PANEL.x + 18
     y = PANEL.y + 130
-    server_url = os.environ.get("COMPETITION_SERVER_URL", settings.server_url)
     admin_token = os.environ.get("COMPETITION_ADMIN_TOKEN", "admin")
     return [
-        TextField("User ID", settings.username, pygame.Rect(x, y, FIELD_W, FIELD_H)),
-        TextField("Group ID", settings.group_id, pygame.Rect(x + 250, y, 178, FIELD_H)),
-        TextField("Password", "", pygame.Rect(x, y + 58, 190, FIELD_H), True),
-        TextField("Skin ID", "0", pygame.Rect(x + 204, y + 58, 88, FIELD_H)),
-        TextField("Max Speed", str(settings.max_speed), pygame.Rect(x + 306, y + 58, 122, FIELD_H)),
-        TextField("Server URL", server_url, pygame.Rect(x, y + 116, 428, FIELD_H)),
-        TextField("Admin Token", admin_token, pygame.Rect(x, y + 174, 428, FIELD_H), True),
+        TextField("使用者", settings.username, pygame.Rect(x, y, FIELD_W, FIELD_H)),
+        TextField("組別", settings.group_id, pygame.Rect(x + 250, y, 178, FIELD_H)),
+        TextField("密碼", "", pygame.Rect(x, y + 58, 190, FIELD_H), True),
+        TextField("造型編號", "0", pygame.Rect(x + 204, y + 58, 88, FIELD_H)),
+        TextField("最高速度", str(settings.max_speed), pygame.Rect(x + 306, y + 58, 122, FIELD_H)),
+        TextField("伺服器網址", settings.server_url, pygame.Rect(x, y + 116, 428, FIELD_H)),
+        TextField("管理員憑證", admin_token, pygame.Rect(x, y + 174, 428, FIELD_H), True),
     ]
 
 
@@ -919,10 +919,10 @@ def _build_result_fields() -> list[TextField]:
     x = PANEL.x + 18
     y = PANEL.y + 606
     return [
-        TextField("Completed", "false", pygame.Rect(x, y, 118, FIELD_H)),
-        TextField("Lap Ticks", "", pygame.Rect(x + 132, y, 118, FIELD_H)),
-        TextField("Max Progress", "0.0", pygame.Rect(x, y + 58, 170, FIELD_H)),
-        TextField("Ticks To Max", "0", pygame.Rect(x + 184, y + 58, 170, FIELD_H)),
+        TextField("是否完賽", "否", pygame.Rect(x, y, 118, FIELD_H)),
+        TextField("完賽幀數", "", pygame.Rect(x + 132, y, 118, FIELD_H)),
+        TextField("最遠進度", "0.0", pygame.Rect(x, y + 58, 170, FIELD_H)),
+        TextField("到達最遠進度幀數", "0", pygame.Rect(x + 184, y + 58, 170, FIELD_H)),
     ]
 
 

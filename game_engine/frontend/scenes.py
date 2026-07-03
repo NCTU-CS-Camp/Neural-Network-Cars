@@ -27,33 +27,33 @@ class Scene:
 def build_default_scenes(settings: RuntimeSettings) -> dict[str, Scene]:
     common_labels = [
         Label(
-            f"User: {settings.username}  Group: {settings.group_id}",
+            f"使用者：{settings.username}  組別：{settings.group_id}",
             (20, 76),
         ),
     ]
     return {
         "home": Scene(
             name="home",
-            title="Neural Network Cars",
-            subtitle="Project shell for GA, UI, and backend collaboration.",
+            title="神經網路賽車",
+            subtitle="賽車訓練與測試主畫面。",
             labels=common_labels,
         ),
         "settings": Scene(
             name="settings",
-            title="Settings",
-            subtitle="Reserved for config controls and profile editing.",
+            title="設定",
+            subtitle="調整遊戲設定與使用者資料。",
             labels=common_labels,
         ),
         "training": Scene(
             name="training",
-            title="Training",
-            subtitle="Current simulator scene and training session runtime.",
+            title="訓練",
+            subtitle="查看目前的模擬與訓練進度。",
             labels=common_labels,
         ),
         "replay": Scene(
             name="replay",
-            title="Replay",
-            subtitle="Reserved for local replay review and server playback jobs.",
+            title="重播",
+            subtitle="查看本機評測與伺服器重播。",
             labels=common_labels,
         ),
     }

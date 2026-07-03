@@ -9,7 +9,6 @@ from shapely.geometry import Point  # type: ignore[import-untyped]
 from shapely.geometry.polygon import Polygon  # type: ignore[import-untyped]
 
 from game_engine.backend.assets import load_game_assets
-from game_engine.backend.environment import load_server_url
 from game_engine.backend.car import (
     DEFAULT_MLP_INIT_SEED,
     Car,
@@ -28,7 +27,6 @@ from game_engine.backend.settings import (
     F1_GREEN,
     F1_RED,
     FONT_PATH,
-    HEAD_FONT_PATH,
     HIDDEN_LAYER,
     INK,
     INPUT_LAYER,
@@ -56,7 +54,6 @@ from game_engine.frontend.shop import wallet
 from game_engine.frontend.shop.config import GENERATION_REWARD
 from game_engine.frontend.shop.renderer import apply_equipped_skin, equipped_skin_id
 from game_engine.frontend.shop.screen import run_shop_screen
-from game_engine.frontend.scenes import AppShell
 from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
     CUSTOM_PRESET_LABEL,
@@ -120,7 +117,6 @@ def run():
 
     try:
         settings = load_runtime_settings()
-        settings.server_url = load_server_url()
         profile = load_login_profile()
         should_save_settings = (
             profile is None or not login_session_is_valid(profile)
@@ -191,7 +187,6 @@ def run_training_loop(
     parent_record: TrainingRecord | None = None,
 ):
     session = TrainingSession.from_settings(settings)
-    shell = AppShell(settings)
     fitness_config = fitness_strategy.config
 
     assets = load_game_assets()
@@ -211,7 +206,7 @@ def run_training_loop(
     simulator = Simulator(track, settings.fps)
 
     generation_started_at = pygame.time.get_ticks()
-    submit_status = "Submit: not sent"
+    submit_status = "提交：尚未送出"
     layer_sizes = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
 
     car = Car(layer_sizes)
@@ -254,10 +249,10 @@ def run_training_loop(
     _map_dst_h = MAP_H
     _map_dst_x = 0
     _map_dst_y = 0
-    back_button = Button("Back", pygame.Rect(0, 0, 180, 44))
+    back_button = Button("返回", pygame.Rect(0, 0, 180, 44))
     new_map_button = Button("新地圖", pygame.Rect(0, 0, 180, 44)) if map_difficulty == 3 else None
-    next_gen_button = Button("下一代 (Next Gen)", pygame.Rect(0, 0, 180, 44))
-    restart_button = Button("Restart", pygame.Rect(0, 0, 180, 44))
+    next_gen_button = Button("下一代", pygame.Rect(0, 0, 180, 44))
+    restart_button = Button("重新開始", pygame.Rect(0, 0, 180, 44))
 
     def recalculate_layout() -> None:
         nonlocal W, H, _map_scale, _map_dst_w, _map_dst_h, _map_dst_x, _map_dst_y
@@ -286,13 +281,12 @@ def run_training_loop(
         )
 
     font = pygame.font.Font(str(FONT_PATH), 18)
-    _bar_head = pygame.font.Font(str(HEAD_FONT_PATH), 14)
     _bar_mono = pygame.font.Font(str(MONO_FONT_PATH), 14)
     _bar_cjk = pygame.font.Font(str(FONT_PATH), 14)
     _next_gen_mono = pygame.font.Font(str(MONO_FONT_PATH), 18)
-    _badge_font = pygame.font.Font(str(HEAD_FONT_PATH), 14)
+    _badge_font = pygame.font.Font(str(FONT_PATH), 14)
     _tower_font = pygame.font.Font(str(MONO_FONT_PATH), 14)
-    _tower_head = pygame.font.Font(str(HEAD_FONT_PATH), 14)
+    _tower_head = pygame.font.Font(str(FONT_PATH), 14)
 
     def persist_settings():
         settings.mutation_rate = session.mutation_rate
@@ -339,14 +333,13 @@ def run_training_loop(
 
     _mono = pygame.font.Font(str(MONO_FONT_PATH), 15)
     _mono_cjk = pygame.font.Font(str(FONT_PATH), 15)
-    _head = pygame.font.Font(str(HEAD_FONT_PATH), 15)
 
     def display_texts():
         rows = [
-            ("GEN",      str(session.generation),          INK),
-            ("CARS",     str(session.population_size),     INK),
-            ("ALIVE",    str(session.alive_count),         F1_GREEN),
-            ("FITNESS",  fitness_strategy.name,            INK),
+            ("世代",      str(session.generation),          INK),
+            ("車輛數",    str(session.population_size),     INK),
+            ("存活數",    str(session.alive_count),         F1_GREEN),
+            ("評分模式",  fitness_strategy.name,            INK),
         ]
         panel_w = 220
         panel_h = len(rows) * 22 + 16
@@ -357,7 +350,7 @@ def run_training_loop(
         pygame.draw.rect(game_display, CYAN, pygame.Rect(panel_x, panel_y, 3, panel_h))
         for i, (label, value, val_color) in enumerate(rows):
             y = panel_y + 8 + i * 22
-            lbl_surf = _mono.render(label, True, DIM)
+            lbl_surf = _mono_cjk.render(label, True, DIM)
             game_display.blit(lbl_surf, (panel_x + 8, y))
             # Values are normally plain ASCII (counts, seconds), but a custom
             # fitness preset name can contain Chinese — SpaceMono has no CJK
@@ -409,7 +402,7 @@ def run_training_loop(
         finish_awarded_this_gen = False
 
     _leader_colors = (F1_RED, CYAN)
-    _leader_labels = ("P1", "P2")
+    _leader_labels = ("第 1 名", "第 2 名")
 
     def draw_fitness_leaders(target):
         if not nn_cars:
@@ -446,7 +439,7 @@ def run_training_loop(
     def submit_best_car():
         nonlocal submit_status
         if not nn_cars:
-            submit_status = "Submit: no cars"
+            submit_status = "提交：沒有可用車輛"
             return
 
         best_car = max(
@@ -503,12 +496,12 @@ def run_training_loop(
         bar_h = 36
         pygame.draw.rect(game_display, (8, 9, 12, 210), pygame.Rect(0, 0, W, bar_h))
         pygame.draw.line(game_display, LINE, (0, bar_h), (W, bar_h))
-        training_surf = _bar_head.render("TRAINING", True, F1_RED)
+        training_surf = _bar_cjk.render("訓練中", True, F1_RED)
         game_display.blit(training_surf, training_surf.get_rect(midleft=(12, bar_h // 2)))
         name_surf = _bar_cjk.render(profile.username, True, DIM)
         name_rect = name_surf.get_rect(midleft=(training_surf.get_width() + 24, bar_h // 2))
         game_display.blit(name_surf, name_rect)
-        group_surf = _bar_mono.render(f"  Group {profile.group_id}", True, DIM)
+        group_surf = _bar_cjk.render(f"  第 {profile.group_id} 組", True, DIM)
         game_display.blit(group_surf, group_surf.get_rect(midleft=(name_rect.right, bar_h // 2)))
         remaining_seconds = max(0.0, session.generation_duration_seconds - generation_elapsed_seconds())
         _ng_right = back_button.rect.left - 12
@@ -516,13 +509,13 @@ def run_training_loop(
         _GAP = 22  # space between items
 
         # Render all label+value surfaces (unified _bar_mono labels / _next_gen_mono values)
-        _coin_lbl_s = _bar_mono.render("COINS", True, DIM)
+        _coin_lbl_s = _bar_cjk.render("金幣", True, DIM)
         _coin_val_s = _next_gen_mono.render(str(coin_balance), True, YELLOW)
-        _ng_lbl_s   = _bar_mono.render("NEXT GEN", True, DIM)
-        _ng_val_s   = _next_gen_mono.render(f"{remaining_seconds:.3f}s", True, YELLOW)
-        _spd_lbl_s  = _bar_mono.render("MAX SPD", True, DIM)
+        _ng_lbl_s   = _bar_cjk.render("下一代（秒）", True, DIM)
+        _ng_val_s   = _next_gen_mono.render(f"{remaining_seconds:.3f}", True, YELLOW)
+        _spd_lbl_s  = _bar_cjk.render("最高速度", True, DIM)
         _spd_val_s  = _next_gen_mono.render(str(settings.max_speed), True, YELLOW)
-        _seed_lbl_s = _bar_mono.render("NN SEED", True, DIM)
+        _seed_lbl_s = _bar_cjk.render("網路種子", True, DIM)
         _seed_val_s = _next_gen_mono.render(str(session.evolution_seed), True, YELLOW)
 
         # Lay out right-to-left: COINS → NEXT GEN → MAX SPD → NN SEED
@@ -558,7 +551,7 @@ def run_training_loop(
             tower_x, tower_y = 16, bar_h + 8
             tower_w = 180
             tower_colors = (F1_RED, CYAN)
-            tower_labels = ("P1", "P2")
+            tower_labels = ("第 1 名", "第 2 名")
             for ti, (ldr, tc, tl) in enumerate(zip(tower_leaders, tower_colors, tower_labels, strict=False)):
                 row_rect = pygame.Rect(tower_x, tower_y + ti * 30, tower_w, 26)
                 pygame.draw.rect(game_display, CARBON, row_rect)
@@ -704,7 +697,7 @@ def run_training_loop(
                     save_training_record(record_name)
                 if save_as_preset:
                     preset_name = run_record_name_screen(
-                        screen, title="幫這組 Fitness 參數命名"
+                        screen, title="幫這組評分參數命名"
                     )
                     if preset_name is not None:
                         FitnessPresetStore().save_preset(preset_name, fitness_config)

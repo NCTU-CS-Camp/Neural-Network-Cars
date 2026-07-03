@@ -26,16 +26,16 @@ _Row = tuple[str, object]
 
 def _rows() -> list[_Row]:
     rows: list[_Row] = [("section", "重複可得（不限次數）")]
-    rows.append(("完成一次 generation", GENERATION_REWARD))
-    rows.append(("easy training 到達終點", TRAINING_FINISH_REWARD.get(1, 0)))
-    rows.append(("hard training 到達終點", TRAINING_FINISH_REWARD.get(2, 0)))
-    rows.append(("random training 到達終點", TRAINING_FINISH_REWARD.get(3, 0)))
+    rows.append(("完成一個世代", GENERATION_REWARD))
+    rows.append(("簡單訓練到達終點", TRAINING_FINISH_REWARD.get(1, 0)))
+    rows.append(("困難訓練到達終點", TRAINING_FINISH_REWARD.get(2, 0)))
+    rows.append(("隨機訓練到達終點", TRAINING_FINISH_REWARD.get(3, 0)))
 
     rows.append(("section", "首次達成（每項限一次）"))
     for label, milestones in (
-        ("easy validation", EASY_VALIDATION_MILESTONES),
-        ("hard validation", HARD_VALIDATION_MILESTONES),
-        ("random validation", RANDOM_VALIDATION_MILESTONES),
+        ("簡單驗證", EASY_VALIDATION_MILESTONES),
+        ("困難驗證", HARD_VALIDATION_MILESTONES),
+        ("隨機驗證", RANDOM_VALIDATION_MILESTONES),
     ):
         for _key, threshold, reward in milestones:
             rows.append((f"{label} {int(threshold)} 秒內完成", reward))

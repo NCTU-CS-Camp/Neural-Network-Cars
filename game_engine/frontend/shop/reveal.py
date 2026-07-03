@@ -97,7 +97,7 @@ def _reveal_one(
     badge_font = _font(28)
     hint_font = _font(24)
 
-    skip_button = Button("Skip", pygame.Rect(width - 180, height - 80, 150, 50))
+    skip_button = Button("全部跳過", pygame.Rect(width - 180, height - 80, 150, 50))
 
     particles: list[_Particle] = []
     phase = "buildup"
@@ -221,7 +221,7 @@ def _reveal_one(
             tier_surface = tier_font.render(f"【{result.tier}】", True, color)
             screen.blit(tier_surface, tier_surface.get_rect(center=(cx, cy + 220)))
             badge_text, badge_color = (
-                ("NEW!", (255, 215, 90)) if not result.duplicate else ("已擁有", (150, 150, 150))
+                ("新取得！", (255, 215, 90)) if not result.duplicate else ("已擁有", (150, 150, 150))
             )
             badge_surface = badge_font.render(badge_text, True, badge_color)
             screen.blit(badge_surface, badge_surface.get_rect(center=(cx + 130, cy - 120)))

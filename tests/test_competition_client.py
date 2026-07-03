@@ -24,7 +24,7 @@ from game_engine.frontend.competition_client import (
 from game_engine.frontend.submission_client import submit_car
 from server.competition_config import FRAME_LIMIT
 from server.competition_maps import get_competition_map
-from shared.contracts import ClientResult, SubmissionPayload
+from shared.contracts import ClientResult, RuntimeSettings, SubmissionPayload
 
 
 LAYER_SIZES = [INPUT_LAYER, HIDDEN_LAYER, OUTPUT_LAYER]
@@ -35,7 +35,6 @@ def competition_client():
     os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     pygame.init()
     screen = pygame.display.set_mode((1600, 900))
-    from shared.contracts import RuntimeSettings
 
     settings = RuntimeSettings(population_size=4, mutation_rate=0)
     return CompetitionTrainingClient(
@@ -88,6 +87,24 @@ def test_parse_bool_accepts_ui_friendly_values():
     assert parse_bool("") is False
 
 
+def test_competition_client_uses_settings_server_url(competition_client):
+    competition_client.fields[2].value = "student-password"
+    competition_client.fields[5].value = "http://192.168.1.20:8000/"
+
+    assert competition_client.server_url == "http://192.168.1.20:8000"
+
+
+def test_competition_client_does_not_override_settings_url_from_environment(
+    monkeypatch,
+):
+    monkeypatch.setenv("COMPETITION_SERVER_URL", "http://env.example:8000")
+    settings = RuntimeSettings(server_url="http://settings.example:8000")
+
+    fields = client_module._build_fields(settings)
+
+    assert fields[5].value == "http://settings.example:8000"
+
+
 def test_generated_client_result_is_test_only_incomplete_result():
     pygame.init()
     car = Car(LAYER_SIZES)
@@ -136,7 +153,7 @@ def test_submit_client_still_requires_explicit_client_result():
     )
 
     assert result.ok is False
-    assert "client_result" in result.message
+    assert "本機評測結果" in result.message
     assert "competition_main.py" in result.message
 
 
@@ -282,7 +299,7 @@ def test_auto_breed_shortcut_works_even_when_user_field_is_active(competition_cl
 
     assert competition_client.session.generation == 2
     assert user_field.value == before_value
-    assert "auto-bred" in competition_client.status
+    assert "自動繁殖" in competition_client.status
 
 
 def test_active_field_still_accepts_normal_text(competition_client):

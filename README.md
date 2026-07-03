@@ -88,13 +88,15 @@ uv run python main.py
 名字與密碼。本機會保存 server 回傳的 12 小時 bearer token，但不保存密碼；
 Eligibility 與 Upload submission 會自動攜帶此 token。
 
-Client 使用的 API 位址由專案根目錄的 `.env` 設定：
+Client 使用的 API 位址由專案根目錄的 `settings.json` 設定：
 
-```dotenv
-COMPETITION_SERVER_URL=http://127.0.0.1:8000
+```json
+{
+  "server_url": "http://127.0.0.1:8000"
+}
 ```
 
-請先複製 `.env.example` 為 `.env`，再依本機環境修改 IP、protocol 與 port。`.env`、`settings.json`、`profile.json`、`records.json` 與隨機賽道輸出皆為本機執行期資料，不納入版本控制。登入畫面不允許使用者修改此位址；若作業系統環境變數中也有 `COMPETITION_SERVER_URL`，環境變數優先。
+請依本機環境修改 `server_url` 的 IP、protocol 與 port。`.env`、`settings.json`、`profile.json`、`records.json` 與隨機賽道輸出皆為本機執行期資料，不納入版本控制。Game Engine 不會再用 `.env` 或 `COMPETITION_SERVER_URL` 覆蓋這個位址。
 
 `main.py` 保留為訓練用 simulator。競賽提交請使用符合 v2 `client_result` 契約的
 competition client；repository 內提供 `competition_main.py` 作為人工訓練與測試提交入口。
@@ -144,11 +146,13 @@ User ID、Group ID 與 admin 建立的 temporary password，產生或覆寫 test
 
 ## Competition 操作流程
 
-以下四個入口使用同一個 competition server，統一使用
-`http://127.0.0.1:8000`。啟動 Pygame client 前可明確設定：
+以下四個入口使用同一個 competition server。Game Engine 與
+Competition Test Main 會讀取 `settings.json` 的 `server_url`：
 
-```bash
-export COMPETITION_SERVER_URL=http://127.0.0.1:8000
+```json
+{
+  "server_url": "http://127.0.0.1:8000"
+}
 ```
 
 ### 1. Admin：設定賽程與建立 snapshot
@@ -169,7 +173,7 @@ Admin 頁也會固定顯示 Easy、Hard、Final 三張 competition map 預覽。
 ### 2. Competition Test Main：訓練並模擬不同玩家提交
 
 ```bash
-COMPETITION_SERVER_URL=http://127.0.0.1:8000 uv run python competition_main.py
+uv run python competition_main.py
 ```
 
 Competition test main 的操作：

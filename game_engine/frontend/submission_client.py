@@ -33,7 +33,7 @@ def submit_car(
     if client_result is None:
         return SubmissionResult(
             False,
-            "Trusted v2 submission requires a client_result. Use competition_main.py.",
+            "競賽提交必須包含本機評測結果。請使用 competition_main.py。",
         )
     payload = export_submission_payload(
         car=car,
@@ -63,15 +63,17 @@ def submit_car(
             data = json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        return SubmissionResult(False, f"Submit failed: HTTP {exc.code} {detail}")
+        return SubmissionResult(False, f"提交失敗：HTTP {exc.code} {detail}")
     except (TimeoutError, URLError) as exc:
-        return SubmissionResult(False, f"Submit failed: {exc}")
+        return SubmissionResult(False, f"提交失敗：{exc}")
 
     submission_id = data.get("submission_id")
     if not submission_id:
-        return SubmissionResult(False, "Submit failed: missing submission id")
+        return SubmissionResult(False, "提交失敗：伺服器未回傳提交編號")
+    competition_labels = {"easy": "簡單", "hard": "困難", "final": "決賽"}
+    competition_id = str(data.get("competition_id", competition_id))
     return SubmissionResult(
         True,
-        f"Submitted {submission_id} ({data.get('competition_id', competition_id)})",
+        f"已提交 {submission_id}（{competition_labels.get(competition_id, competition_id)}）",
         submission_id,
     )

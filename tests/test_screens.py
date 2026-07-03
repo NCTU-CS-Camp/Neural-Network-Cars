@@ -247,7 +247,7 @@ def test_coin_balance_badge_renders_the_given_amount() -> None:
         123,
     )
 
-    assert rendered_text == ["COINS  123"]
+    assert rendered_text == ["金幣  123"]
 
 
 def test_random_validation_awards_coins_for_the_current_map(monkeypatch) -> None:
@@ -355,10 +355,10 @@ def test_all_ten_fitness_parameters_are_split_across_two_lines() -> None:
     penalty_line, reward_line = _fitness_parameter_lines(config)
 
     assert penalty_line == (
-        "Penalties  crash:70  spin:40  stall:50  time:30  wrong_way:0"
+        "懲罰  撞車:70  原地打轉:40  停滯:50  耗時:30  逆向行駛:0"
     )
     assert reward_line == (
-        "Rewards    alignment:1  centered:2  progress:60  safety:3  speed:40"
+        "獎勵  方向對齊:1  保持中央:2  前進進度:60  安全距離:3  速度:40"
     )
 
 
@@ -366,6 +366,7 @@ def test_validation_stops_after_first_clean_completion(monkeypatch) -> None:
     configured_speeds: list[int] = []
     monkeypatch.setattr(pygame.event, "get", lambda: [])
     monkeypatch.setattr(pygame.display, "update", lambda: None)
+    monkeypatch.setattr(pygame.mouse, "get_pos", lambda: (0, 0))
     monkeypatch.setattr(
         screens,
         "configure_car",
@@ -405,6 +406,7 @@ def test_validation_stops_after_first_clean_completion(monkeypatch) -> None:
     assert outcome.collided == [False, False]
     assert [tracker.advance_count for tracker in trackers] == [1, 1]
     assert configured_speeds == [25]
+    assert all(car.max_speed == 25.0 for car in cars)
     assert all(car.collision_surface is surface for car in cars)
 
 

@@ -210,7 +210,8 @@ def run_shop_screen(screen: pygame.Surface) -> None:
             # Tier is shown by a colored badge with the tier text, so the level
             # stays readable without color-coding the border.
             tier_color = catalog.TIER_COLORS.get(skin.tier, WHITE)
-            tier_surf = small_font.render(skin.tier, True, BLACK)
+            tier_label = "原廠" if skin.tier == "DEFAULT" else skin.tier
+            tier_surf = small_font.render(tier_label, True, BLACK)
             badge = pygame.Rect(
                 rect.x + 6, rect.y + 6, tier_surf.get_width() + 10, tier_surf.get_height() + 4
             )
