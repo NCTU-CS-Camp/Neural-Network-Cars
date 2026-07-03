@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Neural Cars Admin</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #0b1118; color: #f4f7fb; }
+    * { box-sizing: border-box; } body { margin: 0; background: #0b1118; } main { max-width: 1120px; margin: 0 auto; padding: 32px 24px 48px; }
+    h1 { margin: 0; font-size: 36px; } h2 { margin: 0 0 14px; font-size: 18px; } section { border-top: 1px solid #273542; padding: 24px 0; }
+    label { display:block; color:#9cadbf; font-size:14px; margin-bottom:8px; } input, select { width:100%; padding:12px; border:1px solid #354656; border-radius:6px; background:#131d27; color:#f4f7fb; font:inherit; }
+    button { border:0; border-radius:6px; padding:11px 15px; background:#3f98e7; color:#fff; font:inherit; font-weight:800; cursor:pointer; } button.secondary { background:#243340; color:#dce7f0; } button.danger { background:#c84c55; }
+    .row { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:end; gap:14px; } .actions { display:flex; flex-wrap:wrap; gap:10px; }
+    .state { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; } .metric { border-left:3px solid #4a6277; padding:10px 12px; background:#101821; } .metric strong, .metric span { display:block; } .metric span { color:#9cadbf; font-size:13px; margin-top:4px; }
+    .maps { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; } .map { border:1px solid #263542; background:#101821; } .map header { padding:11px 12px; color:#c6d2dd; font-weight:800; } .map img { display:block; width:100%; aspect-ratio:16/9; object-fit:cover; background:#060a0e; }
+    table { width:100%; border-collapse:collapse; } th, td { padding:8px; border-bottom:1px solid #263542; text-align:left; } th { color:#9cadbf; font-size:12px; } textarea { width:100%; min-height:86px; padding:12px; border:1px solid #354656; border-radius:6px; background:#131d27; color:#f4f7fb; font:inherit; }
+    .two { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:14px; } .inline { display:flex; gap:8px; flex-wrap:wrap; }
+    pre { margin:0; min-height:90px; padding:14px; border:1px solid #263542; background:#080e14; color:#c2d1dc; white-space:pre-wrap; overflow:auto; }
+    .hidden { display:none; } .status { margin-top:10px; color:#9cadbf; min-height:20px; } .status.error { color:#ff9ca6; }
+    @media(max-width:760px) { .state, .maps { grid-template-columns:1fr; } .row { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Competition Admin</h1>
+    <section id="login">
+      <h2>Admin Login</h2>
+      <div class="row"><div><label for="token">Admin token</label><input id="token" type="password" autocomplete="off" placeholder="admin token"></div><button id="login-button">Unlock Admin</button></div>
+      <div class="status" id="login-status"></div>
+    </section>
+    <div id="admin-content" class="hidden">
+      <section><h2>Competition State</h2><div class="state" id="state"><div class="metric">Locked</div></div></section>
+      <section>
+        <h2>Stage Control</h2>
+        <div class="row"><div><label for="stage">Active stage</label><select id="stage"><option value="phase_one">Phase 1: Easy + Hard</option><option value="final">Final: Group</option></select></div><button id="set-stage">Set Stage</button></div>
+      </section>
+      <section>
+        <h2>Snapshot Timing</h2>
+        <div class="row"><div><label for="interval">Snapshot and cooldown interval</label><select id="interval"><option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option></select></div><button id="set-config">Set Interval</button></div>
+      </section>
+      <section>
+        <h2>User Management</h2>
+        <div class="two">
+          <div>
+            <div class="row"><div><label for="user-group">Group ID</label><input id="user-group" placeholder="8"></div><div><label for="user-name">Username</label><input id="user-name" placeholder="player1"></div></div>
+            <div class="row" style="margin-top:12px"><div><label for="user-password">Temporary password</label><input id="user-password" placeholder="plaintext password"></div><button id="save-user">Save User</button></div>
+          </div>
+          <div>
+            <label for="bulk-users">Bulk import CSV or JSON</label>
+            <textarea id="bulk-users" placeholder="group_id,username,password&#10;1,ada,pw1"></textarea>
+            <button id="import-users">Import Users</button>
+          </div>
+        </div>
+        <div style="overflow:auto; margin-top:16px"><table><thead><tr><th>Group</th><th>User</th><th>Password</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users"></tbody></table></div>
+      </section>
+      <section><h2>Competition Maps</h2><div class="maps" id="maps"></div></section>
+      <section><h2>Operations</h2><div class="actions"><button id="run-batch">Run Snapshot Now</button><button class="secondary" id="restart-replay">Restart Replay</button><button class="danger" id="reset">Reset Competition Data</button></div></section>
+      <section><h2>Submissions</h2><div style="overflow:auto"><table><thead><tr><th>ID</th><th>Competition</th><th>Group</th><th>User</th><th>Status</th><th>Result</th><th>Actions</th></tr></thead><tbody id="submissions"></tbody></table></div></section>
+      <section><pre id="output">Ready</pre></section>
+    </div>
+  </main>
+  <script>
+    const token = document.getElementById("token"), loginStatus = document.getElementById("login-status"), adminContent = document.getElementById("admin-content"), stage = document.getElementById("stage"), interval = document.getElementById("interval"), output = document.getElementById("output"), stateEl = document.getElementById("state"), mapsEl = document.getElementById("maps"), usersEl = document.getElementById("users"), submissionsEl = document.getElementById("submissions");
+    function headers() { return {"Content-Type":"application/json", "X-Admin-Token":token.value}; }
+    function escapeHtml(v){ return String(v).replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"})[c]); }
+    function resultText(r){ return r.completed ? `${(Number(r.lap_ticks)/30).toFixed(3)}s` : `${Number(r.max_progress).toFixed(0)} prog`; }
+    function groupLabel(groupId){ return `Group ${escapeHtml(groupId)}`; }
+    function setLoginStatus(message, isError=false) { loginStatus.textContent = message; loginStatus.classList.toggle("error", isError); }
+    async function call(url, options) { const response = await fetch(url, options); const text = await response.text(); output.textContent = `${response.status} ${response.statusText}\n${text}`; await load(); }
+    function renderState(data) { const snapshotInterval = data.config.snapshot_interval_minutes || data.config.phase_one_batch_minutes; stage.value = data.stage; interval.value = String(snapshotInterval); stateEl.innerHTML = `<div class="metric"><strong>${data.stage.replace("_", " ")}</strong><span>active stage</span></div><div class="metric"><strong>${data.config.version}</strong><span>configuration</span></div><div class="metric"><strong>${snapshotInterval} min</strong><span>snapshot interval</span></div>`; mapsEl.innerHTML = data.competitions.map((map) => `<article class="map"><header>${map.competition_id.toUpperCase()} · ${map.map_id}</header><img alt="${map.name}" src="/v2/maps/${map.competition_id}/preview"></article>`).join(""); }
+    function renderUsers(users) { usersEl.innerHTML = users.map((user)=>`<tr><td>${groupLabel(user.group_id)}</td><td>${escapeHtml(user.username)}</td><td>${escapeHtml(user.password_plaintext)}</td><td>${user.disabled ? "disabled" : "enabled"}</td><td class="inline"><button data-action="enable" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}">Enable</button><button class="secondary" data-action="disable" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}">Disable</button></td></tr>`).join("") || '<tr><td colspan="5">No users</td></tr>'; }
+    function renderSubmissions(rows) { submissionsEl.innerHTML = rows.map((item)=>`<tr><td>${escapeHtml(item.submission_id)}</td><td>${escapeHtml(item.competition_id)}</td><td>${groupLabel(item.group_id)}</td><td>${escapeHtml(item.username)}</td><td>${escapeHtml(item.status)}</td><td>${resultText(item.client_result)}</td><td><button class="danger" data-delete="${escapeHtml(item.submission_id)}">Delete</button></td></tr>`).join("") || '<tr><td colspan="7">No submissions</td></tr>'; }
+    async function load() { const [stateResponse, usersResponse, submissionsResponse] = await Promise.all([fetch("/v2/admin/state", {cache:"no-store", headers:headers()}), fetch("/v2/admin/users", {cache:"no-store", headers:headers()}), fetch("/v2/admin/submissions", {cache:"no-store", headers:headers()})]); if (!stateResponse.ok) throw new Error(`${stateResponse.status} ${stateResponse.statusText}`); renderState(await stateResponse.json()); renderUsers(usersResponse.ok ? await usersResponse.json() : []); renderSubmissions(submissionsResponse.ok ? await submissionsResponse.json() : []); }
+    async function unlockAdmin() { try { await load(); sessionStorage.setItem("competitionAdminToken", token.value); adminContent.classList.remove("hidden"); setLoginStatus("Admin unlocked."); } catch (error) { adminContent.classList.add("hidden"); sessionStorage.removeItem("competitionAdminToken"); setLoginStatus(`Invalid admin token: ${error}`, true); } }
+    token.value = sessionStorage.getItem("competitionAdminToken") || "";
+    document.getElementById("login-button").addEventListener("click", unlockAdmin);
+    token.addEventListener("keydown", (event) => { if (event.key === "Enter") unlockAdmin(); });
+    document.getElementById("set-stage").addEventListener("click", () => call("/v2/admin/stage", {method:"POST", headers:headers(), body:JSON.stringify({stage:stage.value})}));
+    document.getElementById("set-config").addEventListener("click", () => call("/v2/admin/config", {method:"POST", headers:headers(), body:JSON.stringify({snapshot_interval_minutes:Number(interval.value)})}));
+    document.getElementById("save-user").addEventListener("click", () => call("/v2/admin/users", {method:"POST", headers:headers(), body:JSON.stringify({group_id:document.getElementById("user-group").value, username:document.getElementById("user-name").value, password:document.getElementById("user-password").value})}));
+    document.getElementById("import-users").addEventListener("click", () => call("/v2/admin/users/import", {method:"POST", headers:headers(), body:JSON.stringify({text:document.getElementById("bulk-users").value})}));
+    usersEl.addEventListener("click", (event) => { const target = event.target; if (!(target instanceof HTMLButtonElement)) return; const {action, group, user} = target.dataset; if (!action || !group || !user) return; call(`/v2/admin/users/${encodeURIComponent(group)}/${encodeURIComponent(user)}/${action}`, {method:"POST", headers:headers()}); });
+    submissionsEl.addEventListener("click", (event) => { const target = event.target; if (!(target instanceof HTMLButtonElement) || !target.dataset.delete) return; if (confirm(`Delete submission ${target.dataset.delete}?`)) call(`/v2/admin/submissions/${encodeURIComponent(target.dataset.delete)}`, {method:"DELETE", headers:headers()}); });
+    document.getElementById("run-batch").addEventListener("click", () => call("/v2/admin/batches/run-now", {method:"POST", headers:headers()}));
+    document.getElementById("restart-replay").addEventListener("click", () => call("/v2/admin/replay/restart", {method:"POST", headers:headers()}));
+    document.getElementById("reset").addEventListener("click", () => { if (confirm("Delete all submissions, cooldowns, and snapshots?")) call("/v2/admin/reset-all", {method:"POST", headers:headers()}); });
+    if (token.value) unlockAdmin();
+  </script>
+</body>
+</html>

@@ -1,30 +1,330 @@
-# Repository Guidelines
+# Server Agent Handoff
 
-## Project Structure & Module Organization
-`game_engine/frontend/app.py` contains the main Pygame loop and training UI. Core simulation, geometry, assets, settings, and track generation live in `game_engine/backend/`. Genetic operators and fitness strategies live in `GA/`. Root entry points such as `main.py` and `mapGen.py` are thin launch scripts. Visual assets are stored in `Images/`, with car sprites in `Images/Sprites/`, track tiles in `Images/TracksMapGen/`, and playable/generated track images in `Images/Tracks/`.
+## Project Mission
 
-## Build, Test, and Development Commands
-Use `uv` for environment management and `rtk` as the shell wrapper used in this workspace.
+This repo now centers on a trusted-client Neural Cars competition server. The server receives exactly one locally selected winner model plus its client-reported `client_result`, validates and stores that payload, ranks by the uploaded metrics, and feeds the browser leaderboard plus Pygame replay.
+
+The server must not breed, mutate, select among 20 candidates, or overwrite official metrics by rejudging submissions. Those steps belong to the Game Engine client. Server replay is for visualization and audit, not for replacing the submitted result.
+
+## Current State
+
+- FastAPI v2 server lives in `server/app.py`.
+- SQLite persistence and ranking live in `server/storage.py`; schema version is `trusted-client-auth-metadata`.
+- Fixed competition maps are loaded from `maps/kaggle_easy.*`, `maps/kaggle_hard.*`, and `maps/kaggle_final.*` through `server/competition_maps.py`.
+- Shared payload contracts live in `shared/contracts.py`.
+- Phase 1 has independent `easy` and `hard` competitions keyed by `(group_id, username)`.
+- Final is group-based for leaderboard/replay, but cooldown is keyed by `(group_id, username)`; ranking keeps each group's best non-deleted completed snapshot entry.
+- Student identity now requires admin-created classroom accounts. Public student actions use `Authorization: Bearer <token>` from `POST /v2/auth/login`; the request body identity must match the token.
+- Submissions persist optional replay metadata: `skin_id` (shop catalog IDs `0` through `21`) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
+- Training records snapshot the equipped shop `skin_id` when training starts; later Upload submissions reuse that recorded ID rather than the currently equipped skin.
+- Admin can create/update plaintext temporary passwords, bulk import users, enable/disable accounts, and soft-delete individual submissions.
+- Test classroom accounts are provided as CSV in `docs/test-users.csv`; they are imported manually through the admin bulk import UI, not auto-created at startup.
+- Public browser leaderboard is served at `/leaderboard`.
+- Admin page is served at `/admin`.
+- Admin UI initially shows only the token form; protected content is revealed after `GET /v2/admin/state` succeeds.
+- Protected replay payload is served by `GET /v2/admin/replay`.
+- Pygame big-screen replay is launched with `uv run python replay.py`.
+- Manual training/submission test client is launched with `uv run python competition_main.py`.
+- `judge_demo.py` has been removed; do not document or revive it unless explicitly requested.
+- Competition maps under `maps/*_maps` carry ordered `route_cells` and boundary `checkpoints`.
+- Shared lap/progress tracking lives in `game_engine/backend/competition_track.py` and is used by local scoring plus replay visualization.
+
+## Public Contract
+
+Current implemented submission payload shape:
+
+Model payload shape:
+
+```json
+{
+  "group_id": "1",
+  "username": "player1",
+  "skin_id": 0,
+  "maxSpeed": 10.0,
+  "weights": [[36], [24]],
+  "biases": [[6], [4]]
+}
+```
+
+Submission adds `client_result`:
+
+```json
+{
+  "completed": false,
+  "lap_ticks": null,
+  "max_progress": 1250.5,
+  "ticks_to_max_progress": 840
+}
+```
+
+Spec_v2 export-only or not-yet-ranking additions:
+
+```json
+{
+  "client_result": {
+    "survival_rate": 0.467
+  },
+  "training_strategy": {
+    "strategy_id": "progress_first_v2",
+    "base_preset_id": "progress-first",
+    "fitness_config": {}
+  }
+}
+```
+
+Current implementation accepts and persists `skin_id` plus `max_speed`/`maxSpeed`, exposes them in public submission/leaderboard responses, and includes them in protected replay payloads. `client_result.survival_rate` and `training_strategy` are not accepted by the current server contract; treat them as a future alignment decision unless the API is explicitly changed. Ranking must remain based on `completed`, `lap_ticks`, `max_progress`, and `ticks_to_max_progress`.
+
+Validation rules:
+
+- `group_id` and `username` must be non-empty strings.
+- Student eligibility/submission bodies must match the bearer-token identity.
+- Weight lengths are 36 and 24; bias lengths are 6 and 4.
+- All gene and result values must be finite.
+- `skin_id` defaults to `0`; valid values are the shop catalog IDs `0` through `21`.
+- `max_speed`/`maxSpeed` defaults to `10.0`; valid range is `5` through `30`.
+- Completed runs require positive `lap_ticks`.
+- Incomplete runs require `lap_ticks: null`.
+- Tick values must not exceed the configured frame limit.
+
+Ranking order:
+
+- Completed submissions rank before incomplete submissions.
+- Completed submissions sort by lowest `lap_ticks`.
+- Incomplete submissions sort by highest `max_progress`.
+- Ties use lowest `ticks_to_max_progress`, earliest accepted submission time, then submission ID.
+- Easy/Hard keep each `(group_id, username)` identity's historical best.
+- Final keeps each `group_id` identity's historical best non-deleted completed submission, while individual members still have separate cooldowns.
+
+## API Surface
+
+Public:
+
+```text
+GET  /v2/state
+GET  /v2/maps
+GET  /v2/maps/{competition_id}/preview
+POST /v2/auth/login
+GET  /v2/me/submissions
+POST /v2/competitions/{easy|hard}/eligibility
+POST /v2/competitions/{easy|hard}/submissions
+POST /v2/finals/eligibility
+POST /v2/finals/submissions
+GET  /v2/competitions/{easy|hard|final}/leaderboard
+GET  /v2/competitions/{competition_id}/submissions/{submission_id}
+GET  /ws/events
+```
+
+Student eligibility/submission endpoints require `Authorization: Bearer <token>`. Public leaderboard and public submission status endpoints remain readable without login and never expose weights or biases.
+
+Protected admin/replay, all requiring `X-Admin-Token`:
+
+```text
+GET  /v2/admin/submissions
+GET  /v2/admin/state
+GET  /v2/admin/replay
+GET  /v2/admin/users
+POST /v2/admin/users
+POST /v2/admin/users/import
+POST /v2/admin/users/{group_id}/{username}/disable
+POST /v2/admin/users/{group_id}/{username}/enable
+POST /v2/admin/stage
+POST /v2/admin/config
+POST /v2/admin/batches/run-now
+POST /v2/admin/replay/restart
+POST /v2/admin/reset-all
+DELETE /v2/admin/submissions/{submission_id}
+```
+
+Current implementation uses `POST` eligibility endpoints and expects both `group_id` and `username`, including Final eligibility. If spec text says GET or group-only Final eligibility, treat that as an alignment gap rather than silently changing behavior.
+
+## Spec_v2 Server Delta
+
+The latest spec_v2 reinforces the server-first boundary:
+
+- Server receives only one locally selected winner model plus `client_result`.
+- Client owns parent training, 20-candidate generation, local evaluation, and local winner selection.
+- Server validates, rate-limits, queues, persists, ranks, and feeds replay/leaderboard.
+- Server must not breed, mutate, select candidates, or overwrite official metrics by re-running scoring.
+
+New or sharpened server-facing requirements:
+
+- Submission/export metadata now mentions `skin_id` and `maxSpeed`; these are implemented as replay metadata, not ranking inputs.
+- `client_result` now mentions optional-looking `survival_rate`; it is not part of the stated ranking tuple.
+- Eligibility responses should expose `next_submission_at`, current stage, and `competition_config_version`.
+- Submission responses should expose `submission_id`, `status`, `submitted_at`, `next_submission_at`, and `competition_config_version`.
+- Phase 1 spec language says 5-minute replay/leaderboard cadence; current implementation supports admin-configurable 1/2/5 minute intervals and defaults to 1 minute for classroom/demo use.
+- Dashboard/leaderboard should show rank, group id, username, submission id, status, result, replay completed time, and next submission time.
+- Replay batch should retain included submission IDs, deferred submission IDs, leaderboard snapshot, replay status, termination reason, map/config versions, and optional deterministic tick/state logs.
+
+Current alignment gaps:
+
+- `client_result.survival_rate` is not in `shared/contracts.py`, storage, public responses, or replay payloads.
+- Public self-registration does not exist by design; accounts are admin-created classroom accounts.
+- `running` is currently transitional inside one storage transaction, not a long-lived replay-processing state.
+- No persistent deferred-submission list or deferred notification exists.
+- No persistent replay playback/audit record exists beyond `batches.snapshot_json`.
+- Public leaderboard does not yet expose every spec-listed field consistently.
+- Candidate tie-breaker `candidate_index` is client-only because the server receives only the selected winner; server tie-breaks remaining equality by accepted time and submission ID.
+
+## Batching Process
+
+Phase 1 Easy/Hard submissions enter storage as `queued` while stage is `phase_one`. Final submissions also enter storage as `queued` while stage is `final`; the same snapshot worker seals the active stage's queued submissions.
+
+`BatchWorker` in `server/evaluation_worker.py` polls periodically and calls `CompetitionStorage.seal_due_batches()`. Normal sealing uses the previous UTC boundary for the persisted snapshot interval as the cutoff. Admin demo sealing uses `POST /v2/admin/batches/run-now`, which force-seals currently queued submissions for the active stage. Admin can set the interval to 1, 2, or 5 minutes through `POST /v2/admin/config`; the selected interval controls Easy/Hard and Final individual cooldowns.
+
+Current batch behavior:
+
+- For `phase_one`, process `easy` and `hard`; for `final`, process `final`.
+- Select queued rows with `submitted_at` before the cutoff, or at/before `now` in force mode.
+- Update selected rows to `running`.
+- Immediately update the same rows to `completed`, set `completed_at`, and assign a new `batch_id`.
+- Create one `batches` row per competition with `window_start`, `window_end`, `created_at`, included `submission_ids`, and the public leaderboard snapshot.
+- Publish a competition update event after worker processing when submissions were processed.
+
+Known batching gaps:
+
+- No persistent deferred submission list.
+- No persistent replay playback record.
+- No tick/state audit log.
+- No saved termination reason or replay status per submitted model.
+- No explicit notification for submissions that missed the current batch.
+- The `running` state is currently transitional inside one transaction, not a long-lived replay-processing state.
+
+## Replay And Lap Detection
+
+- Local scoring and Pygame replay use sequential boundary checkpoint crossing to detect first-lap completion.
+- A replay car stops updating after first lap completion, collision, or stagnation.
+- Finished/crashed/stalled replay cars stay visible and dimmed; on-map username labels become gray.
+- The Pygame replay client fetches the protected replay payload every 5 seconds and compares stage, replay generation, and leaderboard signatures to detect new data without changing API shape.
+- New snapshots and admin stage changes are adopted only at a safe replay boundary, after the current replay cycle finishes.
+- The first replay cycle for a newly seen leaderboard hides that competition's leaderboard, then reveals it after the corresponding Easy/Hard/Final session stops; later cycles for the same snapshot show the leaderboard normally.
+- Once all replay cars are finished/crashed/stalled, the replay holds for 3 seconds and then either adopts pending replay data or restarts the current payload.
+- If the snapshot countdown reaches zero while runnable replay sessions are actively running, the client restarts the current payload from spawn once for that snapshot boundary and shows `等待新快照，先重播目前排名`; pending new snapshots still wait for a safe reveal boundary.
+- Browser leaderboard displays a live countdown for the active stage/tab and last update time.
+- Replay header uses large status/timing text for projection. `COMPETITION_REPLAY_FONT_PATH` can force a CJK-capable font if the OS fallback is insufficient.
+- The server still trusts submitted `client_result`; replay completion never overwrites ranking metrics.
+
+## Server Ownership Rules
+
+- Validate payload shape, bearer-token identity, finite values, payload size, cooldown, and stage gates.
+- Keep public responses free of weights and biases.
+- Keep protected replay/admin payloads behind `X-Admin-Token`.
+- Preserve immutable competition configuration unless the spec explicitly changes it.
+- Publish update events after stage changes, Final acceptance, reset, replay restart, and completed batch work.
+- Reset should clear submissions, batches, snapshots, cooldown history, and replay data while preserving current stage/configuration.
+- Do not make server-side GA decisions. The submitted winner model and `client_result` are authoritative.
+- Keep admin UI state and controls behind token validation; public `/v2/state` remains available for public leaderboard/replay countdown behavior.
+
+## Server-Facing Integration Boundaries
+
+Game Engine client responsibilities:
+
+- Train parents across maps.
+- Build 20 candidates from parents before submission.
+- Run candidates locally on the selected competition map.
+- Select the single local winner by the official ranking tuple.
+- Submit only that winner model plus `client_result`.
+
+GA/Fitness responsibilities:
+
+- Provide experimental fitness functions and parent selection.
+- Produce fitness panel data for the Game Engine UI.
+- Never write experimental fitness scores into the official leaderboard contract.
+
+Server responsibilities:
+
+- Accept only one winner model per submission request.
+- Rank only by `client_result`.
+- Replay submitted model payloads for display/audit.
+
+## Operational Commands
+
+Use `uv run ...` directly in this environment. Some historical docs mention `rtk`; do not assume it exists in the shell.
 
 ```bash
 uv sync
-rtk uv run python main.py
-rtk uv run python mapGen.py
-rtk uv run pytest
-rtk uv run ruff check .
-rtk uv run mypy game_engine GA server shared
+uv run python -m server.app
+uv run python competition_main.py
+uv run python replay.py
+uv run pytest
+uv run ruff check .
+uv run mypy game_engine GA server shared
 ```
 
-`uv sync` installs runtime and dev dependencies. `main.py` launches the simulator, and `mapGen.py` regenerates track assets. Run `pytest`, `ruff`, and `mypy` before opening a PR, especially when changing physics, neural-network inputs, or asset loading.
+For classroom LAN deployment, bind FastAPI to all interfaces:
 
-## Coding Style & Naming Conventions
-Target Python 3.12 and follow PEP 8 with 4-space indentation. Use `snake_case` for functions, variables, and modules; use `UPPER_SNAKE_CASE` for constants in `game_engine/backend/settings.py`. Keep new game engine modules focused, and keep GA-specific algorithms in `GA/`. Match existing names when touching legacy methods such as `resetPosition()`, but prefer `snake_case` for new APIs.
+```bash
+uv run uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
 
-## Testing Guidelines
-There is no committed `tests/` directory yet, so add one for new behavior. Use `pytest` with files named `test_<module>.py`, and keep deterministic unit tests around geometry, genetic operators, and track generation. For gameplay changes, include at least one logic-level test and note any manual validation steps used in the simulator.
+If replay cannot render CJK status text on a lab machine, provide an installed font path:
 
-## Commit & Pull Request Guidelines
-Recent history uses short, imperative commit messages such as `Setting env` and `seperate file`. Keep commits concise, present-tense, and scoped to one change; clearer examples would be `Refactor car collision checks` or `Add tests for track generator`. PRs should include a short summary, testing notes, linked issues if any, and screenshots or clips when UI, sprites, or track rendering change.
+```bash
+COMPETITION_REPLAY_FONT_PATH=/path/to/NotoSansCJK-Regular.ttc uv run python replay.py
+```
 
-## Assets & Configuration Tips
-Avoid hardcoding new asset paths outside `game_engine/backend/settings.py` or `game_engine/backend/assets.py`. Large generated images should only be updated when the underlying generation logic changes, and contributors should mention those regenerated files explicitly in the PR description.
+Useful local URLs:
+
+- `http://127.0.0.1:8000/leaderboard`
+- `http://127.0.0.1:8000/admin`
+
+Default local admin/replay token is `admin`, overridden by `COMPETITION_ADMIN_TOKEN`.
+
+## Roadmap
+
+1. Replay/Audit Persistence
+   - Persist replay batches beyond public leaderboard snapshots.
+   - Store deferred submission IDs, map/config versions, simulation version, replay status, termination reason, and audit references.
+   - Add optional deterministic tick/state logs or compact replay traces for later verification.
+   - Make `running` meaningful if replay processing becomes asynchronous instead of immediately completed.
+   - Consider persisting replay-loop status now shown client-side only.
+
+2. API Spec Alignment
+   - Decide whether `client_result.survival_rate` should become an accepted optional field, and document whether it remains non-ranking metadata.
+   - Decide whether `training_strategy` should remain client export metadata or become server-visible audit metadata.
+   - Decide whether eligibility should remain `POST` or move to spec-mentioned `GET`.
+   - Align response field names across docs and code.
+   - Decide whether Final eligibility should require `username` or only `group_id`.
+   - Decide whether the official Phase 1 interval should be fixed at 5 minutes during real competition while keeping 1/2/5 minute admin control for demos.
+   - Keep docs/api-spec.md and AGENTS.md updated together.
+
+3. Leaderboard And Replay Completeness
+   - Expose submission ID, status, completed/replay time, next submission time, rank, and audit/replay references consistently.
+   - Preserve top-15 protected replay payload behavior while improving public leaderboard detail.
+   - Add clear handling for empty windows, deferred submissions, and replay restart semantics.
+
+4. Competition Client Alignment
+   - `competition_main.py` is currently a manual test client.
+   - Future Game Engine work should implement spec_v2's parent export/import, 20-candidate local winner selection, validation mode, and official local ranking tuple.
+   - Server contract should remain one submitted winner model plus `client_result`.
+
+5. GA/Fitness Integration Boundary
+   - Document official metric definitions shared with GA/Fitness.
+   - Keep experimental fitness score APIs out of the server ranking path.
+   - Add tests that leaderboard order cannot be affected by non-contract fitness metadata.
+
+## Testing Expectations
+
+Run tests for any behavior change:
+
+```bash
+uv run pytest
+uv run ruff check .
+uv run mypy game_engine GA server shared
+```
+
+Current key test coverage is in `tests/test_competition_server.py`, `tests/test_competition_client.py`, and `tests/test_track_generation.py`.
+
+When changing server behavior, add focused tests for:
+
+- eligibility and cooldown enforcement;
+- payload validation;
+- ranking ties;
+- batch sealing;
+- protected replay payload access;
+- reset behavior;
+- public responses not leaking weights or biases.
+
+## Maintenance Rule
+
+Treat this file as the living server handoff. Update it whenever spec_v2, public APIs, batching, replay, leaderboard, storage, or operational commands change.

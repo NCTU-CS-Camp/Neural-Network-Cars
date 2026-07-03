@@ -11,3 +11,16 @@ __pycache__/
 *.py[cod]
 *$py.class
 shared/__pycache__/
+server/*.db
+server/*.db-*
+
+# Local runtime configuration and user data
+profile.json
+records.json
+settings.json
+shop_state.json
+
+# Runtime-generated random track outputs
+Images/Tracks/randomGeneratedTrack.json
+Images/Tracks/randomGeneratedTrackBack.png
+Images/Tracks/randomGeneratedTrackFront.png

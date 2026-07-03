@@ -1,294 +1,365 @@
-# Neural Network Cars 設計文件
+# 新 Competition API、評分、Replay、Leaderboard 改版計畫
 
-## 一、專案目標
-本專案目前是一個以 Pygame 為基礎的本地神經網路賽車訓練原型。下一階段的目標，是將其擴充為可供多組協作開發的小型平台，具備以下三項核心能力：
+## Summary
 
-- 支援 Genetic Algorithm（GA）訓練策略的調整、比較與驗證。
-- 提供完整的本地使用者介面，讓玩家能操作訓練流程與遊戲設定。
-- 提供後端服務，讓使用者能上傳訓練成果並於大螢幕模式中播放結果。
+- 將 competition server 改成新的 submission API，只接收隊伍、使用者與模型參數。
+- 支援兩階段競賽：`personal` 個人賽與 `group` 小組賽。
+- Server 每 60 秒批次評分所有尚未評分的 submissions。
+- 每筆 submission 最多模擬 30 秒，使用 checkpoint 計算 `score_laps`。
+- Leaderboard 顯示 active phase 前 30 名，`replay.py` 顯示 active phase 前 10 名動畫。
+- Admin 頁負責切換 active phase、選擇每階段地圖、reset 目前階段資料。
+- WebSocket `/ws/events` 推播完整 leaderboard top30 與 replay top10。
+- 新增 mock data CLI，方便後端直接產生多筆訓練資料測試。
 
-## 二、目前專案現況
-目前程式主要以本地 Pygame 執行流程為核心，主要模組如下：
+## Key Changes
 
-- `game_engine/frontend/app.py`：主遊戲迴圈、鍵盤輸入、畫面繪製、訓練流程整合。
-- `game_engine/backend/car.py`：車輛狀態、感測器計算、碰撞判定、神經網路輸出與動作執行。
-- `GA/genetic.py`：目前的 crossover 與 mutation 實作。
-- `GA/fitness.py`：可替換的 fitness strategy 入口。
-- `game_engine/backend/track_generator.py`：隨機地圖生成與賽道圖片輸出。
-- `game_engine/backend/settings.py`：畫面尺寸、神經網路層數、族群大小、資源路徑與常數設定。
+### Submission API
 
-目前已能完成本地訓練與隨機地圖生成，但以下能力仍未模組化：
+`POST /api/submissions` 只接受新格式：
 
-- fitness function 與 GA 訓練策略仍與主執行流程耦合。
-- 使用者介面仍以鍵盤操作為主，缺少完整 UI 流程。
-- 權重格式、提交流程與 replay 播放機制尚未定義為可共享的資料契約。
-
-## 三、目標架構
-下一階段將專案整理為五個層次：
-
-- `game_engine/frontend/`：場景切換、操作元件、設定儲存、重播控制。
-- `game_engine/backend/`：模擬邏輯、車輛行為、訓練 session、賽道載入、模型序列化。
-- `GA/`：genetic operators、fitness strategy 與後續演化策略實驗。
-- `server/`：上傳 API、排行榜 API、重播任務 API、資料儲存。
-- `shared contracts`：設定檔、模型權重、重播請求、執行結果等 JSON 格式定義。
-
-此拆分的目標，是讓 GA Team、UI Team、BE Team 可以在共享資料格式明確的前提下平行開發。
-
-## 四、團隊分工
-### 4.1 GA Team
-GA Team 的目標是提升訓練效果，並建立可比較、可驗證的演化策略。
-
-主要工作範圍：
-- 將 fitness function 自 `game_engine/frontend/app.py` 中抽離。
-- 設計可插拔的 fitness strategy。
-- 研究 selection、crossover、mutation 的組合效果。
-- 建立每代訓練結果的實驗紀錄格式。
-
-建議新增模組：
-- `GA/fitness.py`
-- `game_engine/backend/training_session.py`
-- `game_engine/backend/serialization.py`
-
-第一版建議策略：
-- `baseline_distance`：以碰撞前行進距離作為基礎分數。
-- `progress_speed`：以行進進度與速度作為加分，碰撞作為扣分。
-- `checkpoint_progress`：以 checkpoint 通過數與前進穩定性作為分數基礎，對原地打轉或停滯施加懲罰。
-
-預期產出：
-- 可替換的 fitness function 介面。
-- 可重現的訓練紀錄輸出格式。
-- 可供 UI 與後端共用的穩定權重匯出格式。
-
-### 4.2 UI Team
-UI Team 的目標是將目前以鍵盤操作為主的訓練器，整理成完整、可操作的本地應用程式。
-
-主要工作範圍：
-- 建立首頁、設定頁、訓練頁、重播頁等場景。
-- 提供地圖切換、暱稱輸入、訓練參數調整功能。
-- 顯示目前操作說明、訓練狀態與 replay 流程。
-- 支援本地權重載入、匯出與上傳入口。
-
-建議新增模組：
-- `game_engine/frontend/scenes.py`
-- `game_engine/frontend/widgets.py`
-- `game_engine/frontend/config_store.py`
-
-第一版功能重點：
-- 地圖模式切換：預設地圖、隨機地圖、固定 seed 地圖。
-- 玩家暱稱輸入。
-- `mutation_rate`、`population_size`、`fps`、debug overlay 等設定。
-- 開始訓練、切換地圖、載入 weights、匯出 weights、上傳結果等操作按鈕。
-
-預期產出：
-- 以 scene 為基礎的 UI 導覽流程。
-- 可持久化的 `settings.json`。
-- 本地 replay 與上傳流程的使用者入口。
-
-### 4.3 BE Team
-BE Team 的目標是建立一個可接收模型提交、儲存結果並支援大螢幕播放流程的服務。
-
-主要工作範圍：
-- 接收使用者上傳的模型權重與相關 metadata。
-- 儲存 submission 與 leaderboard 資料。
-- 提供重播任務資料給大螢幕 renderer。
-- 提供 tracks、submissions、leaderboard 等 API。
-
-建議新增模組：
-- `server/app.py`
-- `server/models.py`
-- `server/storage.py`
-- `server/replay_queue.py`
-
-第一版建議 API：
-- `POST /submissions`
-- `GET /submissions`
-- `GET /submissions/{id}`
-- `GET /leaderboard`
-- `POST /replays`
-
-設計原則：
-- server 不直接依賴 Pygame render。
-- 大螢幕播放由本地 replay client 讀取 server replay job 後進行渲染。
-
-預期產出：
-- 可接收模型上傳的 API。
-- 可查詢排行榜與 submission 的 API。
-- 可供大螢幕模式使用的 replay job 資料流。
-
-## 五、共享資料契約
-### 5.1 設定檔格式
 ```json
 {
-  "nickname": "player1",
-  "fps": 30,
-  "population_size": 50,
-  "mutation_rate": 90,
-  "show_player": true,
-  "show_debug_overlay": true,
-  "map_mode": "random",
-  "track_seed": 42
+  "group_id": "1",
+  "username": "player1",
+  "weights": [[36], [24]],
+  "biases": [[6], [4]]
 }
 ```
 
-### 5.2 權重資料格式
+實際欄位規則：
+
+- `group_id`：字串，代表小組競賽身份。
+- `username`：字串，代表個人競賽身份。
+- `weights`：分層扁平陣列，固定為 `[[36 floats], [24 floats]]`。
+- `biases`：分層扁平陣列，固定為 `[[6 floats], [4 floats]]`。
+- 神經網路結構固定為 `[6, 6, 4]`，不再由 request 傳入。
+
+成功回應：
+
 ```json
 {
-  "model_version": "v1",
-  "layer_sizes": [6, 6, 4],
-  "weights": [],
-  "biases": [],
-  "fitness_score": 0.0,
-  "generation": 1,
-  "track_id": "generated-001",
-  "track_seed": 42,
-  "nickname": "player1"
+  "submission_id": "sub_xxxxxxxx",
+  "status": "pending",
+  "phase": "personal"
 }
 ```
 
-### 5.3 Replay Request 格式
+舊格式欄位不再接受，包含：
+
+- `model_version`
+- `layer_sizes`
+- `fitness_score`
+- `generation`
+- `track_id`
+- `track_seed`
+- `nickname`
+
+### Competition Phase
+
+系統有兩個 phase：
+
+- `personal`：個人賽，以 `username` 作為 leaderboard identity。
+- `group`：小組賽，以 `group_id` 作為 leaderboard identity。
+
+submission 上傳時會歸屬到當下 active phase。
+
+同一個 identity 可以多次提交，但 leaderboard 只保留最高 `score_laps`：
+
+- personal phase：同一 `username` 只顯示最佳 submission。
+- group phase：同一 `group_id` 只顯示最佳 submission，並顯示該最佳成績來自哪個 `username`。
+
+同分時採先提交者優先。
+
+### Leaderboard API
+
+`GET /api/leaderboard` 回傳 active phase 前 30 名。
+
+response 使用 `score_laps` 作為正式排名分數。
+
+個人賽顯示：
+
+- rank
+- username
+- group_id
+- score_laps
+- submission_id
+- submitted_at
+- evaluated_at
+
+小組賽顯示：
+
+- rank
+- group_id
+- best_username
+- score_laps
+- submission_id
+- submitted_at
+- evaluated_at
+
+leaderboard 只顯示已評分完成的 submissions，不顯示 `pending` 或 `evaluating`。
+
+### Replay API
+
+`GET /api/replay/top?n=10` 回傳 active phase 前 10 名，供 `replay.py` 播放。
+
+此 endpoint 公開，不需要 token。
+
+每筆 replay item 需要包含：
+
+- submission_id
+- group_id
+- username
+- score_laps
+- weights
+- biases
+
+`replay.py` 每輪動畫最多播放 30 秒；若前 10 名車輛全部撞車，則提前結束。
+
+當 replay 播放中收到新的 top10 資料時，不立刻打斷目前動畫，而是暫存到下一輪套用。
+
+### Admin API 與 Admin Page
+
+Admin 頁需要支援：
+
+- 切換 active phase：`personal` / `group`
+- 選擇 personal phase 使用的官方地圖
+- 選擇 group phase 使用的官方地圖
+- reset 目前 active phase 的資料
+
+切換 active phase 時：
+
+- 不刪除另一個 phase 的資料。
+- 不重新評分。
+- active leaderboard 改為顯示新 phase 的結果。
+- 若新 phase 尚無 evaluated submissions，leaderboard 顯示空榜。
+
+同一 phase 內切換地圖時：
+
+- 立即重跑該 phase 中每個 identity 的目前最佳 submission。
+- 使用新地圖重新計算 `score_laps`。
+- 重跑完成後更新 leaderboard 與 replay top10。
+
+reset 時：
+
+- 只清除目前 active phase 的 submissions 與 results。
+- 不影響另一個 phase。
+
+### 地圖與 Checkpoint
+
+正式競賽使用 5 張全新的官方地圖。
+
+這 5 張地圖都由新的 map generator 產生，不沿用目前 `Images/Tracks` 裡既有的兩張圖。
+
+map generator 需要同時輸出：
+
+- track front image
+- track collision image
+- checkpoint metadata
+- spawn position
+- spawn angle
+
+每個 phase 每次只使用一張 active official map 評分。
+
+評分方式：
+
+- 每筆 submission 最多模擬 30 秒。
+- 透過 checkpoint 計算完成圈數與當前進度。
+- 分數欄位為 `score_laps`。
+- 30 秒後仍在 running 的車，以當下 checkpoint 進度計算小數圈數。
+- 若車輛提前撞車，使用撞車當下進度計算小數圈數。
+
+### Evaluation Worker
+
+Server 每 60 秒批次處理目前尚未評分的 submissions。
+
+批次規則：
+
+- 每筆 pending submission 都要評分。
+- 不因同一個 `username` 或 `group_id` 有多筆 pending 就跳過。
+- 批次完成後一次性更新 leaderboard/replay 資料。
+- 批次完成後推送一次 WebSocket event。
+
+### WebSocket
+
+新增單一 WebSocket endpoint：
+
+```text
+GET /ws/events
+```
+
+每批評分完成後，server 推送完整資料：
+
 ```json
 {
-  "submission_id": "sub_001",
-  "track_seed": 42,
-  "render_mode": "big-screen"
+  "type": "competition_updated",
+  "phase": "personal",
+  "map_id": "official_001",
+  "updated_at": "2026-06-20T00:00:00Z",
+  "leaderboard": [],
+  "replay_top": []
 }
 ```
 
-## 六、開發里程碑
-1. 重構本地 runtime：抽離 fitness logic、定義 weight schema、建立可供 replay 使用的模擬核心。
-2. 建立本地 UI：加入場景切換、設定持久化、地圖切換、暱稱輸入、weights 匯入匯出。
-3. 建立後端 MVP：支援 submissions、leaderboard 與 replay job。
-4. 完成端到端展示流程：本地訓練 -> 匯出或上傳 weights -> 大螢幕 replay。
+WebSocket payload 包含：
 
-## 七、各團隊執行項目
-### 7.1 GA Team 執行項目
-#### 任務 1：抽離 fitness function 模組
-- 目標：將目前訓練分數計算自主迴圈中抽離，建立可替換的 fitness 介面。
-- 涉及檔案：`game_engine/frontend/app.py`、`GA/fitness.py`
-- 驗收標準：
-  - 主訓練流程不直接寫死分數公式。
-  - 可透過設定切換不同 fitness strategy。
+- active phase
+- active map
+- leaderboard top30
+- replay top10
+- updated_at
 
-#### 任務 2：建立 training session 模組
-- 目標：整理每一代訓練所需狀態，避免 GA 邏輯散落於 UI loop。
-- 涉及檔案：`game_engine/backend/training_session.py`、`game_engine/frontend/app.py`
-- 驗收標準：
-  - generation、alive count、selected cars、mutation rate 等狀態集中管理。
-  - UI 可讀取訓練狀態，但不負責計算演化流程。
+leaderboard 頁收到 event 後立即重畫。
 
-#### 任務 3：實作多種 fitness strategy
-- 目標：至少建立 3 種可比較的 fitness function。
-- 建議策略：
-  - `baseline_distance`
-  - `progress_speed`
-  - `checkpoint_progress`
-- 驗收標準：
-  - 每種策略皆可獨立執行。
-  - 執行結果可輸出分數與排名結果。
+`replay.py` 收到 event 後暫存新的 replay top10，等待下一輪動畫套用。
 
-#### 任務 4：建立實驗紀錄格式
-- 目標：輸出每代訓練結果，供後續分析與比較。
-- 涉及檔案：`game_engine/backend/serialization.py`、`logs/` 或 `experiments/`
-- 驗收標準：
-  - 至少記錄 generation、fitness、track_seed、strategy_name。
-  - 同一組設定可重複執行並比較結果。
+### Submission Debug APIs
 
-#### 任務 5：定義 weights 匯出格式
-- 目標：建立可供 UI Team 與 BE Team 共用的模型序列化格式。
-- 驗收標準：
-  - 包含 `layer_sizes`、`weights`、`biases`、`fitness_score`、`track_seed`、`nickname`。
-  - 可從記憶體中的 car model 匯出 JSON。
+保留 submission 查詢 endpoints 供 debug/admin 使用：
 
-### 7.2 UI Team 執行項目
-#### 任務 1：建立 scene-based UI 架構
-- 目標：將目前單一主畫面拆成場景導覽架構。
-- 涉及檔案：`game_engine/frontend/scenes.py`、`game_engine/frontend/app.py`
-- 驗收標準：
-  - 至少包含 `Home`、`Settings`、`Training`、`Replay` 四個場景。
-  - 場景切換不影響既有訓練流程。
+- `GET /api/submissions`
+- `GET /api/submissions/{submission_id}`
 
-#### 任務 2：建立設定儲存機制
-- 目標：將使用者設定寫入本地檔案。
-- 涉及檔案：`game_engine/frontend/config_store.py`、`settings.json`
-- 驗收標準：
-  - 可儲存 nickname、FPS、population size、mutation rate、map mode。
-  - 重啟程式後可恢復設定。
+這兩個 endpoints 需要 admin token。
 
-#### 任務 3：製作設定頁
-- 目標：提供可視化設定介面，取代純鍵盤控制。
-- 驗收標準：
-  - 可切換地圖模式。
-  - 可輸入 nickname。
-  - 可調整訓練參數與 debug 顯示選項。
+公開 API 不應直接列出所有 submission 的 weights/biases。
 
-#### 任務 4：製作訓練控制介面
-- 目標：讓使用者透過 UI 控制訓練流程。
-- 驗收標準：
-  - 提供開始訓練、下一張地圖、重設、載入、匯出等按鈕。
-  - 顯示 generation、alive count、selected count、目前設定值。
+### Local Simulator Upload
 
-#### 任務 5：製作 replay 與 upload 入口
-- 目標：讓使用者可以選擇本地模型進行 replay 或送往 server。
-- 驗收標準：
-  - 可從本地載入 weight JSON。
-  - 可呼叫 upload API 傳送結果。
+本地 simulator 中按 `U` 的提交流程需要同步更新成新格式。
 
-### 7.3 BE Team 執行項目
-#### 任務 1：建立 submission API
-- 目標：讓使用者可上傳模型權重與 metadata。
-- 涉及檔案：`server/app.py`、`server/models.py`
-- 驗收標準：
-  - 提供 `POST /submissions`。
-  - 驗證 payload 基本欄位是否完整。
+`settings.json` / runtime settings 新增：
 
-#### 任務 2：建立 leaderboard API
-- 目標：提供排行榜查詢介面。
-- 驗收標準：
-  - 提供 `GET /leaderboard`。
-  - 至少回傳 nickname、fitness_score、track_seed、submitted_at。
+- `group_id`
+- `username`
 
-#### 任務 3：建立 submission 查詢 API
-- 目標：提供 submission 列表與單筆查詢。
-- 驗收標準：
-  - 提供 `GET /submissions` 與 `GET /submissions/{id}`。
-  - 可依 nickname 或排序條件擴充。
+保留讀取舊 `nickname` 的相容邏輯，但新的 submission 一律使用 `username`。
 
-#### 任務 4：建立 replay job API
-- 目標：讓大螢幕 renderer 可取得待播放資料。
-- 涉及檔案：`server/replay_queue.py`
-- 驗收標準：
-  - 提供 `POST /replays` 建立 replay job。
-  - 可回傳 submission 對應的 track 與模型資料。
+### Mock Data Tool
 
-#### 任務 5：建立持久化儲存層
-- 目標：將 submission、leaderboard、replay job 寫入可查詢的儲存層。
-- 涉及檔案：`server/storage.py`
-- 驗收標準：
-  - MVP 可先使用 JSON 或 SQLite。
-  - 未來可替換為正式資料庫而不影響 API 層。
+新增 mock data CLI，讓後端可以直接產生測試資料。
 
-### 7.4 跨團隊整合項目
-#### 任務 1：定義共享 JSON schema
-- 目標：統一 settings、weights、replay request 格式。
-- 參與團隊：GA Team、UI Team、BE Team
-- 驗收標準：
-  - 文件與實作一致。
-  - 各團隊皆能使用相同欄位名稱與版本號。
+預設行為：
 
-#### 任務 2：建立本地 replay client 規格
-- 目標：定義大螢幕 renderer 與 server 的資料交換方式。
-- 參與團隊：UI Team、BE Team
-- 驗收標準：
-  - 可用同一份 submission 資料進行本地 replay 與大螢幕 replay。
+- 預設產生 10 筆 submissions。
+- 可指定產生數量。
+- 可指定 phase。
+- 可指定資料狀態：`pending` 或 `evaluated`。
+- 直接寫入 competition DB，不需要 server 已啟動。
 
-#### 任務 3：建立 demo flow
-- 目標：完成從本地訓練到上傳、再到大螢幕播放的整合展示。
-- 參與團隊：GA Team、UI Team、BE Team
-- 驗收標準：
-  - 使用者可完成訓練、匯出或上傳、提交 replay、查看結果的完整流程。
+用途：
 
-## 八、待確認問題
-- leaderboard 應以最高分、平均分數，還是最快通關作為排序依據？
-- 正式提交是否需要固定 track seed 以確保公平性？
-- replay 結果是否需要跨機器 deterministic？
-- 每位使用者最多保留多少筆 submission？
+- 測試 60 秒批次評分。
+- 測試 leaderboard top30。
+- 測試 replay top10。
+- 測試 personal/group identity 取最高分。
+- 測試 WebSocket 更新流程。
+
+## Replay 與 WebSocket 行為
+
+完整資料流：
+
+```text
+Frontend submits weights/biases
+        ↓
+POST /api/submissions
+        ↓
+DB stores pending submission with active phase
+        ↓
+Evaluation worker runs every 60 seconds
+        ↓
+Each pending submission is simulated for up to 30 seconds
+        ↓
+Checkpoint progress becomes score_laps
+        ↓
+Leaderboard top30 and replay top10 are updated
+        ↓
+Server pushes /ws/events competition_updated
+        ↓
+Leaderboard redraws immediately
+        ↓
+replay.py stores new top10 and applies it next round
+```
+
+Replay 行為：
+
+- 每輪最多 30 秒。
+- 若全部車輛提前撞車，該輪提前結束。
+- 播放中收到新的 top10 不立即切換。
+- 下一輪開始時使用最新 top10。
+
+Leaderboard 行為：
+
+- 顯示 active phase top30。
+- 只顯示 evaluated submissions。
+- 收到 WebSocket event 後立即更新。
+- 若 WebSocket 斷線，可用 HTTP API 重新抓取目前 leaderboard。
+
+## Test Plan
+
+### API Tests
+
+- 新 submission 格式成功建立 pending submission。
+- 成功 response 包含 `submission_id`、`status`、`phase`。
+- 舊 submission 格式被拒絕。
+- invalid `weights` shape 回 400。
+- invalid `biases` shape 回 400。
+- `GET /api/submissions` 未帶 admin token 被拒絕。
+- `GET /api/submissions/{submission_id}` 未帶 admin token 被拒絕。
+- `/api/replay/top` 可公開取得 top10 replay payload。
+
+### Evaluation Tests
+
+- worker 每 60 秒批次處理 pending submissions。
+- 同一批中的每筆 pending submission 都會評分。
+- checkpoint scorer 可以產生小數 `score_laps`。
+- 車輛撞車時，以撞車當下 checkpoint 進度計分。
+- 車輛 30 秒後仍 running 時，以 30 秒當下位置計分。
+- 同一 `username` 在 personal phase 只保留最高分。
+- 同一 `group_id` 在 group phase 只保留最高分。
+- 同分時先提交者排序較前。
+
+### Phase/Admin Tests
+
+- personal 與 group 結果分開保存。
+- 切 active phase 不刪除另一 phase 資料。
+- 切 active phase 不重新評分。
+- reset 只清除目前 active phase。
+- 同一 phase 內換地圖會重跑該 phase 每個 identity 的最佳 submission。
+- 換地圖後 leaderboard/replay 會更新為新地圖分數。
+
+### Replay/WebSocket Tests
+
+- 批次評分完成後推送一次 `competition_updated` event。
+- WebSocket event 包含完整 leaderboard top30。
+- WebSocket event 包含完整 replay top10。
+- leaderboard 頁收到 event 後重畫。
+- `replay.py` 播放中收到 event 不打斷目前動畫。
+- `replay.py` 下一輪套用最新 top10。
+- replay 單輪最多 30 秒。
+- replay 全部車輛撞車時提前結束。
+
+### Mock Data Tests
+
+- mock CLI 預設產生 10 筆 submissions。
+- mock CLI 可指定產生數量。
+- mock CLI 可產生 `pending` submissions。
+- mock CLI 可產生 `evaluated` submissions。
+- mock CLI 產生的資料可出現在 leaderboard/replay。
+- mock CLI 可產生 personal/group phase 測試資料。
+
+## Assumptions
+
+- 神經網路結構固定為 `[6, 6, 4]`。
+- `weights` 固定為 `[[36 floats], [24 floats]]`。
+- `biases` 固定為 `[[6 floats], [4 floats]]`。
+- `score_laps` 是唯一正式排名分數。
+- personal phase 使用 `username` 排名。
+- group phase 使用 `group_id` 排名。
+- group phase 顯示最佳 submission 對應的 `username`。
+- 五張官方地圖全部重新產生。
+- 五張官方地圖都必須有 checkpoint metadata。
+- 舊 `competition.db` 可清空重建，不需要 migration。
+- `/api/replay/top` 公開回傳 top10 的 weights/biases。
+- submission debug endpoints 需要 admin token。
+- Admin reset 只清目前 active phase。
+- WebSocket 推送完整 leaderboard top30 與 replay top10。

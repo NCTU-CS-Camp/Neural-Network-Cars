@@ -1,7 +1,8 @@
 import random
 
 
-def mutateOneWeightGene(parent1, child1):
+def mutateOneWeightGene(parent1, child1, rng=None):
+    rng = random if rng is None else rng
     sizenn = len(child1.sizes)
 
     for i in range(sizenn - 1):
@@ -19,8 +20,8 @@ def mutateOneWeightGene(parent1, child1):
         for j in range(child1.sizes[i] * child1.sizes[i + 1]):
             genomeWeights.append(child1.weights[i].item(j))
 
-    r1 = random.randint(0, len(genomeWeights) - 1)
-    genomeWeights[r1] = genomeWeights[r1] * random.uniform(0.8, 1.2)
+    r1 = rng.randint(0, len(genomeWeights) - 1)
+    genomeWeights[r1] = genomeWeights[r1] * rng.uniform(0.8, 1.2)
 
     count = 0
     for i in range(sizenn - 1):
@@ -30,7 +31,8 @@ def mutateOneWeightGene(parent1, child1):
                 count += 1
 
 
-def mutateOneBiasesGene(parent1, child1):
+def mutateOneBiasesGene(parent1, child1, rng=None):
+    rng = random if rng is None else rng
     sizenn = len(child1.sizes)
 
     for i in range(sizenn - 1):
@@ -48,8 +50,8 @@ def mutateOneBiasesGene(parent1, child1):
         for j in range(child1.sizes[i + 1]):
             genomeBiases.append(child1.biases[i].item(j))
 
-    r1 = random.randint(0, len(genomeBiases) - 1)
-    genomeBiases[r1] = genomeBiases[r1] * random.uniform(0.8, 1.2)
+    r1 = rng.randint(0, len(genomeBiases) - 1)
+    genomeBiases[r1] = genomeBiases[r1] * rng.uniform(0.8, 1.2)
 
     count = 0
     for i in range(sizenn - 1):
