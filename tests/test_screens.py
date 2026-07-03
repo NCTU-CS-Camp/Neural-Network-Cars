@@ -232,18 +232,24 @@ def test_validation_uses_regular_car_sprite(monkeypatch) -> None:
     assert captured["coin_balance"] == 42
 
 
-def test_coin_balance_badge_renders_the_given_amount() -> None:
+def test_coin_balance_badge_renders_the_given_amount(monkeypatch) -> None:
     rendered_text: list[str] = []
 
     class FakeFont:
+        def get_height(self):
+            return 20
+
         def render(self, text, antialias, color):
             del antialias, color
             rendered_text.append(text)
             return pygame.Surface((80, 20))
 
+    fake_font = FakeFont()
+    monkeypatch.setattr(screens, "_font", lambda _size: fake_font)
+
     screens._draw_coin_balance(
         pygame.Surface((300, 100)),
-        FakeFont(),  # type: ignore[arg-type]
+        fake_font,  # type: ignore[arg-type]
         123,
     )
 

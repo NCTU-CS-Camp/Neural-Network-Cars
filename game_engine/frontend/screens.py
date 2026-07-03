@@ -263,7 +263,8 @@ def _draw_coin_balance(
     right: int | None = None,
     top: int = 16,
 ) -> None:
-    text = font.render(f"金幣  {balance}", True, YELLOW)
+    display_font = _font(max(12, font.get_height()))
+    text = display_font.render(f"金幣  {balance}", True, YELLOW)
     card = pygame.Rect(0, 0, text.get_width() + 20, text.get_height() + 10)
     card.topright = (right if right is not None else screen.get_width() - 20, top)
     pygame.draw.rect(screen, CARBON, card)
@@ -714,12 +715,14 @@ def run_training_config_screen(
         slider_right = W - M - value_input_w - control_gap
         slider_w = max(80, slider_right - slider_x)
         fitness_top = back_button.rect.bottom + M
+        fitness_title_y = fitness_top
+        preset_controls_y = fitness_title_y + font.get_height() + M // 2
         fitness_bottom = H - M
         dropdown_h = max(34, H // 26)
         custom_presets = FitnessPresetStore().list_presets()
         delete_preset_btn_w = max(70, right_w // 6)
         preset_dropdown = Dropdown(
-            pygame.Rect(right_x + M, fitness_top, right_w - M * 3 - delete_preset_btn_w, dropdown_h),
+            pygame.Rect(right_x + M, preset_controls_y, right_w - M * 3 - delete_preset_btn_w, dropdown_h),
             tuple(_fitness_preset_label(name) for name in fitness_strategy_names())
             + tuple(preset.preset_name for preset in custom_presets),
             placeholder="載入評分預設組合",
@@ -727,9 +730,9 @@ def run_training_config_screen(
         )
         delete_preset_button = Button(
             "刪除",
-            pygame.Rect(preset_dropdown.rect.right + M, fitness_top, delete_preset_btn_w, dropdown_h),
+            pygame.Rect(preset_dropdown.rect.right + M, preset_controls_y, delete_preset_btn_w, dropdown_h),
         )
-        sliders_top = preset_dropdown.rect.bottom + M // 2
+        sliders_top = preset_dropdown.rect.bottom + M
         fitness_step = (fitness_bottom - sliders_top) // 10
         slider_track_height = max(12, min(18, fitness_step // 4))
         slider_handle_radius = max(16, min(20, fitness_step // 3))
@@ -1004,7 +1007,7 @@ def run_training_config_screen(
             speed_label = font.render("最高速度（5–30）", True, DIM)
             screen.blit(speed_label, speed_label.get_rect(midright=(max_speed_input.rect.left - M // 2, max_speed_input.rect.centery)))
             max_speed_input.draw(screen, mono_speed)
-            auto_breed_label = font.render("自動繁殖（10–90 秒）", True, DIM)
+            auto_breed_label = font.render("自動繁殖時間（10–90 秒）", True, DIM)
             screen.blit(auto_breed_label, auto_breed_label.get_rect(midright=(auto_breed_input.rect.left - M // 2, auto_breed_input.rect.centery)))
             auto_breed_input.draw(screen, mono_speed)
             for diff_id, label, thumb, card_rect in map_cards:
@@ -1045,7 +1048,7 @@ def run_training_config_screen(
             pygame.draw.rect(screen, LINE, fit_panel, 1)
             pygame.draw.rect(screen, CYAN, pygame.Rect(fit_panel.x, fit_panel.y, 3, fit_panel.height))
             screen.blit(font.render("評分參數", True, CYAN),
-                        (right_x + M + 4, sliders_top - font.get_height() - M // 4))
+                        (right_x + M + 4, fitness_title_y))
             hovered_tip: str | None = None
             hovered_tip_pos: tuple[int, int] = (0, 0)
             icon_r = max(7, mono_value.get_height() // 2 - 1)
@@ -1123,9 +1126,9 @@ def run_save_confirm_screen(
         no_button = Button("不存", pygame.Rect(width // 2 - 90, height // 2, 160, 56))
         cancel_button = Button("取消", pygame.Rect(width // 2 + 80, height // 2, 160, 56))
         checkbox_label = (
-            "另存為評分預設組合"
+            "儲存 Fitness 策略"
             if preset_savable
-            else "另存為評分預設組合（此組合已存在，無需另存）"
+            else "儲存 Fitness 策略（此策略已存在，無需另存）"
         )
         save_as_preset_checkbox = Checkbox(
             pygame.Rect(width // 2 - 260, height // 2 + 80, 28, 28),
@@ -1551,7 +1554,7 @@ def run_validation_list_screen(
                 rank_colors = {1: F1_RED, 2: CYAN, 3: YELLOW}
                 rank_color = rank_colors.get(rank, DIM)
                 pygame.draw.rect(screen, rank_color, pygame.Rect(card_rect.x, card_rect.y, 3, card_rect.height))
-                rank_surf = font.render(f"第 {rank} 名", True, rank_color)
+                rank_surf = font.render(f"{rank}", True, rank_color)
                 screen.blit(rank_surf, rank_surf.get_rect(midleft=(card_rect.x + 12, card_rect.centery)))
                 text_x = card_rect.x + 56
                 performance = (
@@ -1562,7 +1565,7 @@ def run_validation_list_screen(
                 metadata = (
                     f"{record.record_name}  |  "
                     f"{format_timestamp_utc8(record.saved_at)}  |  "
-                    f"神經網路隨機碼：{record.mlp_init_seed}  |  "
+                    f"隨機碼：{record.mlp_init_seed}  |  "
                     f"最高速度：{record.max_speed}"
                 )
                 content_width = validate_button.rect.left - text_x - margin

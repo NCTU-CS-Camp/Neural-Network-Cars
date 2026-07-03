@@ -339,7 +339,7 @@ def run_training_loop(
             ("世代",      str(session.generation),          INK),
             ("車輛數",    str(session.population_size),     INK),
             ("存活數",    str(session.alive_count),         F1_GREEN),
-            ("評分模式",  fitness_strategy.name,            INK),
+            ("評分策略",  fitness_strategy.name,            INK),
         ]
         panel_w = 220
         panel_h = len(rows) * 22 + 16
