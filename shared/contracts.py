@@ -20,7 +20,7 @@ DEFAULT_MAX_SPEED = 10.0
 # Keep this list aligned with game_engine/frontend/shop/catalog.py.  The server
 # treats the value as replay-only metadata and does not need to import frontend
 # rendering code to validate it.
-ALLOWED_SKIN_IDS = tuple(range(22))
+ALLOWED_SKIN_IDS = tuple(skin_id for skin_id in range(22) if skin_id != 20)
 MIN_SUBMISSION_MAX_SPEED = 5.0
 MAX_SUBMISSION_MAX_SPEED = 30.0
 
@@ -195,13 +195,13 @@ class SubmissionPayload:
 
 def _coerce_skin_id(value: Any) -> int:
     if isinstance(value, bool):
-        raise ValueError("skin_id must be a valid catalog id from 0 to 21")
+        raise ValueError("skin_id must be a valid shop catalog id")
     try:
         skin_id = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("skin_id must be a valid catalog id from 0 to 21") from exc
+        raise ValueError("skin_id must be a valid shop catalog id") from exc
     if skin_id not in ALLOWED_SKIN_IDS:
-        raise ValueError("skin_id must be a valid catalog id from 0 to 21")
+        raise ValueError("skin_id must be a valid shop catalog id")
     return skin_id
 
 

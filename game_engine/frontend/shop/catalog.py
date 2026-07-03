@@ -52,7 +52,7 @@ SKINS: list[Skin] = [
     # A
     Skin(12, "F1 法拉利", "A", _image("A", "f1_ferrari")),
     Skin(13, "F1 邁凱倫", "A", _image("A", "f1_mclaren", rotate=180)),
-    Skin(14, "F1 賓士", "A", _image("A", "f1_mercedes", rotate=-90)),
+    Skin(14, "F1 賓士", "A", _image("A", "f1_mercedes")),
     Skin(15, "F1 紅牛", "A", _image("A", "f1_redbull")),
     # S
     Skin(16, "勞大", "S", _image("S", "boss")),
@@ -61,14 +61,11 @@ SKINS: list[Skin] = [
     # SR
     Skin(19, "蛋蛋67", "SR", _image("SR", "egg67")),
     Skin(21, "郁朝北鼻來悲茶的臉", "SR", _image("SR", "beicha")),
-    # SSR
-    Skin(20, "蝌蚪", "SSR", _image("SSR", "tadpole")),
 ]
 
 # Per-tier accent color, shared by the shop grid, 圖鑑, and reveal so a tier
 # always reads the same everywhere.
 TIER_COLORS: dict[str, tuple[int, int, int]] = {
-    "SSR": (255, 190, 70),
     "SR": (200, 130, 255),
     "S": (255, 120, 160),
     "A": (120, 200, 255),

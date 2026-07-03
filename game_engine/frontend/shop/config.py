@@ -7,20 +7,19 @@ rewards, thresholds). Comments mark what must hold (e.g. probabilities sum to 1)
 from __future__ import annotations
 
 # --- Tiers, rarest first ---
-TIERS: tuple[str, ...] = ("SSR", "SR", "S", "A", "B", "C")
+TIERS: tuple[str, ...] = ("SR", "S", "A", "B", "C")
 
 # Draw probability per tier. MUST sum to 1.0. (placeholder — author tunes)
 TIER_PROBABILITIES: dict[str, float] = {
-    "SSR": 0.02,
     "SR": 0.05,
     "S": 0.10,
-    "A": 0.18,
+    "A": 0.20,
     "B": 0.30,
     "C": 0.35,
 }
 
 # Tiers that satisfy the 10-pull floor guarantee ("A or above").
-GUARANTEE_TIERS: tuple[str, ...] = ("SSR", "SR", "S", "A")
+GUARANTEE_TIERS: tuple[str, ...] = ("SR", "S", "A")
 
 # --- Gacha costs (coins) ---
 SINGLE_PULL_COST: int = 10
