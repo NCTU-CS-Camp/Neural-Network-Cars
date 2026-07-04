@@ -20,6 +20,7 @@ from game_engine.frontend.competition_client import (
     check_eligibility,
     evaluate_car_result,
     parse_bool,
+    update_user_nickname,
 )
 from game_engine.frontend.submission_client import submit_car
 from server.competition_config import FRAME_LIMIT
@@ -183,6 +184,7 @@ def test_authenticate_user_returns_bearer_session(monkeypatch) -> None:
                 "expires_at": "2026-07-03T14:00:00+00:00",
                 "group_id": "1",
                 "username": "ada",
+                "nickname": "Ada Lovelace",
             },
         ),
     )
@@ -196,6 +198,7 @@ def test_authenticate_user_returns_bearer_session(monkeypatch) -> None:
 
     assert isinstance(result, AuthenticatedSession)
     assert result.token == "student-token"
+    assert result.nickname == "Ada Lovelace"
 
 
 def test_authenticate_user_reports_invalid_credentials(monkeypatch) -> None:
@@ -214,6 +217,30 @@ def test_authenticate_user_reports_invalid_credentials(monkeypatch) -> None:
 
     assert isinstance(result, NetworkError)
     assert "401" in result.message
+
+
+def test_update_user_nickname_uses_bearer_profile_api(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_patch_json(url, payload, timeout=10.0, token=None):
+        captured.update(url=url, payload=payload, timeout=timeout, token=token)
+        return 200, {"nickname": "Ada Driver"}
+
+    monkeypatch.setattr(client_module, "_patch_json", fake_patch_json)
+
+    result = update_user_nickname(
+        "http://localhost:8000/",
+        token="student-token",
+        nickname="Ada Driver",
+    )
+
+    assert result == "Ada Driver"
+    assert captured == {
+        "url": "http://localhost:8000/v2/me",
+        "payload": {"nickname": "Ada Driver"},
+        "timeout": 10.0,
+        "token": "student-token",
+    }
 
 
 def test_eligibility_forwards_bearer_token(monkeypatch) -> None:

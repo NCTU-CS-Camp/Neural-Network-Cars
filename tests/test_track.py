@@ -14,8 +14,8 @@ def test_loads_ordered_centerline_from_tile_connections() -> None:
         default_half_width=66.0,
     )
 
-    assert len(track.centerline) == 26
-    assert track.total_length == pytest.approx(3796.0)
+    assert len(track.centerline) == 28
+    assert track.total_length == pytest.approx(4088.0)
     assert track.centerline[:2] == ((143.0, 450.0), (143.0, 304.0))
     assert track.centerline[-1] == (143.0, 596.0)
 

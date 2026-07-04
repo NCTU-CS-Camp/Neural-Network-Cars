@@ -47,9 +47,23 @@ def test_valid_profile_is_loaded(tmp_path: Path) -> None:
     assert profile is not None
     assert profile.group_id == "group-1"
     assert profile.username == "apollo"
+    assert profile.nickname == "apollo"
     assert profile.server_url == "http://localhost:8000"
     assert profile.token == ""
     assert profile.expires_at == ""
+
+
+def test_profile_preserves_server_nickname(tmp_path: Path) -> None:
+    path = tmp_path / "profile.json"
+    path.write_text(
+        '{"group_id":"1","username":"apollo","nickname":"Apollo Driver"}',
+        encoding="utf-8",
+    )
+
+    profile = load_login_profile(path)
+
+    assert profile is not None
+    assert profile.display_name == "Apollo Driver"
 
 
 def test_login_session_requires_unexpired_token() -> None:
@@ -120,3 +134,38 @@ def test_clear_current_user_data_clears_profile_records_presets_and_shop(
         ("records", None),
         ("profile", None),
     ]
+
+
+def test_logout_current_user_only_clears_profile(monkeypatch) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        app_module,
+        "clear_login_profile",
+        lambda: calls.append("profile"),
+    )
+    monkeypatch.setattr(
+        app_module.shop_store,
+        "active_identity",
+        lambda: calls.append("active_identity"),
+    )
+    monkeypatch.setattr(
+        app_module.shop_store,
+        "delete_entry",
+        lambda identity: calls.append(f"shop:{identity}"),
+    )
+
+    class FakePresetStore:
+        def clear(self) -> None:
+            calls.append("presets")
+
+    class FakeRecordStore:
+        def clear(self) -> None:
+            calls.append("records")
+
+    monkeypatch.setattr(app_module, "FitnessPresetStore", FakePresetStore)
+    monkeypatch.setattr(app_module, "RecordStore", FakeRecordStore)
+
+    app_module._logout_current_user()
+
+    assert calls == ["profile"]

@@ -66,17 +66,21 @@ def create_user(
     group_id: str = "1",
     username: str = "tester",
     password: str = "pw",
+    nickname: str | None = None,
     disabled: bool = False,
 ) -> dict:
+    body = {
+        "group_id": group_id,
+        "username": username,
+        "password": password,
+        "disabled": disabled,
+    }
+    if nickname is not None:
+        body["nickname"] = nickname
     response = client.post(
         "/v2/admin/users",
         headers={"X-Admin-Token": "secret"},
-        json={
-            "group_id": group_id,
-            "username": username,
-            "password": password,
-            "disabled": disabled,
-        },
+        json=body,
     )
     assert response.status_code == 200
     return response.json()
@@ -268,12 +272,22 @@ def test_admin_page_gates_content_behind_session_token(tmp_path):
     assert '/v2/admin/submissions' in html
     assert 'data-action="enable"' in html
     assert 'id="admin-content" class="hidden"' in html
+    assert 'id="user-nickname"' in html
+    assert 'data-action="save-nickname"' in html
+    assert "<th>Created</th>" in html
+    assert "<th>Updated</th>" in html
 
 
 def test_user_login_authentication_and_expiration(tmp_path):
     clock = Clock()
     with make_client(tmp_path, clock) as client:
-        create_user(client, group_id="8", username="ada", password="pw8")
+        create_user(
+            client,
+            group_id="8",
+            username="ada",
+            password="pw8",
+            nickname="Ada Lovelace",
+        )
         ok = client.post(
             "/v2/auth/login",
             json={"group_id": "8", "username": "ada", "password": "pw8"},
@@ -302,9 +316,49 @@ def test_user_login_authentication_and_expiration(tmp_path):
 
     assert ok.status_code == 200
     assert ok.json()["group_id"] == "8"
+    assert ok.json()["nickname"] == "Ada Lovelace"
     assert bad_password.status_code == 401
     assert disabled.status_code == 401
     assert expired.status_code == 401
+
+
+def test_user_profile_nickname_api_updates_live_display_metadata(tmp_path):
+    clock = Clock()
+    with make_client(tmp_path, clock) as client:
+        headers = auth_headers(client, group_id="1", username="ada")
+        profile = client.get("/v2/me", headers=headers)
+        invalid_blank = client.patch("/v2/me", headers=headers, json={"nickname": "  "})
+        invalid_control = client.patch(
+            "/v2/me",
+            headers=headers,
+            json={"nickname": "Ada\nBot"},
+        )
+        updated = client.patch("/v2/me", headers=headers, json={"nickname": "Ada Bot"})
+        payload = make_payload(group_id="1", username="ada", max_progress=60.0)
+        submitted = client.post(
+            "/v2/competitions/easy/submissions",
+            json=payload,
+            headers=headers,
+        )
+        process_now(client)
+        leaderboard = client.get("/v2/competitions/easy/leaderboard").json()
+        replay = client.get(
+            "/v2/admin/replay",
+            headers={"X-Admin-Token": "secret"},
+        ).json()
+        mine = client.get("/v2/me/submissions?competition_id=easy", headers=headers)
+
+    assert profile.status_code == 200
+    assert profile.json()["nickname"] == "ada"
+    assert invalid_blank.status_code == 400
+    assert invalid_control.status_code == 400
+    assert updated.status_code == 200
+    assert updated.json()["nickname"] == "Ada Bot"
+    assert submitted.status_code == 201
+    assert submitted.json()["nickname"] == "Ada Bot"
+    assert leaderboard[0]["nickname"] == "Ada Bot"
+    assert replay["replays"]["easy"]["items"][0]["nickname"] == "Ada Bot"
+    assert mine.json()[0]["nickname"] == "Ada Bot"
 
 
 def test_student_endpoints_require_matching_bearer_identity(tmp_path):
@@ -330,7 +384,12 @@ def test_admin_can_import_users_and_plaintext_passwords_are_visible(tmp_path):
         imported = client.post(
             "/v2/admin/users/import",
             headers={"X-Admin-Token": "secret"},
-            json={"text": "2,bob,pw2\n3,cy,pw3,true"},
+            json={"text": "2,bob,pw2\n3,cy,pw3,Cy,true"},
+        )
+        header_imported = client.post(
+            "/v2/admin/users/import",
+            headers={"X-Admin-Token": "secret"},
+            json={"text": "group_id,username,password,nickname\n4,dan,pw4,Dan"},
         )
         users = client.get(
             "/v2/admin/users",
@@ -344,9 +403,12 @@ def test_admin_can_import_users_and_plaintext_passwords_are_visible(tmp_path):
 
     assert imported.status_code == 200
     assert imported.json()["imported"] == 2
-    assert [user["username"] for user in users.json()] == ["bob", "cy"]
+    assert header_imported.status_code == 200
+    assert [user["username"] for user in users.json()] == ["bob", "cy", "dan"]
     assert users.json()[0]["password_plaintext"] == "pw2"
+    assert users.json()[1]["nickname"] == "Cy"
     assert users.json()[1]["disabled"] is True
+    assert users.json()[2]["nickname"] == "Dan"
     assert invalid_json.status_code == 400
     assert "JSON import text is invalid" in invalid_json.json()["detail"]
 
@@ -1410,6 +1472,9 @@ def test_public_pages_and_websocket_use_v2_snapshot_payload(tmp_path):
     assert "/v2/me/submissions" in page.text
     assert "competitionUserToken" in page.text
     assert "My Runs" in page.text
+    assert '<select id="me-group"' in page.text
+    assert '<input id="me-group"' not in page.text
+    assert '<option value="10">Group 10</option>' in page.text
     assert "Group ${" in page.text
     assert "represented by" in page.text
     assert "Stage inactive" in page.text

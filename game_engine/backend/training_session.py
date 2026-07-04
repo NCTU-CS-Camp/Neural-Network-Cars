@@ -45,6 +45,7 @@ def create_evolution_rngs(
 class TrainingSession:
     population_size: int
     mutation_rate: int
+    fitness_strategy: str | None = None
     evolution_seed: int = DEFAULT_EVOLUTION_SEED
     generation: int = 1
     alive_count: int = 0

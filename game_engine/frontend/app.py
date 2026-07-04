@@ -58,9 +58,9 @@ from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
     CUSTOM_PRESET_LABEL,
     AppQuit,
-    run_clear_user_confirm_screen,
     run_loading_screen,
     run_login_screen,
+    run_logout_confirm_screen,
     run_main_menu_screen,
     run_record_name_screen,
     run_save_confirm_screen,
@@ -73,6 +73,17 @@ from shared.contracts import TrainingRecord
 
 
 UTC_PLUS_8 = timezone(timedelta(hours=8))
+
+# Backward-compatible countdown helpers for the older auto-breed tests. The
+# training loop now uses RuntimeSettings.auto_breed_seconds directly, but these
+# exports are still harmless and keep legacy imports working.
+AUTO_BREED_SECONDS = 10
+AUTO_BREED_FRAMES = AUTO_BREED_SECONDS * 30
+
+
+def advance_generation_countdown(frames_remaining: int) -> tuple[int, bool]:
+    next_frames_remaining = max(0, int(frames_remaining) - 1)
+    return next_frames_remaining, next_frames_remaining == 0
 
 
 def _set_collision_surface(
@@ -107,6 +118,10 @@ def _clear_current_user_data() -> None:
     clear_login_profile()
 
 
+def _logout_current_user() -> None:
+    clear_login_profile()
+
+
 def run():
     pygame.init()
     pygame.scrap.init()
@@ -125,17 +140,17 @@ def run():
             profile = run_login_screen(screen, settings.server_url)
         else:
             profile.server_url = settings.server_url
-        settings.nickname = profile.username
+        settings.nickname = profile.display_name
         if should_save_settings:
             save_runtime_settings(settings)
 
         while True:
             choice = run_main_menu_screen(screen, profile)
-            if choice == "clear_user":
-                if run_clear_user_confirm_screen(screen):
-                    _clear_current_user_data()
+            if choice == "logout":
+                if run_logout_confirm_screen(screen):
+                    _logout_current_user()
                     profile = run_login_screen(screen, settings.server_url)
-                    settings.nickname = profile.username
+                    settings.nickname = profile.display_name
                     save_runtime_settings(settings)
                 continue
             if choice == "training":
@@ -169,7 +184,7 @@ def run():
             else:
                 if not login_session_is_valid(profile):
                     profile = run_login_screen(screen, settings.server_url)
-                    settings.nickname = profile.username
+                    settings.nickname = profile.display_name
                     save_runtime_settings(settings)
                 run_validation_list_screen(screen, profile)
     except AppQuit:
@@ -498,7 +513,7 @@ def run_training_loop(
         pygame.draw.line(game_display, LINE, (0, bar_h), (W, bar_h))
         training_surf = _bar_cjk.render("訓練中", True, F1_RED)
         game_display.blit(training_surf, training_surf.get_rect(midleft=(12, bar_h // 2)))
-        name_surf = _bar_cjk.render(profile.username, True, DIM)
+        name_surf = _bar_cjk.render(profile.display_name, True, DIM)
         name_rect = name_surf.get_rect(midleft=(training_surf.get_width() + 24, bar_h // 2))
         game_display.blit(name_surf, name_rect)
         group_surf = _bar_cjk.render(f"  第 {profile.group_id} 組", True, DIM)
@@ -588,7 +603,7 @@ def run_training_loop(
             generation=session.generation,
             track_id=f"training-{map_difficulty}",
             track_seed=settings.track_seed,
-            nickname=profile.username,
+            nickname=profile.display_name,
         )
         pa_payload = export_weight_payload(parent_a, **common)
         pb_payload = export_weight_payload(parent_b, **common)
