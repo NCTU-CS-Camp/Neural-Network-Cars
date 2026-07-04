@@ -138,6 +138,7 @@ class LoginProfile:
     server_url: str = DEFAULT_SERVER_URL
     token: str = ""
     expires_at: str = ""
+    nickname: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LoginProfile":
@@ -147,7 +148,12 @@ class LoginProfile:
             server_url=str(data.get("server_url", DEFAULT_SERVER_URL)),
             token=str(data.get("token", "")),
             expires_at=str(data.get("expires_at", "")),
+            nickname=str(data.get("nickname") or data["username"]),
         )
+
+    @property
+    def display_name(self) -> str:
+        return self.nickname.strip() or self.username
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

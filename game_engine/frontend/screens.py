@@ -72,6 +72,7 @@ from game_engine.frontend.competition_client import (
     SubmissionRejected,
     authenticate_user,
     check_eligibility,
+    update_user_nickname,
 )
 from game_engine.frontend.competition_client import submit as submit_to_competition_server
 from game_engine.frontend.profile_store import save_login_profile
@@ -383,6 +384,7 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
     error_message = ""
     name_text = ""
     password_text = ""
+    nickname_text = ""
 
     while True:  # outer: rebuild on VIDEORESIZE
         W, H = screen.get_size()
@@ -397,17 +399,24 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             Button(str(group_id), pygame.Rect(M + (group_id - 1) * (group_btn_w + 8), btn_y, group_btn_w, group_btn_h))
             for group_id in range(1, GROUP_COUNT + 1)
         ]
-        inp_y = H * 50 // 100
+        inp_y = H * 48 // 100
         inp_h = max(40, H // 18)
         name_input = TextInput(pygame.Rect(M, inp_y, min(400, W - M * 2), inp_h), text=name_text)
-        password_y = H * 61 // 100
+        password_y = H * 59 // 100
         password_input = TextInput(
             pygame.Rect(M, password_y, min(400, W - M * 2), inp_h),
             text=password_text,
-            max_length=80,
+            max_length=8,
+            allowed_characters="0123456789",
             masked=True,
         )
-        login_y = H * 74 // 100
+        nickname_y = H * 70 // 100
+        nickname_input = TextInput(
+            pygame.Rect(M, nickname_y, min(400, W - M * 2), inp_h),
+            text=nickname_text,
+            max_length=20,
+        )
+        login_y = H * 82 // 100
         login_button = Button(
             "登入",
             pygame.Rect(M, login_y, max(120, W // 8), max(44, H // 18)),
@@ -420,10 +429,12 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
                 if event.type == pygame.VIDEORESIZE:
                     name_text = name_input.text
                     password_text = password_input.text
+                    nickname_text = nickname_input.text
                     resize = True
                     break
                 name_input.handle_event(event)
                 password_input.handle_event(event)
+                nickname_input.handle_event(event)
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     for button in group_buttons:
                         if button.contains(event.pos):
@@ -431,8 +442,11 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
                     if login_button.contains(event.pos):
                         username = name_input.text.strip()
                         password = password_input.text
-                        if selected_group is None or not username or not password.strip():
-                            error_message = "請選擇組別並輸入名字與密碼"
+                        nickname = nickname_input.text.strip()
+                        if selected_group is None or not username or not password or not nickname:
+                            error_message = "請選擇組別並輸入姓名、生日與暱稱"
+                        elif len(password) != 8 or not password.isdigit():
+                            error_message = "生日請輸入 8 位數字，格式為 YYYYMMDD"
                         else:
                             session = authenticate_user(
                                 server_url,
@@ -443,12 +457,21 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
                             if isinstance(session, NetworkError):
                                 error_message = session.message
                                 continue
+                            updated_nickname = update_user_nickname(
+                                server_url,
+                                token=session.token,
+                                nickname=nickname,
+                            )
+                            if isinstance(updated_nickname, NetworkError):
+                                error_message = updated_nickname.message
+                                continue
                             profile = LoginProfile(
                                 group_id=session.group_id,
                                 username=session.username,
                                 server_url=server_url,
                                 token=session.token,
                                 expires_at=session.expires_at,
+                                nickname=updated_nickname,
                             )
                             save_login_profile(profile)
                             return profile
@@ -468,13 +491,18 @@ def run_login_screen(screen: pygame.Surface, server_url: str) -> LoginProfile:
             screen.blit(font.render("選擇組別 (1-10)", True, DIM), (M, btn_y - font.get_height() - 6))
             for button in group_buttons:
                 button.draw(screen, font)
-            screen.blit(font.render("名字", True, DIM), (M, inp_y - font.get_height() - 6))
+            screen.blit(font.render("姓名（帳號）", True, DIM), (M, inp_y - font.get_height() - 6))
             name_input.draw(screen, font)
             screen.blit(
-                font.render("密碼", True, DIM),
+                font.render("生日（YYYYMMDD）", True, DIM),
                 (M, password_y - font.get_height() - 6),
             )
             password_input.draw(screen, font)
+            screen.blit(
+                font.render("暱稱", True, DIM),
+                (M, nickname_y - font.get_height() - 6),
+            )
+            nickname_input.draw(screen, font)
             login_button.draw(screen, font)
             if error_message:
                 screen.blit(
@@ -542,7 +570,7 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
             shop_button.update_hover(mouse_pos)
 
             screen.fill(BG)
-            name_surf = font.render(profile.username, True, INK)
+            name_surf = font.render(profile.display_name, True, INK)
             screen.blit(name_surf, (60, 52))
             group_surf = head22.render(f" 第 {profile.group_id} 組 ", True, INK)
             group_bg = pygame.Rect(

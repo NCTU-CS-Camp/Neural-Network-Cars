@@ -52,7 +52,7 @@
             <button id="import-users">Import Users</button>
           </div>
         </div>
-        <div style="overflow:auto; margin-top:16px"><table><thead><tr><th>Group</th><th>User</th><th>Nickname</th><th>Password</th><th>Status</th><th>Actions</th></tr></thead><tbody id="users"></tbody></table></div>
+        <div style="overflow:auto; margin-top:16px"><table><thead><tr><th>Group</th><th>User</th><th>Nickname</th><th>Password</th><th>Status</th><th>Created</th><th>Updated</th><th>Actions</th></tr></thead><tbody id="users"></tbody></table></div>
       </section>
       <section><h2>Competition Maps</h2><div class="maps" id="maps"></div></section>
       <section><h2>Operations</h2><div class="actions"><button id="run-batch">Run Snapshot Now</button><button class="secondary" id="restart-replay">Restart Replay</button><button class="danger" id="reset">Reset Competition Data</button></div></section>
@@ -75,12 +75,14 @@
       <td><input data-nickname-input="${escapeHtml(user.group_id)}:${escapeHtml(user.username)}" maxlength="20" value="${escapeHtml(user.nickname || user.username)}"></td>
       <td>${escapeHtml(user.password_plaintext)}</td>
       <td>${user.disabled ? "disabled" : "enabled"}</td>
+      <td>${escapeHtml(user.created_at)}</td>
+      <td>${escapeHtml(user.updated_at)}</td>
       <td class="inline">
         <button data-action="save-nickname" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}" data-password="${escapeHtml(user.password_plaintext)}" data-disabled="${user.disabled ? "1" : "0"}">Save Nickname</button>
         <button data-action="enable" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}">Enable</button>
         <button class="secondary" data-action="disable" data-group="${escapeHtml(user.group_id)}" data-user="${escapeHtml(user.username)}">Disable</button>
       </td>
-    </tr>`).join("") || '<tr><td colspan="6">No users</td></tr>'; }
+    </tr>`).join("") || '<tr><td colspan="8">No users</td></tr>'; }
     function renderSubmissions(rows) { submissionsEl.innerHTML = rows.map((item)=>`<tr><td>${escapeHtml(item.submission_id)}</td><td>${escapeHtml(item.competition_id)}</td><td>${groupLabel(item.group_id)}</td><td>${escapeHtml(item.username)}</td><td>${escapeHtml(item.status)}</td><td>${resultText(item.client_result)}</td><td><button class="danger" data-delete="${escapeHtml(item.submission_id)}">Delete</button></td></tr>`).join("") || '<tr><td colspan="7">No submissions</td></tr>'; }
     async function load() { const [stateResponse, usersResponse, submissionsResponse] = await Promise.all([fetch("/v2/admin/state", {cache:"no-store", headers:headers()}), fetch("/v2/admin/users", {cache:"no-store", headers:headers()}), fetch("/v2/admin/submissions", {cache:"no-store", headers:headers()})]); if (!stateResponse.ok) throw new Error(`${stateResponse.status} ${stateResponse.statusText}`); renderState(await stateResponse.json()); renderUsers(usersResponse.ok ? await usersResponse.json() : []); renderSubmissions(submissionsResponse.ok ? await submissionsResponse.json() : []); }
     async function unlockAdmin() { try { await load(); sessionStorage.setItem("competitionAdminToken", token.value); adminContent.classList.remove("hidden"); setLoginStatus("Admin unlocked."); } catch (error) { adminContent.classList.add("hidden"); sessionStorage.removeItem("competitionAdminToken"); setLoginStatus(`Invalid admin token: ${error}`, true); } }

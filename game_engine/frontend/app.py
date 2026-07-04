@@ -125,7 +125,7 @@ def run():
             profile = run_login_screen(screen, settings.server_url)
         else:
             profile.server_url = settings.server_url
-        settings.nickname = profile.username
+        settings.nickname = profile.display_name
         if should_save_settings:
             save_runtime_settings(settings)
 
@@ -135,7 +135,7 @@ def run():
                 if run_clear_user_confirm_screen(screen):
                     _clear_current_user_data()
                     profile = run_login_screen(screen, settings.server_url)
-                    settings.nickname = profile.username
+                    settings.nickname = profile.display_name
                     save_runtime_settings(settings)
                 continue
             if choice == "training":
@@ -169,7 +169,7 @@ def run():
             else:
                 if not login_session_is_valid(profile):
                     profile = run_login_screen(screen, settings.server_url)
-                    settings.nickname = profile.username
+                    settings.nickname = profile.display_name
                     save_runtime_settings(settings)
                 run_validation_list_screen(screen, profile)
     except AppQuit:
@@ -498,7 +498,7 @@ def run_training_loop(
         pygame.draw.line(game_display, LINE, (0, bar_h), (W, bar_h))
         training_surf = _bar_cjk.render("訓練中", True, F1_RED)
         game_display.blit(training_surf, training_surf.get_rect(midleft=(12, bar_h // 2)))
-        name_surf = _bar_cjk.render(profile.username, True, DIM)
+        name_surf = _bar_cjk.render(profile.display_name, True, DIM)
         name_rect = name_surf.get_rect(midleft=(training_surf.get_width() + 24, bar_h // 2))
         game_display.blit(name_surf, name_rect)
         group_surf = _bar_cjk.render(f"  第 {profile.group_id} 組", True, DIM)
@@ -588,7 +588,7 @@ def run_training_loop(
             generation=session.generation,
             track_id=f"training-{map_difficulty}",
             track_seed=settings.track_seed,
-            nickname=profile.username,
+            nickname=profile.display_name,
         )
         pa_payload = export_weight_payload(parent_a, **common)
         pb_payload = export_weight_payload(parent_b, **common)

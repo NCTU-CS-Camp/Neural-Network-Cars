@@ -112,10 +112,15 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
             pygame.MOUSEBUTTONDOWN,
             {"button": 1, "pos": (100, 570)},
         ),
-        pygame.event.Event(pygame.TEXTINPUT, {"text": "temporary-password"}),
+        pygame.event.Event(pygame.TEXTINPUT, {"text": "20080102"}),
         pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
-            {"button": 1, "pos": (100, 690)},
+            {"button": 1, "pos": (100, 670)},
+        ),
+        pygame.event.Event(pygame.TEXTINPUT, {"text": "小吳車手"}),
+        pygame.event.Event(
+            pygame.MOUSEBUTTONDOWN,
+            {"button": 1, "pos": (100, 780)},
         ),
     ]
     monkeypatch.setattr(pygame.event, "get", lambda: events)
@@ -132,7 +137,13 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
             expires_at="2026-07-03T14:00:00+00:00",
             group_id="1",
             username="吳榮恆",
+            nickname="吳同學",
         ),
+    )
+    monkeypatch.setattr(
+        screens,
+        "update_user_nickname",
+        lambda *args, **kwargs: "小吳車手",
     )
     pygame.font.init()
 
@@ -143,6 +154,7 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
 
     assert profile.group_id == "1"
     assert profile.username == "吳榮恆"
+    assert profile.nickname == "小吳車手"
     assert profile.server_url == "http://192.168.1.20:8000"
     assert profile.token == "student-token"
 

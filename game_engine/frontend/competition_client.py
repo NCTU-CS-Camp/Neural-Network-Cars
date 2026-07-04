@@ -47,6 +47,7 @@ class AuthenticatedSession:
     expires_at: str
     group_id: str
     username: str
+    nickname: str
 
 
 @dataclass(slots=True)
@@ -754,6 +755,36 @@ def _post_json(
         return NetworkError(message=f"伺服器回應格式錯誤：{exc}")
 
 
+def _patch_json(
+    url: str,
+    payload: dict[str, Any],
+    timeout: float = 10.0,
+    token: str | None = None,
+) -> tuple[int, dict[str, Any]] | NetworkError:
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        method="PATCH",
+        headers=headers,
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            raw = response.read()
+            body = json.loads(raw.decode("utf-8")) if raw else {}
+            return response.status, body
+    except HTTPError as exc:
+        raw = exc.read()
+        body = json.loads(raw.decode("utf-8")) if raw else {}
+        return exc.code, body
+    except (URLError, TimeoutError, ConnectionError, OSError) as exc:
+        return NetworkError(message=str(exc))
+    except json.JSONDecodeError as exc:
+        return NetworkError(message=f"伺服器回應格式錯誤：{exc}")
+
+
 def _eligibility_path(competition_id: str) -> str:
     if competition_id == "final":
         return "/v2/finals/eligibility"
@@ -787,6 +818,7 @@ def authenticate_user(
     expires_at = str(body.get("expires_at", "")).strip()
     response_group_id = str(body.get("group_id", "")).strip()
     response_username = str(body.get("username", "")).strip()
+    nickname = str(body.get("nickname") or response_username).strip()
     if not token or not expires_at:
         return NetworkError(message="登入失敗：伺服器回應缺少登入憑證或到期時間")
     if response_group_id != group_id or response_username != username:
@@ -796,7 +828,32 @@ def authenticate_user(
         expires_at=expires_at,
         group_id=response_group_id,
         username=response_username,
+        nickname=nickname,
     )
+
+
+def update_user_nickname(
+    server_url: str,
+    *,
+    token: str,
+    nickname: str,
+) -> str | NetworkError:
+    result = _patch_json(
+        server_url.rstrip("/") + "/v2/me",
+        {"nickname": nickname},
+        token=token,
+    )
+    if isinstance(result, NetworkError):
+        return result
+
+    status, body = result
+    if status != 200:
+        detail = body.get("detail", "無法更新暱稱")
+        return NetworkError(message=f"暱稱設定失敗（HTTP {status}）：{detail}")
+    updated_nickname = str(body.get("nickname", "")).strip()
+    if not updated_nickname:
+        return NetworkError(message="暱稱設定失敗：伺服器回應缺少暱稱")
+    return updated_nickname
 
 
 def _submission_path(competition_id: str) -> str:
@@ -970,4 +1027,5 @@ __all__ = [
     "parse_bool",
     "run",
     "submit",
+    "update_user_nickname",
 ]

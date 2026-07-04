@@ -47,9 +47,23 @@ def test_valid_profile_is_loaded(tmp_path: Path) -> None:
     assert profile is not None
     assert profile.group_id == "group-1"
     assert profile.username == "apollo"
+    assert profile.nickname == "apollo"
     assert profile.server_url == "http://localhost:8000"
     assert profile.token == ""
     assert profile.expires_at == ""
+
+
+def test_profile_preserves_server_nickname(tmp_path: Path) -> None:
+    path = tmp_path / "profile.json"
+    path.write_text(
+        '{"group_id":"1","username":"apollo","nickname":"Apollo Driver"}',
+        encoding="utf-8",
+    )
+
+    profile = load_login_profile(path)
+
+    assert profile is not None
+    assert profile.display_name == "Apollo Driver"
 
 
 def test_login_session_requires_unexpired_token() -> None:

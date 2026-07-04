@@ -15,6 +15,7 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 - Phase 1 has independent `easy` and `hard` competitions keyed by `(group_id, username)`.
 - Final is group-based for leaderboard/replay, but cooldown is keyed by `(group_id, username)`; ranking keeps each group's best non-deleted completed snapshot entry.
 - Student identity now requires admin-created classroom accounts. Public student actions use `Authorization: Bearer <token>` from `POST /v2/auth/login`; the request body identity must match the token.
+- The Pygame login screen selects a group, uses the student's name as `username`, accepts an 8-digit `YYYYMMDD` birthday as the account password, and updates the student's required nickname through `PATCH /v2/me` after authentication.
 - User identity keys remain `(group_id, username)`, but accounts also have mutable `nickname` display metadata. Browser leaderboard and protected replay show nickname first, with `Group N` and `username` as secondary/audit text.
 - Submissions persist optional replay metadata: `skin_id` (shop catalog IDs `0` through `21`) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
 - Training records snapshot the equipped shop `skin_id` when training starts; later Upload submissions reuse that recorded ID rather than the currently equipped skin.

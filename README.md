@@ -84,9 +84,11 @@ uv run python main.py
 此指令會從 `game_engine/frontend/app.py` 啟動 Pygame simulator。
 訓練時按 `U` 可將目前最佳車的 weights 提交到 server。
 
-首次啟動或登入 token 到期時，請在登入畫面輸入管理員預先建立的組別、
-名字與密碼。本機會保存 server 回傳的 12 小時 bearer token，但不保存密碼；
-Eligibility 與 Upload submission 會自動攜帶此 token。
+首次啟動或登入 token 到期時，請在登入畫面選擇組別，輸入姓名
+（作為帳號）、8 位數字生日（`YYYYMMDD`，作為密碼）與想使用的暱稱。
+登入後 client 會通過 `PATCH /v2/me` 更新暱稱。本機會保存 server 回傳的
+12 小時 bearer token 與暱稱，但不保存生日密碼；Eligibility 與 Upload
+submission 會自動攜帶此 token。
 
 Client 使用的 API 位址由專案根目錄的 `settings.json` 設定：
 

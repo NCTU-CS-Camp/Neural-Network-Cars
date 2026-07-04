@@ -274,6 +274,8 @@ def test_admin_page_gates_content_behind_session_token(tmp_path):
     assert 'id="admin-content" class="hidden"' in html
     assert 'id="user-nickname"' in html
     assert 'data-action="save-nickname"' in html
+    assert "<th>Created</th>" in html
+    assert "<th>Updated</th>" in html
 
 
 def test_user_login_authentication_and_expiration(tmp_path):
