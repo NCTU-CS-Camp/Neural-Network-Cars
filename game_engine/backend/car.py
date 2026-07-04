@@ -78,6 +78,7 @@ class Car:
     self.car_image = default_car_image
     # Existing training code configures a global map. Replays can override it per car.
     self.collision_surface = collision_surface
+    self.track_geometry = None
 
   @property
   def mlp_init_seed(self) -> int | None:
@@ -118,6 +119,8 @@ class Car:
         self.angle = 360 + self.angle
 
   def update(self, track: TrackGeometry | None = None):
+    if track is None:
+        track = self.track_geometry
     if self.acceleration != 0:
         self.velocity += self.acceleration
         speed_limit = getattr(self, "max_speed", maxspeed)
@@ -162,7 +165,12 @@ class Car:
     if self.collision_surface is not None or collision_surface is not None:
         return self._surface_contains
     if track is not None:
-        return track.contains
+        contains = getattr(track, "contains", None)
+        if callable(contains):
+            return contains
+        is_on_track = getattr(track, "is_on_track", None)
+        if callable(is_on_track):
+            return is_on_track
     return self._surface_contains
 
   def _sensor_endpoint(self, angle, contains, step):
@@ -207,6 +215,7 @@ class Car:
     self.d1, self.d2, self.d3, self.d4, self.d5 = distances
 
   def refresh_track_state(self, track: TrackGeometry):
+    self.track_geometry = track
     self.center = self.x, self.y
     self._update_corners()
     self._update_sensors(track)
@@ -235,11 +244,16 @@ class Car:
     return self.outp
 
   def collision(self, track: TrackGeometry | None = None):
+      if track is None:
+          track = self.track_geometry
       contains = self._containment_check(track)
       return not all(contains(corner) for corner in (self.a, self.b, self.c, self.d))
 
   def set_collision_surface(self, surface):
       self.collision_surface = surface
+
+  def set_track_geometry(self, track):
+      self.track_geometry = track
 
   def resetPosition(self):
       self.reset_state()
@@ -269,6 +283,8 @@ class Car:
       self._update_corners()
       if car_image is not None:
           self.car_image = car_image
+      if self.track_geometry is not None:
+          self._update_sensors(self.track_geometry)
 
   def takeAction(self):
     if self.outp.item(0) > 0.5:

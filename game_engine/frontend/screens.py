@@ -160,7 +160,7 @@ class AppQuit(Exception):
 
 
 GROUP_COUNT = 10
-MenuChoice = Literal["training", "validation", "clear_user", "shop"]
+MenuChoice = Literal["training", "validation", "logout", "shop"]
 TrainingConfigResult = tuple[FitnessStrategy, int, TrainingRecord | None, int, int]
 CUSTOM_PRESET_LABEL = "自訂（未儲存）"
 
@@ -529,8 +529,8 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
             "驗證",
             pygame.Rect(width // 2 + 40, height // 2 - 100, 320, 200),
         )
-        clear_user_button = Button(
-            "清除使用者資料",
+        logout_button = Button(
+            "登出",
             pygame.Rect(width // 2 - 160, height // 2 + 140, 320, 56),
             fill_color=F1_RED,
             hover_color=(200, 30, 22),
@@ -556,8 +556,8 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
                         return "training"
                     if validation_button.contains(event.pos):
                         return "validation"
-                    if clear_user_button.contains(event.pos):
-                        return "clear_user"
+                    if logout_button.contains(event.pos):
+                        return "logout"
                     if shop_button.contains(event.pos):
                         return "shop"
             if resize:
@@ -566,7 +566,7 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
             mouse_pos = pygame.mouse.get_pos()
             training_button.update_hover(mouse_pos)
             validation_button.update_hover(mouse_pos)
-            clear_user_button.update_hover(mouse_pos)
+            logout_button.update_hover(mouse_pos)
             shop_button.update_hover(mouse_pos)
 
             screen.fill(BG)
@@ -585,14 +585,14 @@ def run_main_menu_screen(screen: pygame.Surface, profile: LoginProfile) -> MenuC
                 pygame.draw.rect(screen, accent, pygame.Rect(btn.rect.x, btn.rect.y, btn.rect.width, 4))
             training_button.draw(screen, head22)
             validation_button.draw(screen, head22)
-            clear_user_button.draw(screen, font)
+            logout_button.draw(screen, font)
             shop_button.draw(screen, font)
 
             pygame.display.update()
             clock.tick(30)
 
 
-def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
+def run_logout_confirm_screen(screen: pygame.Surface) -> bool:
     clock = pygame.time.Clock()
 
     while True:  # outer: rebuild on VIDEORESIZE
@@ -600,7 +600,7 @@ def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
         title_font = _font(32)
         width, height = screen.get_size()
         confirm_button = Button(
-            "確認清除",
+            "確認登出",
             pygame.Rect(width // 2 - 180, height // 2 + 60, 160, 56),
             fill_color=F1_RED,
             hover_color=(200, 30, 22),
@@ -636,10 +636,10 @@ def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
             pygame.draw.rect(screen, CARBON, panel)
             pygame.draw.rect(screen, LINE, panel, 1)
             pygame.draw.rect(screen, F1_RED, pygame.Rect(panel.x, panel.y, panel_w, 4))
-            title = title_font.render("確定要清除使用者資料？", True, INK)
+            title = title_font.render("確定要登出？", True, INK)
             warning_lines = (
-                "個人資料、訓練紀錄與自訂預設組合都會刪除，",
-                "金幣、已獲得皮膚等商店進度也無法復原。",
+                "只會清除這次登入的使用者資料，",
+                "訓練紀錄、金幣、皮膚與商店進度都會保留。",
             )
             screen.blit(title, title.get_rect(center=(width // 2, height // 2 - 50)))
             for index, text in enumerate(warning_lines):
@@ -653,6 +653,11 @@ def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
 
             pygame.display.update()
             clock.tick(30)
+
+
+def run_clear_user_confirm_screen(screen: pygame.Surface) -> bool:
+    """Backward-compatible alias for the old destructive flow's confirm dialog."""
+    return run_logout_confirm_screen(screen)
 
 
 def run_training_config_screen(
@@ -1504,7 +1509,7 @@ def run_validation_list_screen(
             rows = []
             for index, record in enumerate(records):
                 row_y = list_top + index * (row_height + row_gap)
-                button_y = row_y + (row_height - 44) // 2
+                button_y = row_y + 40
                 validate_button = Button(
                     "驗證",
                     pygame.Rect(content_right - 380, button_y, 110, 44),
@@ -2126,7 +2131,11 @@ def _simulate_candidates(
             screen.fill(BG)
             screen.blit(pygame.transform.scale(canvas, (dst_w, dst_h)), (dst_x, dst_y))
             if esc_button is not None:
-                esc_button.update_hover(pygame.mouse.get_pos())
+                try:
+                    mouse_pos = pygame.mouse.get_pos()
+                except pygame.error:
+                    mouse_pos = (-1, -1)
+                esc_button.update_hover(mouse_pos)
                 esc_button.draw(screen, font)
             if coin_balance is not None:
                 right = esc_button.rect.left - 16 if esc_button is not None else None

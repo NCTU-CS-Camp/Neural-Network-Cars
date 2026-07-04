@@ -4,8 +4,9 @@ from dataclasses import dataclass
 import math
 from typing import Any
 
-from GA.fitness import FitnessStrategy, StepContext
-from game_engine.backend.settings import SIMULATION_MAX_FRAMES
+from GA.fitness import FitnessStrategy
+from game_engine.backend.settings import VALIDATION_FRAME_LIMIT
+from game_engine.backend.simulator import FrameTelemetry
 from game_engine.backend.track_geometry import TrackGeometry
 
 
@@ -18,14 +19,14 @@ class FitnessTracker:
     track: TrackGeometry
     strategy: FitnessStrategy
     fps: int
-    max_frames: int = SIMULATION_MAX_FRAMES
+    max_frames: int = VALIDATION_FRAME_LIMIT
     previous_progress: float = 0.0
     total_fitness: float = 0.0
     frame: int = 0
     finished: bool = False
     crashed: bool = False
     timed_out: bool = False
-    last_context: StepContext | None = None
+    last_context: FrameTelemetry | None = None
 
     @property
     def stopped(self) -> bool:
@@ -39,7 +40,7 @@ class FitnessTracker:
         track: TrackGeometry,
         strategy: FitnessStrategy,
         fps: int,
-        max_frames: int = SIMULATION_MAX_FRAMES,
+        max_frames: int = VALIDATION_FRAME_LIMIT,
     ) -> "FitnessTracker":
         progress, _ = track.project((float(car.x), float(car.y)))
         car.fitness_score = 0.0
@@ -59,7 +60,7 @@ class FitnessTracker:
         *,
         previous_angle: float,
         collided: bool,
-    ) -> StepContext:
+    ) -> FrameTelemetry:
         if self.stopped:
             if self.last_context is None:
                 raise RuntimeError("Stopped fitness tracker has no context")
@@ -86,26 +87,23 @@ class FitnessTracker:
         ]
         turn_amount = abs(_angle_delta(float(car.angle), previous_angle))
         finished_now = progress >= self.track.total_length
-        context = StepContext(
+        context = FrameTelemetry(
             velocity=float(car.velocity),
             progress_delta=progress_delta,
-            reverse_progress_delta=reverse_progress_delta,
             progress_ratio=progress_ratio,
             center_offset=center_offset,
-            normalized_center_offset=center_offset / self.track.half_width,
+            track_half_width=self.track.half_width,
+            heading_delta=heading_delta,
             heading_alignment=heading_alignment,
-            front_clearance=distances[0],
             min_clearance=min(distances),
-            side_clearance_balance=abs(distances[3] - distances[4]),
-            turn_amount=turn_amount,
             collided=collided,
-            finished=finished_now,
+            finished_now=finished_now,
             is_stalled=float(car.velocity) < 0.5,
             is_spinning=turn_amount >= 5.0 and progress_delta < 0.1,
-            frame=self.frame,
+            is_wrong_way=reverse_progress_delta > 0.0 or heading_alignment < 0.0,
             time_elapsed=self.frame / self.fps,
         )
-        self.total_fitness += self.strategy.score_step(context)
+        self.total_fitness += self.strategy.score_frame(context)
         self.previous_progress = progress
         self.finished = finished_now
         self.crashed = collided

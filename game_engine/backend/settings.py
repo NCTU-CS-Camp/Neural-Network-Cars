@@ -84,6 +84,14 @@ TRAINING_DIFFICULTY_MAPS: dict[int, tuple[Path, Path, Path]] = {
     ),  # random, generated at runtime
 }
 
+# Backward-compatible alias for the authored training-map metadata paths. Older
+# tests import this directly when building track geometry fixtures.
+TRAINING_MAP_METADATA: dict[int, Path] = {
+    difficulty: metadata_path
+    for difficulty, (_, _, metadata_path) in TRAINING_DIFFICULTY_MAPS.items()
+    if difficulty in (1, 2)
+}
+
 # Validation maps mirror the training hookup (front for display, back for
 # collision). Scoring checkpoints come from the matching valid_{id}.json.
 VALIDATION_DIFFICULTY_MAPS: dict[str, tuple[Path, Path]] = {

@@ -2,13 +2,22 @@ from __future__ import annotations
 
 import numpy as np
 
-from game_engine.backend.car import create_seeded_population
+from game_engine.backend.car import Car
+from game_engine.backend.training_session import create_evolution_rngs
 from shared.contracts import RuntimeSettings
 
 
+def population(seed: int, count: int) -> list[Car]:
+    rng, _ = create_evolution_rngs(seed)
+    return [
+        Car([6, 6, 4], mlp_init_seed=seed, mlp_init_rng=rng)
+        for _ in range(count)
+    ]
+
+
 def test_same_nn_seed_recreates_identical_initial_population() -> None:
-    first = create_seeded_population([6, 6, 4], 4, seed=3057)
-    second = create_seeded_population([6, 6, 4], 4, seed=3057)
+    first = population(3057, 4)
+    second = population(3057, 4)
 
     for first_car, second_car in zip(first, second):
         for first_weights, second_weights in zip(
@@ -24,14 +33,14 @@ def test_same_nn_seed_recreates_identical_initial_population() -> None:
 
 
 def test_different_nn_seed_changes_initial_weights() -> None:
-    first = create_seeded_population([6, 6, 4], 1, seed=3057)[0]
-    second = create_seeded_population([6, 6, 4], 1, seed=3058)[0]
+    first = population(3057, 1)[0]
+    second = population(3058, 1)[0]
 
     assert not np.array_equal(first.weights[0], second.weights[0])
 
 
-def test_legacy_custom_seed_migrates_to_nn_seed() -> None:
+def test_track_seed_does_not_override_evolution_seed() -> None:
     settings = RuntimeSettings.from_dict({"track_seed": 3057})
 
     assert settings.track_seed == 3057
-    assert settings.nn_seed == 3057
+    assert settings.evolution_seed == 3057

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from GA.fitness import select_top_k_cars
+from GA.fitness import select_best_cars
 from game_engine.backend.car import Car
 from game_engine.backend.training_session import TrainingSession
 from game_engine.frontend.app import (
@@ -10,7 +10,6 @@ from game_engine.frontend.app import (
     AUTO_BREED_SECONDS,
     advance_generation_countdown,
 )
-from shared.contracts import FitnessConfig
 
 
 def test_auto_breed_countdown_reaches_zero_after_ten_seconds() -> None:
@@ -41,7 +40,7 @@ def test_parent_selection_uses_accumulated_beginner_mix_fitness() -> None:
         SimpleNamespace(fitness_score=80.0),
     ]
 
-    parents = select_top_k_cars(cars, FitnessConfig(), k=2)
+    parents = select_best_cars(cars, count=2)
 
     assert [car.fitness_score for car in parents] == [90.0, 80.0]
 

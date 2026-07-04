@@ -134,3 +134,38 @@ def test_clear_current_user_data_clears_profile_records_presets_and_shop(
         ("records", None),
         ("profile", None),
     ]
+
+
+def test_logout_current_user_only_clears_profile(monkeypatch) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        app_module,
+        "clear_login_profile",
+        lambda: calls.append("profile"),
+    )
+    monkeypatch.setattr(
+        app_module.shop_store,
+        "active_identity",
+        lambda: calls.append("active_identity"),
+    )
+    monkeypatch.setattr(
+        app_module.shop_store,
+        "delete_entry",
+        lambda identity: calls.append(f"shop:{identity}"),
+    )
+
+    class FakePresetStore:
+        def clear(self) -> None:
+            calls.append("presets")
+
+    class FakeRecordStore:
+        def clear(self) -> None:
+            calls.append("records")
+
+    monkeypatch.setattr(app_module, "FitnessPresetStore", FakePresetStore)
+    monkeypatch.setattr(app_module, "RecordStore", FakeRecordStore)
+
+    app_module._logout_current_user()
+
+    assert calls == ["profile"]

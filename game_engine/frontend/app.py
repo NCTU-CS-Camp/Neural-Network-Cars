@@ -58,9 +58,9 @@ from game_engine.frontend.submission_client import submit_car
 from game_engine.frontend.screens import (
     CUSTOM_PRESET_LABEL,
     AppQuit,
-    run_clear_user_confirm_screen,
     run_loading_screen,
     run_login_screen,
+    run_logout_confirm_screen,
     run_main_menu_screen,
     run_record_name_screen,
     run_save_confirm_screen,
@@ -73,6 +73,17 @@ from shared.contracts import TrainingRecord
 
 
 UTC_PLUS_8 = timezone(timedelta(hours=8))
+
+# Backward-compatible countdown helpers for the older auto-breed tests. The
+# training loop now uses RuntimeSettings.auto_breed_seconds directly, but these
+# exports are still harmless and keep legacy imports working.
+AUTO_BREED_SECONDS = 10
+AUTO_BREED_FRAMES = AUTO_BREED_SECONDS * 30
+
+
+def advance_generation_countdown(frames_remaining: int) -> tuple[int, bool]:
+    next_frames_remaining = max(0, int(frames_remaining) - 1)
+    return next_frames_remaining, next_frames_remaining == 0
 
 
 def _set_collision_surface(
@@ -107,6 +118,10 @@ def _clear_current_user_data() -> None:
     clear_login_profile()
 
 
+def _logout_current_user() -> None:
+    clear_login_profile()
+
+
 def run():
     pygame.init()
     pygame.scrap.init()
@@ -131,9 +146,9 @@ def run():
 
         while True:
             choice = run_main_menu_screen(screen, profile)
-            if choice == "clear_user":
-                if run_clear_user_confirm_screen(screen):
-                    _clear_current_user_data()
+            if choice == "logout":
+                if run_logout_confirm_screen(screen):
+                    _logout_current_user()
                     profile = run_login_screen(screen, settings.server_url)
                     settings.nickname = profile.display_name
                     save_runtime_settings(settings)

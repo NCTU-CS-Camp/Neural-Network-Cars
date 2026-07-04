@@ -159,7 +159,7 @@ def test_login_uses_preconfigured_server_url(monkeypatch) -> None:
     assert profile.token == "student-token"
 
 
-def test_main_menu_exposes_clear_user_action(monkeypatch) -> None:
+def test_main_menu_exposes_logout_action(monkeypatch) -> None:
     events = [
         pygame.event.Event(
             pygame.MOUSEBUTTONDOWN,
@@ -174,7 +174,7 @@ def test_main_menu_exposes_clear_user_action(monkeypatch) -> None:
         LoginProfile(group_id="1", username="apollo"),
     )
 
-    assert choice == "clear_user"
+    assert choice == "logout"
 
 
 def test_main_menu_exposes_shop_action(monkeypatch) -> None:
@@ -324,7 +324,7 @@ def test_random_validation_awards_coins_for_the_current_map(monkeypatch) -> None
         ((900, 538), False),
     ],
 )
-def test_clear_user_requires_confirmation(
+def test_logout_requires_confirmation(
     monkeypatch,
     position: tuple[int, int],
     expected: bool,
@@ -339,7 +339,7 @@ def test_clear_user_requires_confirmation(
     pygame.font.init()
 
     assert (
-        screens.run_clear_user_confirm_screen(pygame.Surface((1600, 900)))
+        screens.run_logout_confirm_screen(pygame.Surface((1600, 900)))
         is expected
     )
 
