@@ -100,7 +100,7 @@ Request body:
 All genes and progress values must be finite. `max_progress` is the percentage of
 the lap reached and must be between `0` and `100`. Incomplete runs require `lap_ticks: null`;
 completed runs require a positive `lap_ticks`. Tick values cannot exceed 900.
-`skin_id` is optional and defaults to `0`; valid values are shop catalog IDs `0` through `21`. Replay resolves non-default IDs through `game_engine.frontend.shop.renderer` and the assets under `Images/Skins/`.
+`skin_id` is optional and defaults to `0`; valid values are shop catalog IDs `0` through `19` and `21` (ID `20`, the removed SSR skin, is invalid). Replay resolves non-default IDs through `game_engine.frontend.shop.renderer` and the assets under `Images/Skins/`.
 `max_speed` or `maxSpeed` is optional and defaults to `10.0`; valid range is 5 through 30.
 These two fields affect replay appearance/physics only and never change official ranking.
 

@@ -28,7 +28,7 @@ from game_engine.frontend.widgets import Button
 
 
 # Rarity order, best first — used to emphasise the rarest card in the summary.
-_TIER_ORDER: list[str] = ["SSR", "SR", "S", "A", "B", "C", "DEFAULT"]
+_TIER_ORDER: list[str] = ["SR", "S", "A", "B", "C", "DEFAULT"]
 
 # Per-tier drama: (build_up_frames, flash_frames, particle_count, shake_frames)
 # at 60 fps. Rarer = longer build-up, bigger burst, and a screen shake.
@@ -39,7 +39,6 @@ _DRAMA: dict[str, tuple[int, int, int, int]] = {
     "S": (28, 8, 22, 0),
     "A": (28, 8, 22, 0),
     "SR": (48, 12, 44, 8),
-    "SSR": (56, 14, 64, 12),
 }
 
 _HERO_HEIGHT = 240

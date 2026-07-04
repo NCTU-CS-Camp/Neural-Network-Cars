@@ -17,7 +17,7 @@ The server must not breed, mutate, select among 20 candidates, or overwrite offi
 - Student identity now requires admin-created classroom accounts. Public student actions use `Authorization: Bearer <token>` from `POST /v2/auth/login`; the request body identity must match the token.
 - The Pygame login screen selects a group, uses the student's name as `username`, accepts an 8-digit `YYYYMMDD` birthday as the account password, and updates the student's required nickname through `PATCH /v2/me` after authentication.
 - User identity keys remain `(group_id, username)`, but accounts also have mutable `nickname` display metadata. Browser leaderboard and protected replay show nickname first, with `Group N` and `username` as secondary/audit text.
-- Submissions persist optional replay metadata: `skin_id` (shop catalog IDs `0` through `21`) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
+- Submissions persist optional replay metadata: `skin_id` (shop catalog IDs `0` through `19` and `21`; removed SSR ID `20` is invalid) and `max_speed` / `maxSpeed` (`5 <= value <= 30`, default `10.0`). Ranking still ignores this metadata.
 - Training records snapshot the equipped shop `skin_id` when training starts; later Upload submissions reuse that recorded ID rather than the currently equipped skin.
 - Admin can create/update plaintext temporary passwords, bulk import users, enable/disable accounts, and soft-delete individual submissions.
 - Admin user create/update/import supports optional `nickname`. Student nickname editing is exposed through bearer-token profile APIs, not through the browser leaderboard UI.
@@ -55,7 +55,7 @@ Submission adds `client_result`:
 {
   "completed": false,
   "lap_ticks": null,
-    "max_progress": 28.5,
+  "max_progress": 28.5,
   "ticks_to_max_progress": 840
 }
 ```
@@ -83,7 +83,7 @@ Validation rules:
 - Student eligibility/submission bodies must match the bearer-token identity.
 - Weight lengths are 36 and 24; bias lengths are 6 and 4.
 - All gene and result values must be finite.
-- `skin_id` defaults to `0`; valid values are the shop catalog IDs `0` through `21`.
+- `skin_id` defaults to `0`; valid values are the shop catalog IDs `0` through `19` and `21` (SSR ID `20` was removed).
 - `max_speed`/`maxSpeed` defaults to `10.0`; valid range is `5` through `30`.
 - Completed runs require positive `lap_ticks`.
 - Incomplete runs require `lap_ticks: null`.
