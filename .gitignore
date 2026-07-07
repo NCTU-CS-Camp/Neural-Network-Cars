@@ -17,7 +17,6 @@ server/*.db-*
 # Local runtime configuration and user data
 profile.json
 records.json
-settings.json
 shop_state.json
 configs/fitness_presets.json
 
