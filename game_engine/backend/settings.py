@@ -11,6 +11,11 @@ OFFICIAL_TRACKS_DIR = IMAGES_DIR / "OfficialTracks"
 
 FONT_PATH = PROJECT_ROOT / "fonts" / "GenSenRounded-R.ttc"
 
+FONTS_DIR = PROJECT_ROOT / "fonts"
+HEAD_FONT_PATH = FONTS_DIR / "ChakraPetch-Bold.ttf"
+BODY_FONT_PATH = FONTS_DIR / "Rajdhani-SemiBold.ttf"
+MONO_FONT_PATH = FONTS_DIR / "SpaceMono-Bold.ttf"
+
 MAPS_DIR = PROJECT_ROOT / "maps"
 TRAIN_MAPS_DIR = MAPS_DIR / "train_maps"
 VALID_MAPS_DIR = MAPS_DIR / "valid_maps"
@@ -26,17 +31,35 @@ FPS = 30
 MAX_SPEED = 10
 TRACK_HALF_WIDTH = 66.0
 
+# Keep training sprites at the original feat/nn_engine dimensions. Collision
+# geometry remains fixed separately in car.py.
+CAR_RENDER_SCALE = 1.2
+
 # Validation run length. Kept as a config knob because the termination rule is
 # expected to change later (e.g. stagnation / first-completion); for now a flat
 # time limit is the only criterion implemented.
-VALIDATION_TIME_LIMIT_SECONDS = 90
-VALIDATION_FRAME_LIMIT = VALIDATION_TIME_LIMIT_SECONDS * FPS  # 90s @ 30fps = 2700 ticks
+VALIDATION_TIME_LIMIT_SECONDS = 60
+VALIDATION_FRAME_LIMIT = VALIDATION_TIME_LIMIT_SECONDS * FPS  # 60s @ 30fps = 1800 ticks
 
 WHITE = (255, 255, 255)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 128)
 BLACK = (0, 0, 0)
 COLOR_LINE = (255, 0, 0)
+
+# --- F1 Broadcast palette ---
+BG       = (10, 11, 14)      # 深黑底
+CARBON   = (20, 22, 28)      # 面板 / 一般按鈕
+CARBON2  = (27, 30, 38)      # hover / 次層
+FIELD    = (12, 14, 18)      # 輸入框底
+LINE     = (42, 46, 57)      # 邊框線
+INK      = (238, 241, 246)   # 主要文字
+DIM      = (138, 146, 163)   # 次要文字
+F1_RED   = (255, 43, 33)     # 主色 / CTA / 懲罰 / 選取高亮
+CYAN     = (24, 223, 230)    # 資料 / 獎勵 / 焦點
+YELLOW   = (255, 214, 10)    # 訊號
+F1_GREEN = (58, 224, 110)    # 正向數值
+SELECT_BG = (28, 17, 20)     # 被選中列底（帶紅調）
 
 INPUT_LAYER = 6
 HIDDEN_LAYER = 6
@@ -59,6 +82,14 @@ TRAINING_DIFFICULTY_MAPS: dict[int, tuple[Path, Path, Path]] = {
         TRACK_BACK_PATH,
         TRACK_METADATA_PATH,
     ),  # random, generated at runtime
+}
+
+# Backward-compatible alias for the authored training-map metadata paths. Older
+# tests import this directly when building track geometry fixtures.
+TRAINING_MAP_METADATA: dict[int, Path] = {
+    difficulty: metadata_path
+    for difficulty, (_, _, metadata_path) in TRAINING_DIFFICULTY_MAPS.items()
+    if difficulty in (1, 2)
 }
 
 # Validation maps mirror the training hookup (front for display, back for

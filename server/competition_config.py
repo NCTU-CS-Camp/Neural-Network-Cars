@@ -50,14 +50,17 @@ def public_config(
     phase_one_batch_minutes: int = PHASE_ONE_BATCH_MINUTES,
 ) -> dict[str, Any]:
     phase_one_batch_minutes = validate_phase_one_batch_minutes(phase_one_batch_minutes)
+    next_snapshot_at = next_batch_boundary(
+        now,
+        phase_one_batch_minutes,
+    ).isoformat()
     return {
         "version": COMPETITION_CONFIG_VERSION,
         "simulation_fps": SIMULATION_FPS,
         "frame_limit": FRAME_LIMIT,
         "stagnation_ticks": STAGNATION_TICKS,
+        "snapshot_interval_minutes": phase_one_batch_minutes,
+        "next_snapshot_at": next_snapshot_at,
         "phase_one_batch_minutes": phase_one_batch_minutes,
-        "next_phase_one_batch_at": next_batch_boundary(
-            now,
-            phase_one_batch_minutes,
-        ).isoformat(),
+        "next_phase_one_batch_at": next_snapshot_at,
     }

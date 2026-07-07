@@ -17,6 +17,7 @@ from game_engine.backend.car import Car
 from game_engine.backend.competition_track import CompetitionRunTracker
 from game_engine.backend.serialization import apply_weight_payload
 from game_engine.backend.settings import FONT_PATH, FPS, SCREEN_SIZE
+from game_engine.frontend.shop.renderer import surfaces_for
 from server.competition_config import (
     FRAME_LIMIT,
     PHASE_ONE_REPLAY_LIMIT,
@@ -28,38 +29,90 @@ from shared.contracts import EXPECTED_LAYER_SIZES, SubmissionPayload
 
 
 Color = tuple[int, int, int]
-LeaderboardSignature = tuple[tuple[int, str], ...]
-BACKGROUND: Color = (11, 17, 24)
-PANEL: Color = (16, 25, 33)
-BORDER: Color = (39, 54, 67)
-TEXT: Color = (244, 247, 251)
-MUTED: Color = (157, 174, 191)
-EASY_ACCENT: Color = (87, 211, 207)
-HARD_ACCENT: Color = (244, 177, 111)
-FINAL_ACCENT: Color = (217, 168, 255)
-DIM_COLOR: Color = (92, 105, 116)
+LeaderboardSignature = tuple[tuple[int, str, str], ...]
+
+# ------------------------------------------------------------------ F1 "Podium Hero" palette
+# Presentation-only restyle (see docs / design handoff). The legacy names
+# (BACKGROUND/PANEL/BORDER/TEXT/MUTED/*_ACCENT/DIM_COLOR) are kept as aliases to the new
+# values so any untouched draw code keeps working. Hex equivalents in comments.
+BG_STAGE: Color = (17, 16, 23)       # #111017 main screen fill
+BG_DEEP: Color = (14, 14, 21)        # #0E0E15 map wells / chip fill
+PANEL: Color = (26, 26, 34)          # #1A1A22 list panels
+PANEL2: Color = (30, 30, 39)         # #1E1E27 position blocks (rank 4+)
+BORDER: Color = (52, 52, 62)         # #34343E outer borders
+BORDER_SOFT: Color = (42, 42, 52)    # #2A2A34 inner borders
+ROW_LINE: Color = (34, 34, 43)       # #22222B row separators
+
+RED: Color = (225, 6, 0)             # #E10600 brand red / leader / Hard accent
+RED_BRIGHT: Color = (255, 68, 56)    # #FF4438
+GOLD: Color = (225, 180, 76)         # #E1B44C P1 medal / Final accent
+SILVER: Color = (199, 203, 212)      # #C7CBD4 P2 medal
+SILVER_TAB: Color = (184, 188, 198)  # #B8BCC6 Easy accent
+BRONZE: Color = (205, 127, 50)       # #CD7F32 P3 medal
+WHITE: Color = (244, 244, 247)       # #F4F4F7 primary text
+OFFWHITE: Color = (237, 237, 240)    # #EDEDF0
+MUTED2: Color = (154, 154, 165)      # #9A9AA5 secondary text
+DIM: Color = (92, 105, 116)          # #5C6974 finished/crashed/stalled
+DARK_TEXT: Color = (8, 8, 12)        # #08080C text on light/red/gold fills
+
+# legacy aliases (keep existing references valid)
+BACKGROUND: Color = BG_STAGE
+TEXT: Color = WHITE
+MUTED: Color = (139, 139, 150)       # #8B8B96 labels
+EASY_ACCENT: Color = SILVER_TAB
+HARD_ACCENT: Color = RED
+FINAL_ACCENT: Color = GOLD
+DIM_COLOR: Color = DIM
+
+# per-competition accent: Easy silver / Hard red / Final gold
+ACCENT: dict[str, Color] = {"easy": SILVER_TAB, "hard": RED, "final": GOLD}
+# car marker ramp by replay-rank order (dim overrides when a car is not running)
+CAR_RAMP: list[Color] = [RED, OFFWHITE, SILVER, GOLD, (142, 145, 153), RED_BRIGHT]
+
 REPLAY_PROGRESS_DISTANCE_PX = 24.0
 REPLAY_HOLD_SECONDS = 3.0
 REPLAY_FETCH_SECONDS = 5.0
+SNAPSHOT_SYNC_RETRY_SECONDS = 0.5
+SNAPSHOT_SYNC_TIMEOUT_SECONDS = 6.0
 LEADERBOARD_REVEAL_HIGHLIGHT_SECONDS = 2.0
 VIRTUAL_SIZE = SCREEN_SIZE
+SNAPSHOT_WAIT_LABEL = "等待新快照"
+# per-car label colors, intentionally avoiding gray; stopped cars override to DIM.
 REPLAY_COLORS: list[Color] = [
-    (76, 169, 255),
-    (255, 105, 124),
-    (250, 205, 86),
-    (114, 224, 152),
-    (188, 132, 255),
-    (100, 221, 225),
-    (255, 148, 93),
-    (198, 227, 108),
-    (244, 137, 199),
-    (185, 196, 210),
-    (121, 166, 255),
-    (240, 173, 108),
-    (112, 213, 191),
-    (222, 143, 166),
-    (173, 150, 240),
+    RED_BRIGHT,
+    GOLD,
+    (74, 222, 128),
+    (56, 189, 248),
+    (251, 113, 133),
+    (168, 85, 247),
+    (45, 212, 191),
+    (250, 204, 21),
 ]
+
+
+def medal(position: int) -> Color:
+    """Medal color for a 1-based finishing position."""
+    return {1: GOLD, 2: SILVER, 3: BRONZE}.get(position, MUTED)
+
+
+def podium_bg(position: int) -> Color:
+    """Tinted card background for a 1-based podium position."""
+    return {1: (33, 29, 20), 2: (29, 30, 33), 3: (31, 23, 18)}.get(position, PANEL)
+
+
+def mix(a: Color, b: Color, t: float) -> Color:
+    """Blend a->b by t (0..1); used for pseudo-alpha ghost numerals over a card bg."""
+    return (
+        round(a[0] + (b[0] - a[0]) * t),
+        round(a[1] + (b[1] - a[1]) * t),
+        round(a[2] + (b[2] - a[2]) * t),
+    )
+
+
+def pulse_alpha(period: float = 1.1) -> float:
+    """0.22..1.0 sine pulse for LIVE / SNAPSHOT dots, driven off the wall clock."""
+    phase = (time.monotonic() % period) / period
+    return 0.22 + 0.78 * (0.5 + 0.5 * math.cos(2 * math.pi * phase))
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,17 +145,7 @@ class ReplayCar:
 
     @property
     def label(self) -> str:
-        state = ""
-        if self.finished:
-            if self.finish_ticks is not None:
-                state = f" FINISHED {self.finish_ticks / FPS:.3f}s"
-            else:
-                state = " FINISHED"
-        elif self.stalled:
-            state = " STALLED"
-        elif self.crashed:
-            state = " CRASHED"
-        return f"{self.item.get('username', 'unknown')}{state}"
+        return _display_name(self.item)
 
     def observe_position(self) -> None:
         current = (float(self.car.x), float(self.car.y))
@@ -159,6 +202,7 @@ class ReplayStatus:
     elapsed_seconds: float = 0.0
     restart_seconds: float | None = None
     snapshot_countdown: str = "-"
+    snapshot_waiting: bool = False
 
 
 def run(
@@ -187,6 +231,15 @@ def run(
     next_fetch_at = 0.0
     status = "Connecting to protected replay feed"
     hold_until: float | None = None
+    last_handled_snapshot_boundary: str | None = None
+    snapshot_wait_boundary: str | None = None
+    snapshot_sync_base_identity: tuple[
+        str,
+        int,
+        tuple[tuple[str, LeaderboardSignature], ...],
+    ] | None = None
+    snapshot_sync_deadline: float | None = None
+    snapshot_sync_next_attempt_at = 0.0
 
     try:
         while True:
@@ -225,7 +278,57 @@ def run(
                             return
 
             now = time.monotonic()
-            if now >= next_fetch_at:
+            if snapshot_wait_boundary is not None:
+                if now >= snapshot_sync_next_attempt_at:
+                    try:
+                        process_due_snapshots(replay_url, replay_token)
+                        incoming_state = fetch_replay_state(replay_url, replay_token)
+                        incoming_identity = _replay_payload_identity(incoming_state)
+                        base_identity = snapshot_sync_base_identity
+                        incoming_boundary = _snapshot_boundary_iso(incoming_state)
+                        server_reached_boundary = (
+                            incoming_boundary != snapshot_wait_boundary
+                        )
+                        sync_timed_out = (
+                            snapshot_sync_deadline is not None
+                            and now >= snapshot_sync_deadline
+                        )
+                        if (
+                            base_identity is None
+                            or incoming_identity != base_identity
+                            or server_reached_boundary
+                            or sync_timed_out
+                        ):
+                            state = incoming_state
+                            sessions = load_replay_sessions(
+                                state,
+                                assets,
+                                revealed_signatures,
+                            )
+                            pending_state = None
+                            hold_until = None
+                            snapshot_wait_boundary = None
+                            snapshot_sync_base_identity = None
+                            snapshot_sync_deadline = None
+                        else:
+                            state = incoming_state
+                            snapshot_sync_next_attempt_at = (
+                                now + SNAPSHOT_SYNC_RETRY_SECONDS
+                            )
+                        next_fetch_at = now + REPLAY_FETCH_SECONDS
+                        status = "RUNNING"
+                    except (
+                        HTTPError,
+                        URLError,
+                        TimeoutError,
+                        json.JSONDecodeError,
+                        ValueError,
+                    ) as exc:
+                        status = f"Replay feed unavailable: {exc}"
+                        snapshot_sync_next_attempt_at = (
+                            now + SNAPSHOT_SYNC_RETRY_SECONDS
+                        )
+            elif now >= next_fetch_at:
                 try:
                     incoming_state = fetch_replay_state(replay_url, replay_token)
                     next_fetch_at = now + REPLAY_FETCH_SECONDS
@@ -258,6 +361,37 @@ def run(
                     status = f"Replay feed unavailable: {exc}"
                     next_fetch_at = now + REPLAY_FETCH_SECONDS
 
+            if state is not None:
+                wait_boundary = _snapshot_wait_boundary(
+                    state,
+                    sessions,
+                    hold_until,
+                    last_handled_snapshot_boundary,
+                )
+                if wait_boundary is not None:
+                    last_handled_snapshot_boundary = wait_boundary
+                    if pending_state is not None:
+                        (
+                            state,
+                            sessions,
+                            pending_state,
+                            hold_until,
+                            snapshot_wait_boundary,
+                        ) = _restart_snapshot_boundary_cycle(
+                            state,
+                            pending_state,
+                            assets,
+                            revealed_signatures,
+                        )
+                        snapshot_sync_base_identity = None
+                        snapshot_sync_deadline = None
+                    else:
+                        snapshot_wait_boundary = wait_boundary
+                        snapshot_sync_base_identity = _replay_payload_identity(state)
+                        snapshot_sync_deadline = now + SNAPSHOT_SYNC_TIMEOUT_SECONDS
+                        snapshot_sync_next_attempt_at = now
+                        hold_until = None
+
             virtual_screen.fill(BACKGROUND)
             if state is None:
                 _draw_centered(
@@ -275,6 +409,7 @@ def run(
                         state,
                         now,
                         hold_until,
+                        snapshot_wait_boundary is not None,
                     )
                     finished = _draw_final(
                         virtual_screen,
@@ -283,6 +418,7 @@ def run(
                         display_status,
                         now,
                         revealed_signatures,
+                        tick=snapshot_wait_boundary is None,
                     )
                     hold_until, cycle_done = _handle_finished_cycle(
                         finished,
@@ -315,6 +451,7 @@ def run(
                             state,
                             now,
                             hold_until,
+                            snapshot_wait_boundary is not None,
                         )
                     else:
                         display_status = _waiting_status_text(state)
@@ -326,6 +463,7 @@ def run(
                         display_status,
                         now,
                         revealed_signatures,
+                        tick=snapshot_wait_boundary is None,
                     )
                     if runnable_sessions:
                         hold_until, cycle_done = _handle_finished_cycle(
@@ -407,12 +545,25 @@ def fetch_replay_state(server_url: str, token: str) -> dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
+def process_due_snapshots(server_url: str, token: str) -> int:
+    request = Request(
+        server_url.rstrip("/") + "/v2/admin/batches/process-due",
+        data=b"",
+        headers={"X-Admin-Token": token},
+        method="POST",
+    )
+    with urlopen(request, timeout=5.0) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    return int(payload.get("processed", 0))
+
+
 def _replay_status(
     stage: str,
     sessions: tuple[ReplaySession, ...],
     state: dict[str, Any],
     now: float,
     hold_until: float | None,
+    snapshot_waiting: bool = False,
 ) -> ReplayStatus:
     elapsed = max((session.frames for session in sessions), default=0) / FPS
     snapshot = _snapshot_countdown_text(state)
@@ -423,11 +574,13 @@ def _replay_status(
             elapsed_seconds=elapsed,
             restart_seconds=remaining,
             snapshot_countdown=snapshot,
+            snapshot_waiting=snapshot_waiting,
         )
     return ReplayStatus(
-        label=f"Running replay / {stage}",
+        label=f"{SNAPSHOT_WAIT_LABEL} / {stage}" if snapshot_waiting else f"Running replay / {stage}",
         elapsed_seconds=elapsed,
         snapshot_countdown=snapshot,
+        snapshot_waiting=snapshot_waiting,
     )
 
 
@@ -448,9 +601,8 @@ def _waiting_status_text(state: dict[str, Any]) -> ReplayStatus:
 
 
 def _snapshot_countdown_text(state: dict[str, Any]) -> str:
-    if state.get("stage") == "final":
-        return "-"
-    target = state.get("config", {}).get("next_phase_one_batch_at")
+    config = state.get("config", {})
+    target = config.get("next_snapshot_at") or config.get("next_phase_one_batch_at")
     if not target:
         return "-"
     try:
@@ -458,14 +610,18 @@ def _snapshot_countdown_text(state: dict[str, Any]) -> str:
     except ValueError:
         return "-"
     remaining = max(0.0, target_time.timestamp() - time.time())
-    minutes = int(remaining // 60)
-    seconds = int(remaining % 60)
+    remaining_seconds = math.ceil(remaining) if remaining > 0 else 0
+    minutes, seconds = divmod(remaining_seconds, 60)
     return f"{minutes}:{seconds:02d}"
 
 
 def leaderboard_signature(leaderboard: list[dict[str, Any]]) -> LeaderboardSignature:
     return tuple(
-        (int(entry.get("rank", 0)), str(entry.get("submission_id", "")))
+        (
+            int(entry.get("rank", 0)),
+            str(entry.get("submission_id", "")),
+            str(entry.get("nickname") or entry.get("username") or ""),
+        )
         for entry in leaderboard
     )
 
@@ -492,6 +648,35 @@ def _replay_payload_identity(state: dict[str, Any]) -> tuple[str, int, tuple[tup
 
 def _has_runnable_sessions(sessions: dict[str, ReplaySession]) -> bool:
     return any(session.has_cars for session in sessions.values())
+
+
+def _snapshot_wait_boundary(
+    state: dict[str, Any],
+    sessions: dict[str, ReplaySession],
+    hold_until: float | None,
+    last_handled_boundary: str | None,
+    *,
+    wall_time: float | None = None,
+) -> str | None:
+    del hold_until
+    if not _has_runnable_sessions(sessions):
+        return None
+    boundary = _snapshot_boundary_iso(state)
+    if boundary is None or boundary == last_handled_boundary:
+        return None
+    try:
+        boundary_time = datetime.fromisoformat(boundary)
+    except ValueError:
+        return None
+    if boundary_time.timestamp() > (time.time() if wall_time is None else wall_time):
+        return None
+    return boundary
+
+
+def _snapshot_boundary_iso(state: dict[str, Any]) -> str | None:
+    config = state.get("config", {})
+    target = config.get("next_snapshot_at") or config.get("next_phase_one_batch_at")
+    return None if not target else str(target)
 
 
 def _handle_finished_cycle(
@@ -523,6 +708,27 @@ def _start_next_replay_cycle(
         None,
         None,
     )
+
+
+def _restart_snapshot_boundary_cycle(
+    state: dict[str, Any],
+    pending_state: dict[str, Any] | None,
+    assets: GameAssets,
+    revealed_signatures: dict[str, LeaderboardSignature],
+) -> tuple[
+    dict[str, Any] | None,
+    dict[str, ReplaySession],
+    dict[str, Any] | None,
+    None,
+    None,
+]:
+    next_state, sessions, next_pending, hold_until = _start_next_replay_cycle(
+        state,
+        pending_state,
+        assets,
+        revealed_signatures,
+    )
+    return next_state, sessions, next_pending, hold_until, None
 
 
 def load_replay_sessions(
@@ -559,7 +765,7 @@ def load_replay_session(
             item=item,
             color=REPLAY_COLORS[index % len(REPLAY_COLORS)],
             track=track,
-            car_image=assets.green_small_car,
+            car_image=_sprite_for_skin(assets, int(item.get("skin_id", 0))),
         )
         for index, item in enumerate(replay.get("items", [])[:PHASE_ONE_REPLAY_LIMIT])
     ]
@@ -595,6 +801,7 @@ def build_replay_car(
         biases=item["biases"],
     )
     apply_weight_payload(car, payload)
+    car.max_speed = float(item.get("max_speed", 10.0))
     car.set_collision_surface(track.collision)
     spawn = track.spawn
     car.reset_state(
@@ -605,6 +812,12 @@ def build_replay_car(
     )
     tracker = CompetitionRunTracker.from_metadata_path(track.competition_map.metadata_path)
     return ReplayCar(item=item, car=car, color=color, tracker=tracker)
+
+
+def _sprite_for_skin(assets: GameAssets, skin_id: int) -> pygame.Surface:
+    if skin_id == 0:
+        return assets.white_small_car
+    return surfaces_for(skin_id)["small"]
 
 
 def update_replay_cars(replay_cars: list[ReplayCar]) -> None:
@@ -637,6 +850,83 @@ def step_replay_car(replay_car: ReplayCar) -> None:
         replay_car.crashed = True
 
 
+# ------------------------------------------------------------------ F1 draw helpers
+def _entry_result(client_result: dict[str, Any]) -> tuple[str, str]:
+    """(value, unit) for a podium/tower result: lap seconds when completed, else progress."""
+    if client_result.get("completed"):
+        return f"{int(client_result['lap_ticks']) / FPS:.3f}", "SEC"
+    return f"{float(client_result['max_progress']):.1f}", "%"
+
+
+def _display_name(entry: dict[str, Any]) -> str:
+    return str(entry.get("nickname") or entry.get("username") or "unknown")
+
+
+def _identity_line(entry: dict[str, Any]) -> str:
+    return f"Group {entry.get('group_id', '?')} · {entry.get('username', 'unknown')}"
+
+
+def _user_font(
+    fonts: dict[str, pygame.font.Font], text: str, ascii_key: str, cjk_key: str
+) -> pygame.font.Font:
+    """Pick the F1 ascii face for latin text, or the CJK-capable face otherwise."""
+    return fonts[ascii_key] if str(text).isascii() else fonts[cjk_key]
+
+
+def _blit_clipped(
+    screen: pygame.Surface, surface: pygame.Surface, x: int, y: int, max_width: int
+) -> None:
+    """Blit text left-aligned, hard-clipped to max_width (no ellipsis; broadcast style)."""
+    previous = screen.get_clip()
+    screen.set_clip(pygame.Rect(x, y, max_width, surface.get_height()))
+    screen.blit(surface, (x, y))
+    screen.set_clip(previous)
+
+
+def _draw_pulse_dot(
+    screen: pygame.Surface, cx: int, cy: int, color: Color, bg: Color, radius: int = 4
+) -> None:
+    """Live/snapshot indicator dot that fades over ~1.1s against a known background."""
+    pygame.draw.circle(screen, mix(bg, color, pulse_alpha()), (cx, cy), radius)
+
+
+def _draw_skew_banner(
+    screen: pygame.Surface,
+    x: int,
+    y: int,
+    text: str,
+    accent: Color,
+    font: pygame.font.Font,
+    *,
+    fg: Color = DARK_TEXT,
+    skew: int = 10,
+    padx: int = 22,
+    pady: int = 8,
+) -> int:
+    """Angled F1 banner (EASY / HARD / FINAL, or a small car tag). Returns its total width."""
+    label = font.render(text, True, fg)
+    width = label.get_width() + padx * 2
+    height = label.get_height() + pady * 2
+    points = [(x + skew, y), (x + width + skew, y), (x + width, y + height), (x, y + height)]
+    pygame.draw.polygon(screen, accent, points)
+    screen.blit(label, (x + padx + skew // 2, y + pady))
+    return width + skew
+
+
+def _draw_ghost_numeral(
+    screen: pygame.Surface,
+    right: int,
+    top: int,
+    position: int,
+    card_bg: Color,
+    font: pygame.font.Font,
+) -> None:
+    """Giant translucent position numeral bleeding off the top-right of a podium card.
+    Pygame can't alpha-blend text over an opaque bg, so blend medal->card_bg (~14%)."""
+    glyph = font.render(str(position), True, mix(medal(position), card_bg, 0.86))
+    screen.blit(glyph, (right - glyph.get_width() + 6, top - 16))
+
+
 def _draw_phase_one(
     screen: pygame.Surface,
     easy: ReplaySession,
@@ -645,28 +935,31 @@ def _draw_phase_one(
     status: ReplayStatus,
     now: float,
     revealed_signatures: dict[str, LeaderboardSignature],
+    *,
+    tick: bool = True,
 ) -> bool:
     _draw_header(screen, fonts, "PHASE 1", status)
-    easy_rect = pygame.Rect(24, 136, 764, 390)
-    hard_rect = pygame.Rect(812, 136, 764, 390)
-    _draw_map_panel(screen, easy, easy_rect, "EASY", EASY_ACCENT, fonts)
-    _draw_map_panel(screen, hard, hard_rect, "HARD", HARD_ACCENT, fonts)
-    _draw_compact_leaderboard(
-        screen,
-        easy,
-        pygame.Rect(24, 554, 764, 316),
-        EASY_ACCENT,
-        fonts,
-        now=now,
-    )
-    _draw_compact_leaderboard(
-        screen,
-        hard,
-        pygame.Rect(812, 554, 764, 316),
-        HARD_ACCENT,
-        fonts,
-        now=now,
-    )
+    # Two symmetric columns (design PHASE1): map on top, then podium band + tower + footer.
+    # Accent is fixed by column (left = Easy silver, right = Hard red), not the session id.
+    for session, col_x, title, accent in (
+        (easy, 34, "EASY", ACCENT["easy"]),
+        (hard, 813, "HARD", ACCENT["hard"]),
+    ):
+        # map is 16:9 (matches the 1600x900 track) so it fills the panel without distortion
+        map_rect = pygame.Rect(col_x, 96, 753, 424)
+        _draw_map_panel(screen, session, map_rect, title, accent, fonts)
+        _draw_snapshot_lights_overlay(screen, map_rect, session, status, fonts)
+        _draw_compact_leaderboard(
+            screen,
+            session,
+            pygame.Rect(col_x, 528, 753, 342),
+            accent,
+            fonts,
+            rows=5,
+            now=now,
+        )
+    if not tick:
+        return False
     easy_finished = easy.tick()
     hard_finished = hard.tick()
     _reveal_leaderboard_if_stopped(easy, now, revealed_signatures)
@@ -681,25 +974,26 @@ def _draw_final(
     status: ReplayStatus,
     now: float,
     revealed_signatures: dict[str, LeaderboardSignature],
+    *,
+    tick: bool = True,
 ) -> bool:
     _draw_header(screen, fonts, "FINAL", status)
-    _draw_map_panel(
-        screen,
-        session,
-        pygame.Rect(24, 136, 1032, 540),
-        "FINAL HARD MAP",
-        FINAL_ACCENT,
-        fonts,
-    )
+    accent = ACCENT["final"]
+    # Final (design FINAL): one large map on the left, stacked podium + tower on the right.
+    map_rect = pygame.Rect(34, 96, 940, 640)
+    _draw_map_panel(screen, session, map_rect, "FINAL", accent, fonts)
+    _draw_snapshot_lights_overlay(screen, map_rect, session, status, fonts)
     _draw_compact_leaderboard(
         screen,
         session,
-        pygame.Rect(1080, 136, 496, 734),
-        FINAL_ACCENT,
+        pygame.Rect(1000, 96, 566, 774),
+        accent,
         fonts,
-        rows=10,
+        rows=7,
         now=now,
     )
+    if not tick:
+        return False
     finished = session.tick()
     _reveal_leaderboard_if_stopped(session, now, revealed_signatures)
     return finished
@@ -711,40 +1005,68 @@ def _draw_header(
     stage: str,
     status: ReplayStatus,
 ) -> None:
-    screen.blit(fonts["title"].render(f"NEURAL CARS  /  {stage}", True, TEXT), (24, 20))
-    bar = pygame.Rect(24, 58, SCREEN_SIZE[0] - 48, 54)
-    pygame.draw.rect(screen, PANEL, bar)
-    pygame.draw.rect(screen, BORDER, bar, 1)
-    pygame.draw.rect(screen, EASY_ACCENT, (bar.x, bar.y, 5, bar.height))
-    screen.blit(fonts["status"].render(status.label, True, TEXT), (bar.x + 18, bar.y + 10))
-    chip_x = bar.right - 18
+    is_final = stage == "FINAL"
+    header_accent = GOLD if is_final else RED
+    # skewed "N" logo tile + wordmark
+    tile = pygame.Rect(34, 22, 54, 54)
+    pygame.draw.polygon(
+        screen,
+        RED,
+        [
+            (tile.x + 10, tile.y),
+            (tile.right + 10, tile.y),
+            (tile.right, tile.bottom),
+            (tile.x, tile.bottom),
+        ],
+    )
+    glyph = fonts["banner"].render("N", True, WHITE)
+    screen.blit(
+        glyph,
+        (tile.centerx - glyph.get_width() // 2 + 3, tile.centery - glyph.get_height() // 2),
+    )
+    screen.blit(fonts["wordmark"].render("NEURAL CARS", True, WHITE), (104, 24))
+    sub = "FINAL · CHAMPIONSHIP" if is_final else f"{stage} · LIVE REPLAY"
+    screen.blit(fonts["stage"].render(sub, True, header_accent), (104, 56))
+    # right-side outlined timing chips (SNAPSHOT is a live/pulsing red chip)
+    restart = f"{status.restart_seconds:.0f}s" if status.restart_seconds is not None else "—"
     chips = [
-        f"Elapsed {status.elapsed_seconds:.1f}s",
-        f"Next replay {status.restart_seconds:.0f}s"
-        if status.restart_seconds is not None
-        else "Next replay -",
-        f"Next snapshot {status.snapshot_countdown}",
+        ("ELAPSED", f"{status.elapsed_seconds:.1f}s", False),
+        ("NEXT REPLAY", restart, False),
+        ("SNAPSHOT", status.snapshot_countdown, True),
     ]
-    for text in reversed(chips):
-        chip_x = _draw_status_chip(screen, fonts, text, chip_x, bar.centery)
-    pygame.draw.line(screen, BORDER, (24, 124), (SCREEN_SIZE[0] - 24, 124), 1)
+    chip_x = 1566
+    for label, value, live in reversed(chips):
+        chip_x = _draw_status_chip(screen, fonts, label, value, chip_x, 49, live=live)
+    pygame.draw.line(screen, BORDER_SOFT, (34, 90), (1566, 90), 1)
 
 
 def _draw_status_chip(
     screen: pygame.Surface,
     fonts: dict[str, pygame.font.Font],
-    text: str,
+    label: str,
+    value: str,
     right: int,
     center_y: int,
+    *,
+    live: bool = False,
 ) -> int:
-    rendered = fonts["chip"].render(text, True, TEXT)
-    chip = pygame.Rect(0, 0, rendered.get_width() + 22, 34)
+    lab = fonts["chip_label"].render(label, True, WHITE if live else MUTED)
+    val = fonts["chip_value"].render(value, True, WHITE)
+    dot_w = 16 if live else 0
+    inner = 12 + dot_w + lab.get_width() + 8 + val.get_width() + 14
+    chip = pygame.Rect(0, 0, inner, 34)
     chip.right = right
     chip.centery = center_y
-    pygame.draw.rect(screen, BACKGROUND, chip, border_radius=4)
-    pygame.draw.rect(screen, BORDER, chip, 1, border_radius=4)
-    screen.blit(rendered, (chip.x + 11, chip.y + 7))
-    return chip.x - 10
+    pygame.draw.rect(screen, BG_DEEP, chip)
+    pygame.draw.rect(screen, RED if live else BORDER, chip, 1)
+    ox = chip.x + 12
+    if live:
+        _draw_pulse_dot(screen, ox + 4, chip.centery, RED, BG_DEEP, 4)
+        ox += dot_w
+    screen.blit(lab, (ox, chip.centery - lab.get_height() // 2))
+    ox += lab.get_width() + 8
+    screen.blit(val, (ox, chip.centery - val.get_height() // 2))
+    return chip.x - 12
 
 
 def _draw_map_panel(
@@ -756,38 +1078,260 @@ def _draw_map_panel(
     fonts: dict[str, pygame.font.Font],
 ) -> None:
     panel_status = replay_panel_status(session)
-    pygame.draw.rect(screen, PANEL, rect.inflate(0, 0))
+    header_h = 40
+    track_rect = pygame.Rect(rect.x, rect.y + header_h, rect.width, rect.height - header_h)
+    pygame.draw.rect(screen, BG_DEEP, rect)  # map well / letterbox backing
     native = session.track.front.copy()
-    for replay_car in session.cars:
-        color = (
-            DIM_COLOR
-            if replay_car.crashed or replay_car.stalled or replay_car.finished
-            else replay_car.color
-        )
-        replay_car.car.draw(native)
-        pygame.draw.circle(native, color, (int(replay_car.car.x), int(replay_car.car.y)), 7)
-    scaled = pygame.transform.smoothscale(native, rect.size)
-    screen.blit(scaled, rect.topleft)
+    if panel_status != "WAITING":
+        for replay_car in sorted(session.cars, key=_replay_rank, reverse=True):
+            _draw_replay_car_sprite(native, replay_car)
+    # Fit the track inside the track area preserving its aspect ratio (no squashing).
+    fit_scale = min(track_rect.width / native.get_width(), track_rect.height / native.get_height())
+    fit_w = round(native.get_width() * fit_scale)
+    fit_h = round(native.get_height() * fit_scale)
+    fit_x = track_rect.x + (track_rect.width - fit_w) // 2
+    fit_y = track_rect.y + (track_rect.height - fit_h) // 2
+    track = pygame.transform.smoothscale(native, (fit_w, fit_h))
+    screen.blit(track, (fit_x, fit_y))
     border_color = accent if panel_status == "RUNNING" else BORDER
-    border_width = 3 if panel_status == "RUNNING" else 1
-    pygame.draw.rect(screen, border_color, rect, border_width)
-    pygame.draw.rect(screen, BACKGROUND, (rect.x, rect.y, 134, 30))
-    pygame.draw.rect(screen, accent, (rect.x, rect.y, 4, 30))
-    screen.blit(fonts["panel"].render(title, True, TEXT), (rect.x + 12, rect.y + 6))
+    pygame.draw.rect(screen, border_color, rect, 3 if panel_status == "RUNNING" else 1)
+    _draw_map_panel_header(screen, rect, title, accent, fonts)
     _draw_panel_badge(screen, rect, panel_status, accent, fonts)
     if panel_status == "WAITING":
-        _draw_waiting_for_submissions(screen, rect, fonts)
+        _draw_waiting_for_submissions(screen, track_rect, fonts)
+        return
+    # Lightweight name tags only: no marker dots or filled tag pills over the track.
     for replay_car in sorted(session.cars, key=_replay_rank, reverse=True):
-        color = (
-            DIM_COLOR
-            if replay_car.crashed or replay_car.stalled or replay_car.finished
-            else replay_car.color
+        cx = fit_x + int(replay_car.car.x / native.get_width() * fit_w)
+        cy = fit_y + int(replay_car.car.y / native.get_height() * fit_h)
+        stopped = replay_car.crashed or replay_car.stalled or replay_car.finished
+        _draw_replay_name_tag(
+            screen,
+            replay_car.label,
+            cx,
+            cy,
+            DIM if stopped else replay_car.color,
+            track_rect,
+            fonts["label"],
         )
-        x = rect.x + int(replay_car.car.x / SCREEN_SIZE[0] * rect.width)
-        y = rect.y + int(replay_car.car.y / SCREEN_SIZE[1] * rect.height)
-        label = fonts["label"].render(replay_car.label, True, color)
-        label_x, label_y = _fixed_label_position(rect, x, y, label)
-        screen.blit(label, (label_x, label_y))
+
+
+def _draw_map_panel_header(
+    screen: pygame.Surface,
+    rect: pygame.Rect,
+    title: str,
+    accent: Color,
+    fonts: dict[str, pygame.font.Font],
+) -> None:
+    text = fonts["panel"].render(title, True, WHITE)
+    y = rect.y + 7
+    pygame.draw.line(screen, accent, (rect.x + 10, rect.y + 27), (rect.x + 116, rect.y + 27), 2)
+    screen.blit(text, (rect.x + 12, y))
+
+
+def _draw_replay_car_sprite(surface: pygame.Surface, replay_car: ReplayCar) -> None:
+    image = replay_car.car.car_image
+    if image is None:
+        return
+    rotated = pygame.transform.rotate(image, -replay_car.car.angle - 180)
+    if replay_car.crashed or replay_car.stalled or replay_car.finished:
+        rotated = rotated.copy()
+        rotated.set_alpha(112)
+    rect = rotated.get_rect()
+    rect.center = replay_car.car.x, replay_car.car.y
+    surface.blit(rotated, rect)
+
+
+def _draw_replay_name_tag(
+    screen: pygame.Surface,
+    text: str,
+    x: int,
+    y: int,
+    color: Color,
+    bounds: pygame.Rect,
+    font: pygame.font.Font,
+) -> None:
+    rendered = font.render(text, True, color)
+    shadow = font.render(text, True, DARK_TEXT)
+    label_x, label_y = _fixed_label_position(bounds, x, y, rendered)
+    for offset in ((1, 1), (0, 1)):
+        screen.blit(shadow, (label_x + offset[0], label_y + offset[1]))
+    screen.blit(rendered, (label_x, label_y))
+
+
+def _fixed_label_position(
+    bounds: pygame.Rect,
+    x: int,
+    y: int,
+    label: pygame.Surface,
+) -> tuple[int, int]:
+    label_x = x + 9
+    label_y = y - label.get_height() - 8
+    min_x = bounds.x + 4
+    min_y = bounds.y + 4
+    max_x = max(min_x, bounds.right - label.get_width() - 4)
+    max_y = max(min_y, bounds.bottom - label.get_height() - 4)
+    return min(max(label_x, min_x), max_x), min(max(label_y, min_y), max_y)
+
+
+def _draw_snapshot_lights_overlay(
+    screen: pygame.Surface,
+    rect: pygame.Rect,
+    session: ReplaySession,
+    status: ReplayStatus,
+    fonts: dict[str, pygame.font.Font],
+) -> None:
+    seconds = _snapshot_seconds_from_status(status)
+    if not session.has_cars:
+        return
+    if not status.snapshot_waiting and (
+        seconds is None or seconds > 5 or seconds <= 0
+    ):
+        return
+    overlay = pygame.Surface(rect.size, pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 92))
+    screen.blit(overlay, rect.topleft)
+    lights = 5
+    lit = (
+        lights
+        if status.snapshot_waiting
+        else max(0, min(lights, lights - math.ceil(seconds or 0) + 1))
+    )
+    radius = 18
+    gap = 18
+    total_w = lights * radius * 2 + (lights - 1) * gap
+    start_x = rect.centerx - total_w // 2 + radius
+    y = rect.y + 72
+    for index in range(lights):
+        center = (start_x + index * (radius * 2 + gap), y)
+        color = RED_BRIGHT if index < lit else BORDER
+        pygame.draw.circle(screen, DARK_TEXT, center, radius + 5)
+        pygame.draw.circle(screen, color, center, radius)
+
+
+def _snapshot_seconds_from_status(status: ReplayStatus) -> float | None:
+    value = status.snapshot_countdown
+    if not value or value == "-":
+        return None
+    try:
+        minutes, seconds = value.split(":", 1)
+        return int(minutes) * 60 + int(seconds)
+    except (ValueError, TypeError):
+        return None
+
+
+def _leader_ticks(entries: list[dict[str, Any]]) -> int | None:
+    """lap_ticks of rank 1 when it completed, else None (used for tower intervals)."""
+    if entries:
+        leader = entries[0]["client_result"]
+        if leader.get("completed"):
+            return int(leader["lap_ticks"])
+    return None
+
+
+def _draw_phase_one_podium(
+    screen: pygame.Surface,
+    rect: pygame.Rect,
+    top3: list[dict[str, Any]],
+    fonts: dict[str, pygame.font.Font],
+    competition_id: str,
+) -> int:
+    """Three side-by-side podium cards (ghost numeral + tag + sub + medal result)."""
+    gap, card_h = 8, 100
+    card_w = (rect.width - 2 * gap) // 3
+    for index, entry in enumerate(top3):
+        pos = int(entry["rank"])
+        card = pygame.Rect(rect.x + index * (card_w + gap), rect.y, card_w, card_h)
+        bg = podium_bg(pos)
+        pygame.draw.rect(screen, bg, card)
+        pygame.draw.rect(screen, medal(pos), (card.x, card.y, card.width, 4))
+        _draw_ghost_numeral(screen, card.right, card.y, pos, bg, fonts["pod_ghost"])
+        username = _display_name(entry)
+        username_font = _user_font(fonts, username, "pod_tag", "pod_sub_cjk")
+        _blit_clipped(
+            screen,
+            username_font.render(username, True, WHITE),
+            card.x + 12,
+            card.y + 12,
+            card_w - 20,
+        )
+        sub = _identity_line(entry)
+        sub_font = _user_font(fonts, sub, "pod_sub", "pod_sub_cjk")
+        _blit_clipped(screen, sub_font.render(sub, True, MUTED2), card.x + 12, card.y + 42, card_w - 20)
+        value, unit = _entry_result(entry["client_result"])
+        res = fonts["pod_result"].render(value, True, medal(pos))
+        screen.blit(res, (card.x + 12, card.y + 62))
+        screen.blit(fonts["pod_sub"].render(unit, True, MUTED), (card.x + 12 + res.get_width() + 6, card.y + 68))
+    return rect.y + card_h
+
+
+def _draw_final_podium(
+    screen: pygame.Surface,
+    rect: pygame.Rect,
+    top3: list[dict[str, Any]],
+    fonts: dict[str, pygame.font.Font],
+) -> int:
+    """Three stacked podium cards: big medal numeral, Group N + submitter, result at right."""
+    gap, card_h = 8, 66
+    y = rect.y
+    for entry in top3:
+        pos = int(entry["rank"])
+        card = pygame.Rect(rect.x, y, rect.width, card_h)
+        pygame.draw.rect(screen, podium_bg(pos), card)
+        pygame.draw.rect(screen, medal(pos), (card.x, card.y, 4, card.height))
+        num = fonts["pod_ghost_fin"].render(str(pos), True, medal(pos))
+        screen.blit(num, (card.x + 18, card.centery - num.get_height() // 2))
+        name = _display_name(entry)
+        name_font = _user_font(fonts, name, "pod_name", "pod_sub_cjk")
+        _blit_clipped(
+            screen,
+            name_font.render(name, True, WHITE),
+            card.x + 86,
+            card.y + 10,
+            rect.width - 220,
+        )
+        uname = _identity_line(entry)
+        uname_font = _user_font(fonts, uname, "pod_sub", "pod_sub_cjk")
+        _blit_clipped(screen, uname_font.render(uname, True, MUTED2), card.x + 86, card.y + 38, rect.width - 220)
+        value, unit = _entry_result(entry["client_result"])
+        res = fonts["pod_result"].render(value, True, medal(pos))
+        screen.blit(res, (card.right - res.get_width() - 14, card.y + 12))
+        u = fonts["pod_sub"].render(unit, True, MUTED)
+        screen.blit(u, (card.right - u.get_width() - 14, card.y + 40))
+        y += card_h + gap
+    return y - gap
+
+
+def _draw_tower_row(
+    screen: pygame.Surface,
+    x: int,
+    y: int,
+    width: int,
+    entry: dict[str, Any],
+    fonts: dict[str, pygame.font.Font],
+    accent: Color,
+    leader_ticks: int | None,
+    competition_id: str,
+) -> None:
+    """Ranks 4..N: position block, tag, name (clipped), interval-to-leader or progress."""
+    client_result = entry["client_result"]
+    completed = bool(client_result.get("completed"))
+    pos = int(entry["rank"])
+    block = pygame.Rect(x, y + 3, 30, 24)
+    pygame.draw.rect(screen, PANEL2, block)
+    screen.blit(fonts["row_pos"].render(str(pos), True, MUTED), (block.x + 8, block.y + 4))
+    name = _display_name(entry)
+    name_font = _user_font(fonts, name, "row_name", "row_name_cjk")
+    _blit_clipped(screen, name_font.render(name, True, MUTED if completed else DIM), x + 40, y + 8, width - 130)
+    if completed:
+        if pos == 1 or leader_ticks is None:
+            text, color = f"{int(client_result['lap_ticks']) / FPS:.3f}", accent
+        else:
+            text, color = f"+{(int(client_result['lap_ticks']) - leader_ticks) / FPS:.3f}", SILVER
+    else:
+        text, color = f"{float(client_result['max_progress']):.1f}%", DIM
+    interval = fonts["row_int"].render(text, True, color)
+    screen.blit(interval, (x + width - interval.get_width() - 6, y + 8))
 
 
 def _draw_compact_leaderboard(
@@ -800,29 +1344,39 @@ def _draw_compact_leaderboard(
     rows: int = 5,
     now: float = 0.0,
 ) -> None:
-    pygame.draw.rect(screen, PANEL, rect)
-    highlighted = session.reveal_highlight_until > now
-    pygame.draw.rect(screen, accent if highlighted else BORDER, rect, 3 if highlighted else 1)
-    screen.blit(fonts["panel"].render("LEADERBOARD", True, TEXT), (rect.x + 14, rect.y + 13))
-    pygame.draw.line(screen, accent, (rect.x + 14, rect.y + 43), (rect.right - 14, rect.y + 43), 2)
+    is_final = session.competition_id == "final"
     if not session.leaderboard:
-        screen.blit(fonts["meta"].render("Waiting for completed submissions", True, MUTED), (rect.x + 14, rect.y + 62))
+        screen.blit(
+            fonts["meta"].render("Waiting for completed submissions", True, MUTED),
+            (rect.x + 4, rect.y + 8),
+        )
         return
     if not session.leaderboard_revealed:
         _draw_leaderboard_reveal_panel(screen, session, rect, accent, fonts)
         return
-    y = rect.y + 60
-    for entry in session.leaderboard[:rows]:
-        client_result = entry["client_result"]
-        identity = f"Group {entry['group_id']}" if session.competition_id == "final" else entry["username"]
-        detail = entry["username"] if session.competition_id == "final" else f"G{entry['group_id']}"
-        screen.blit(fonts["row"].render(f"#{entry['rank']}", True, accent), (rect.x + 14, y))
-        screen.blit(fonts["row"].render(identity, True, TEXT), (rect.x + 60, y))
-        screen.blit(fonts["meta"].render(detail, True, MUTED), (rect.x + 60, y + 21))
-        result = _result_text(client_result)
-        rendered = fonts["row"].render(result, True, TEXT)
-        screen.blit(rendered, (rect.right - rendered.get_width() - 14, y + 7))
-        y += 48
+
+    entries = session.leaderboard
+    if is_final:
+        pod_bottom = _draw_final_podium(screen, rect, entries[:3], fonts)
+    else:
+        pod_bottom = _draw_phase_one_podium(screen, rect, entries[:3], fonts, session.competition_id)
+
+    leader_ticks = _leader_ticks(entries)
+    row_h = 40 if is_final else 30
+    y = pod_bottom + 16
+    for entry in entries[3 : 3 + rows]:
+        _draw_tower_row(screen, rect.x, y, rect.width, entry, fonts, accent, leader_ticks, session.competition_id)
+        pygame.draw.line(screen, ROW_LINE, (rect.x, y + row_h - 2), (rect.right, y + row_h - 2), 1)
+        y += row_h
+
+    shown = min(len(entries), 3 + rows)
+    footer_y = rect.bottom - 18
+    screen.blit(fonts["footer"].render(f"SHOWING {shown} OF {len(entries)}", True, MUTED), (rect.x, footer_y))
+    right = fonts["footer"].render("TOP 10" if is_final else "TOP 15 REPLAY", True, accent)
+    screen.blit(right, (rect.right - right.get_width(), footer_y))
+
+    if session.reveal_highlight_until > now:  # 2s highlight after a new snapshot reveals
+        pygame.draw.rect(screen, accent, rect.inflate(10, 10), 3)
 
 
 def _draw_leaderboard_reveal_panel(
@@ -880,22 +1434,6 @@ def _draw_centered(screen: pygame.Surface, font: pygame.font.Font, text: str, y:
     screen.blit(rendered, ((SCREEN_SIZE[0] - rendered.get_width()) // 2, y))
 
 
-def _fixed_label_position(
-    rect: pygame.Rect,
-    x: int,
-    y: int,
-    label: pygame.Surface,
-) -> tuple[int, int]:
-    height = label.get_height()
-    min_x = rect.x + 4
-    min_y = rect.y + 32
-    max_x = max(min_x, rect.right - label.get_width() - 4)
-    max_y = max(min_y, rect.bottom - height - 4)
-    label_x = min(max(min_x, x + 8), max_x)
-    label_y = min(max(min_y, y - height - 8), max_y)
-    return label_x, label_y
-
-
 def _replay_rank(replay_car: ReplayCar) -> int:
     try:
         return int(replay_car.item.get("rank", 9999))
@@ -918,17 +1456,19 @@ def _draw_panel_badge(
     accent: Color,
     fonts: dict[str, pygame.font.Font],
 ) -> None:
-    color = accent if status == "RUNNING" else MUTED
-    label = fonts["meta"].render(status, True, TEXT if status == "RUNNING" else MUTED)
-    badge = pygame.Rect(
-        rect.right - label.get_width() - 24,
-        rect.y + 6,
-        label.get_width() + 16,
-        22,
-    )
-    pygame.draw.rect(screen, BACKGROUND, badge)
-    pygame.draw.rect(screen, color, badge, 1)
-    screen.blit(label, (badge.x + 8, badge.y + 4))
+    live = status == "RUNNING"
+    text = "LIVE" if live else status
+    label = fonts["chip_label"].render(text, True, WHITE if live else MUTED)
+    dot_w = 14 if live else 0
+    badge = pygame.Rect(0, 0, dot_w + label.get_width() + 20, 24)
+    badge.topright = (rect.right - 10, rect.y + 10)
+    pygame.draw.rect(screen, BG_DEEP, badge)
+    pygame.draw.rect(screen, accent if live else BORDER, badge, 1)
+    ox = badge.x + 10
+    if live:
+        _draw_pulse_dot(screen, ox, badge.centery, accent, BG_DEEP, 4)
+        ox += dot_w
+    screen.blit(label, (ox, badge.centery - label.get_height() // 2))
 
 
 def _draw_waiting_for_submissions(
@@ -944,15 +1484,20 @@ def _draw_waiting_for_submissions(
     screen.blit(message, (box.x + 17, box.y + 11))
 
 
-def _result_text(client_result: dict[str, Any]) -> str:
-    if client_result.get("completed"):
-        ticks = int(client_result["lap_ticks"])
-        return f"{ticks / FPS:.3f}s"
-    return f"{float(client_result['max_progress']):.0f} prog"
+FONTS_DIR = FONT_PATH.parent
+# F1 display faces downloaded into fonts/ (SIL Open Font License; see fonts/*-OFL.txt).
+_F1_FONT_FILES = {
+    "black": "SairaCondensed-Black.ttf",       # 900 display / numerals / tags / banners
+    "xbold": "SairaCondensed-ExtraBold.ttf",   # 800 stage label / chip value / tower tag
+    "bold": "SairaCondensed-Bold.ttf",         # 700 chip label / footer
+    "semi": "SairaSemiCondensed-Bold.ttf",     # tabular timing digits (intervals)
+    "ti_black": "TitilliumWeb-Black.ttf",      # 900 wordmark / ascii identity
+    "ti_bold": "TitilliumWeb-Bold.ttf",        # 700 ascii sub text
+}
 
 
 def _fonts() -> dict[str, pygame.font.Font]:
-    def font(size: int, *, bold: bool = False) -> pygame.font.Font:
+    def cjk(size: int, *, bold: bool = False) -> pygame.font.Font:
         for path in _font_path_candidates(bold=bold):
             if os.path.exists(path):
                 return pygame.font.Font(path, size)
@@ -962,14 +1507,43 @@ def _fonts() -> dict[str, pygame.font.Font]:
                 return pygame.font.Font(matched, size)
         return pygame.font.SysFont("Arial", size, bold=bold)
 
+    def f1(family: str, size: int) -> pygame.font.Font:
+        path = FONTS_DIR / _F1_FONT_FILES[family]
+        if path.exists():
+            return pygame.font.Font(str(path), size)
+        return cjk(size, bold=True)  # graceful fallback if a TTF is missing
+
     return {
-        "title": font(28, bold=True),
-        "status": font(30, bold=True),
-        "chip": font(20, bold=True),
-        "panel": font(18, bold=True),
-        "row": font(17, bold=True),
-        "label": font(15, bold=True),
-        "meta": font(14),
+        # --- F1 chrome (ASCII only: wordmark, labels, numerals, tags, results) ---
+        "wordmark": f1("ti_black", 25),
+        "stage": f1("xbold", 16),
+        "chip_label": f1("bold", 13),
+        "chip_value": f1("xbold", 19),
+        "banner": f1("black", 44),
+        "banner_fin": f1("black", 40),
+        "pod_tag": f1("black", 21),
+        "pod_result": f1("black", 22),
+        "pod_ghost": f1("black", 78),
+        "pod_ghost_fin": f1("black", 46),
+        "pod_name": f1("ti_black", 22),
+        "row_pos": f1("black", 16),
+        "row_tag": f1("xbold", 15),
+        "row_int": f1("semi", 13),
+        "footer": f1("bold", 11),
+        "car_tag": f1("black", 12),
+        # --- user-supplied text (CJK-capable; usernames / groups may be Chinese) ---
+        "pod_sub": f1("ti_bold", 13),
+        "pod_sub_cjk": cjk(13),
+        "row_name": f1("ti_bold", 14),
+        "row_name_cjk": cjk(14),
+        # --- legacy keys for waiting / reveal / centered screens (CJK-capable) ---
+        "title": cjk(28, bold=True),
+        "status": cjk(30, bold=True),
+        "chip": cjk(20, bold=True),
+        "panel": cjk(18, bold=True),
+        "row": cjk(17, bold=True),
+        "label": cjk(15, bold=True),
+        "meta": cjk(14),
     }
 
 

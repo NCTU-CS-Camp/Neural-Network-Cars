@@ -26,6 +26,12 @@ def test_runtime_settings_default_server_url() -> None:
     assert settings.server_url == "http://127.0.0.1:8000"
 
 
+def test_runtime_settings_default_training_population() -> None:
+    settings = RuntimeSettings.from_dict({})
+
+    assert settings.population_size == 300
+
+
 def test_runtime_settings_load_max_speed() -> None:
     settings = RuntimeSettings.from_dict({"max_speed": 25})
 
@@ -42,3 +48,16 @@ def test_runtime_settings_clamp_max_speed(
     expected: int,
 ) -> None:
     assert RuntimeSettings.from_dict({"max_speed": configured}).max_speed == expected
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [(9, 10), (10, 10), (90, 90), (91, 90)],
+)
+def test_runtime_settings_clamp_auto_breed_seconds(
+    configured: int,
+    expected: int,
+) -> None:
+    settings = RuntimeSettings.from_dict({"auto_breed_seconds": configured})
+
+    assert settings.auto_breed_seconds == expected

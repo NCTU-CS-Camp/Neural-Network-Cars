@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from collections.abc import Mapping
 from typing import Any, ClassVar
 
@@ -15,6 +15,14 @@ EXPECTED_WEIGHT_LENGTHS = [rows * cols for rows, cols in EXPECTED_WEIGHT_SHAPES]
 EXPECTED_BIAS_LENGTHS = [rows * cols for rows, cols in EXPECTED_BIAS_SHAPES]
 DEFAULT_SERVER_URL = "http://127.0.0.1:8000"
 DEFAULT_EVOLUTION_SEED = 3057
+DEFAULT_SKIN_ID = 0
+DEFAULT_MAX_SPEED = 10.0
+# Keep this list aligned with game_engine/frontend/shop/catalog.py.  The server
+# treats the value as replay-only metadata and does not need to import frontend
+# rendering code to validate it.
+ALLOWED_SKIN_IDS = tuple(skin_id for skin_id in range(22) if skin_id != 20)
+MIN_SUBMISSION_MAX_SPEED = 5.0
+MAX_SUBMISSION_MAX_SPEED = 30.0
 
 
 def _float_layers(raw_layers: Any, expected_lengths: list[int], field_name: str) -> list[list[float]]:
@@ -44,7 +52,7 @@ class RuntimeSettings:
     nickname: str = "player1"
     server_url: str = DEFAULT_SERVER_URL
     fps: int = 30
-    population_size: int = 50
+    population_size: int = 300
     mutation_rate: int = 90
     show_player: bool = True
     show_debug_overlay: bool = True
@@ -52,6 +60,7 @@ class RuntimeSettings:
     track_seed: int = 42
     evolution_seed: int = DEFAULT_EVOLUTION_SEED
     max_speed: int = 10
+    auto_breed_seconds: int = 40
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
@@ -77,6 +86,9 @@ class RuntimeSettings:
                 data.get("evolution_seed", defaults.evolution_seed)
             ),
             max_speed=max(5, min(30, int(data.get("max_speed", defaults.max_speed)))),
+            auto_breed_seconds=max(
+                10, min(90, int(data.get("auto_breed_seconds", defaults.auto_breed_seconds)))
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -124,6 +136,9 @@ class LoginProfile:
     group_id: str
     username: str
     server_url: str = DEFAULT_SERVER_URL
+    token: str = ""
+    expires_at: str = ""
+    nickname: str = ""
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "LoginProfile":
@@ -131,7 +146,14 @@ class LoginProfile:
             group_id=str(data["group_id"]),
             username=str(data["username"]),
             server_url=str(data.get("server_url", DEFAULT_SERVER_URL)),
+            token=str(data.get("token", "")),
+            expires_at=str(data.get("expires_at", "")),
+            nickname=str(data.get("nickname") or data["username"]),
         )
+
+    @property
+    def display_name(self) -> str:
+        return self.nickname.strip() or self.username
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -145,6 +167,8 @@ class SubmissionPayload:
     username: str
     weights: list[list[float]]
     biases: list[list[float]]
+    skin_id: int = DEFAULT_SKIN_ID
+    max_speed: float = DEFAULT_MAX_SPEED
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SubmissionPayload":
@@ -154,15 +178,53 @@ class SubmissionPayload:
             raise ValueError("group_id must not be empty")
         if not username:
             raise ValueError("username must not be empty")
+        skin_raw = data.get("skin_id")
+        if skin_raw is None:
+            skin_raw = DEFAULT_SKIN_ID
+        max_speed_raw = data.get("max_speed")
+        if max_speed_raw is None:
+            max_speed_raw = data.get("maxSpeed")
+        if max_speed_raw is None:
+            max_speed_raw = DEFAULT_MAX_SPEED
         return cls(
             group_id=group_id,
             username=username,
             weights=_float_layers(data.get("weights"), EXPECTED_WEIGHT_LENGTHS, "weights"),
             biases=_float_layers(data.get("biases"), EXPECTED_BIAS_LENGTHS, "biases"),
+            skin_id=_coerce_skin_id(skin_raw),
+            max_speed=_coerce_submission_max_speed(max_speed_raw),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+def _coerce_skin_id(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("skin_id must be a valid shop catalog id")
+    try:
+        skin_id = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("skin_id must be a valid shop catalog id") from exc
+    if skin_id not in ALLOWED_SKIN_IDS:
+        raise ValueError("skin_id must be a valid shop catalog id")
+    return skin_id
+
+
+def _coerce_submission_max_speed(value: Any) -> float:
+    if isinstance(value, bool):
+        raise ValueError("max_speed must be a number from 5 to 30")
+    try:
+        max_speed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_speed must be a number from 5 to 30") from exc
+    if (
+        not math.isfinite(max_speed)
+        or max_speed < MIN_SUBMISSION_MAX_SPEED
+        or max_speed > MAX_SUBMISSION_MAX_SPEED
+    ):
+        raise ValueError("max_speed must be a finite number from 5 to 30")
+    return max_speed
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,9 +272,9 @@ class ClientResult:
             raise ValueError(
                 "client_result.max_progress must be a finite number"
             ) from exc
-        if not math.isfinite(max_progress) or max_progress < 0:
+        if not math.isfinite(max_progress) or not 0 <= max_progress <= 100:
             raise ValueError(
-                "client_result.max_progress must be finite and non-negative"
+                "client_result.max_progress must be a finite percentage from 0 to 100"
             )
 
         ticks_raw = data.get("ticks_to_max_progress")
@@ -235,6 +297,21 @@ class ClientResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def as_progress_percentage(self, total_length_px: float) -> ClientResult:
+        """Convert a locally tracked pixel distance to the API's 0-100 percentage."""
+        if not math.isfinite(total_length_px) or total_length_px <= 0:
+            raise ValueError("total track length must be finite and positive")
+        percentage = round(
+            min(100.0, max(0.0, self.max_progress / total_length_px * 100.0)),
+            6,
+        )
+        return ClientResult(
+            completed=self.completed,
+            lap_ticks=self.lap_ticks,
+            max_progress=percentage,
+            ticks_to_max_progress=self.ticks_to_max_progress,
+        )
 
     def ranking_key(self) -> tuple[int, int, float, int]:
         """Lower keys rank ahead of higher keys."""
@@ -377,6 +454,25 @@ def _coerce_fitness_weight(name: str, value: Any) -> FitnessWeight:
     return int(numeric) if numeric.is_integer() else numeric
 
 
+def _migrate_upload_results(data: dict[str, Any]) -> dict[str, Any]:
+    """Backward-compat: migrate old flat last_upload_* fields to per-difficulty dict."""
+    if "upload_results" in data:
+        return dict(data["upload_results"])
+    # Old single-upload records used flat fields; import them under the key "legacy"
+    if data.get("last_upload_status") is not None:
+        return {
+            "legacy": {
+                "completed": data.get("last_upload_completed"),
+                "lap_ticks": data.get("last_upload_lap_ticks"),
+                "max_progress": data.get("last_upload_max_progress"),
+                "survival_rate": data.get("last_upload_survival_rate"),
+                "status": data.get("last_upload_status"),
+                "uploaded_at": data.get("last_upload_at"),
+            }
+        }
+    return {}
+
+
 @dataclass(slots=True)
 class TrainingRecord:
     record_id: str
@@ -392,16 +488,21 @@ class TrainingRecord:
     fitness_config: FitnessConfig
     map_difficulty: int
     max_speed: int = 10
+    skin_id: int = DEFAULT_SKIN_ID
     best_fitness_score: float | None = None
     mlp_init_seed: int = DEFAULT_EVOLUTION_SEED
     mlp_init_rng_state: dict[str, Any] | None = None
     mutation_rng_state: tuple[Any, ...] | list[Any] | None = None
+    upload_results: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "TrainingRecord":
         # backward compat: old records stored single weights/biases
         legacy_weights = [[float(w) for w in layer] for layer in data["weights"]] if "weights" in data else []
         legacy_biases = [[float(b) for b in layer] for layer in data["biases"]] if "biases" in data else []
+        skin_id = int(data.get("skin_id", DEFAULT_SKIN_ID))
+        if skin_id not in ALLOWED_SKIN_IDS:
+            skin_id = DEFAULT_SKIN_ID
         return cls(
             record_id=str(data["record_id"]),
             record_name=str(data["record_name"]),
@@ -416,6 +517,7 @@ class TrainingRecord:
             fitness_config=FitnessConfig.from_dict(data["fitness_config"]),
             map_difficulty=int(data["map_difficulty"]),
             max_speed=max(5, min(30, int(data.get("max_speed", 10)))),
+            skin_id=skin_id,
             best_fitness_score=(
                 float(data["best_fitness_score"])
                 if data.get("best_fitness_score") is not None
@@ -426,6 +528,7 @@ class TrainingRecord:
             ),
             mlp_init_rng_state=data.get("mlp_init_rng_state"),
             mutation_rng_state=data.get("mutation_rng_state"),
+            upload_results=_migrate_upload_results(data),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -443,10 +546,34 @@ class TrainingRecord:
             "fitness_config": self.fitness_config.to_dict(),
             "map_difficulty": self.map_difficulty,
             "max_speed": self.max_speed,
+            "skin_id": self.skin_id,
             "best_fitness_score": self.best_fitness_score,
             "mlp_init_seed": self.mlp_init_seed,
             "mlp_init_rng_state": self.mlp_init_rng_state,
             "mutation_rng_state": self.mutation_rng_state,
+            "upload_results": self.upload_results,
+        }
+
+
+@dataclass(slots=True)
+class CustomFitnessPreset:
+    preset_id: str
+    preset_name: str
+    fitness_config: FitnessConfig
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CustomFitnessPreset":
+        return cls(
+            preset_id=str(data["preset_id"]),
+            preset_name=str(data["preset_name"]),
+            fitness_config=FitnessConfig.from_dict(data["fitness_config"]),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "preset_id": self.preset_id,
+            "preset_name": self.preset_name,
+            "fitness_config": self.fitness_config.to_dict(),
         }
 
 

@@ -28,12 +28,29 @@ class IdentityIn(BaseModel):
         return group_id, username
 
 
+class LoginIn(IdentityIn):
+    password: str = Field(min_length=1, max_length=80)
+
+    def clean_login(self) -> tuple[str, str, str]:
+        group_id, username = self.clean_identity()
+        password = self.password.strip()
+        if not password:
+            raise ValueError("password must not be blank")
+        return group_id, username, password
+
+
+class NicknameUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    nickname: str = Field(min_length=1, max_length=20)
+
+
 class ClientResultIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     completed: bool
     lap_ticks: int | None
-    max_progress: float
+    max_progress: float = Field(ge=0, le=100)
     ticks_to_max_progress: int
 
     def to_client_result(self) -> ClientResult:
@@ -45,6 +62,9 @@ class SubmissionIn(IdentityIn):
     weights: list[list[float]]
     biases: list[list[float]]
     client_result: ClientResultIn
+    skin_id: int | None = None
+    max_speed: float | None = None
+    maxSpeed: float | None = None
 
     def to_submission(self) -> tuple[SubmissionPayload, ClientResult]:
         data: dict[str, Any] = self.model_dump() if hasattr(self, "model_dump") else self.dict()
@@ -59,6 +79,18 @@ class SubmissionIn(IdentityIn):
         return payload, client_result
 
 
+class AdminUserRequest(LoginIn):
+    disabled: bool = False
+    nickname: str | None = Field(default=None, min_length=1, max_length=20)
+
+
+class AdminUserImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    users: list[AdminUserRequest] | None = None
+    text: str | None = None
+
+
 class AdminStageRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -68,7 +100,17 @@ class AdminStageRequest(BaseModel):
 class AdminConfigRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    phase_one_batch_minutes: int
+    phase_one_batch_minutes: int | None = None
+    snapshot_interval_minutes: int | None = None
 
     def clean_phase_one_batch_minutes(self) -> int:
-        return validate_phase_one_batch_minutes(self.phase_one_batch_minutes)
+        values = [
+            value
+            for value in (self.phase_one_batch_minutes, self.snapshot_interval_minutes)
+            if value is not None
+        ]
+        if not values:
+            raise ValueError("snapshot_interval_minutes is required")
+        if len(set(values)) > 1:
+            raise ValueError("snapshot interval fields must match")
+        return validate_phase_one_batch_minutes(values[0])

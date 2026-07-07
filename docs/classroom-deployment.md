@@ -121,13 +121,14 @@ Admin 頁需要輸入 `COMPETITION_ADMIN_TOKEN`。
 http://192.168.1.23:8000
 ```
 
-本 repo 的 test client 可用：
+本 repo 的 test client 請先將 `settings.json` 的 `server_url` 設為
+`http://192.168.1.23:8000`，再啟動：
 
 ```bash
-COMPETITION_SERVER_URL=http://192.168.1.23:8000 uv run python competition_main.py
+uv run python competition_main.py
 ```
 
-Phase 1 Easy/Hard queued submissions 要等目前 Admin 設定的 `Phase 1 interval` batch boundary，或由 admin 按 `Create Demo Snapshot` 立即封存。Interval 可設為 1、2、5 分鐘，預設 1 分鐘；正式活動建議不要頻繁按 demo snapshot，除非要展示或排除問題。
+Queued submissions 要等目前 Admin 設定的 `Snapshot interval` boundary，或由 admin 按 `Run Snapshot Now` 立即封存。Interval 可設為 1、2、5 分鐘，預設 1 分鐘；正式活動建議不要頻繁手動封存，除非要展示或排除問題。學生端提交前需要先由 admin 建立帳號與 temporary password；測試時可把 `docs/test-users.csv` 貼到 Admin → User Management → Bulk import。CSV 可用 `group_id,username,password`，也可多加第 4 欄 `nickname`；若省略 nickname，預設會使用 username。
 
 ### 6. Replay 電腦設定
 
@@ -231,13 +232,14 @@ curl http://192.168.56.10:8000/health
 curl http://192.168.56.10:8000/v2/state
 ```
 
-啟動測試 client：
+先將 `settings.json` 的 `server_url` 設為
+`http://192.168.56.10:8000`，再啟動測試 client：
 
 ```bash
-COMPETITION_SERVER_URL=http://192.168.56.10:8000 uv run python competition_main.py
+uv run python competition_main.py
 ```
 
-在 UI 內輸入任意 `User ID`、`Group ID`，切 Easy/Hard，按 `V` 產生 `client_result`，按 `U` 檢查 eligibility 並提交。
+在 UI 內輸入 admin 建好的 `User ID`、`Group ID`、Password，切 Easy/Hard/Final，按 `I` 登入，按 `V` 產生 `client_result`，按 `U` 檢查 eligibility 並提交。Final cooldown 也是以個人 `(group_id, username)` 為單位，但 leaderboard/replay 仍顯示每組最佳。學生顯示名稱使用 mutable `nickname`；identity 仍是 `(group_id, username)`。目前 nickname 編輯走 `/v2/me` API 或 partner frontend，browser leaderboard 只提供登入與查看紀錄。
 
 ### VM B：測試 Leaderboard
 
@@ -264,7 +266,7 @@ curl -X POST http://127.0.0.1:8000/v2/admin/batches/run-now \
 http://192.168.56.10:8000/admin
 ```
 
-輸入 `test-admin`，按 `Create Demo Snapshot`。
+輸入 `test-admin`，按 `Run Snapshot Now`。
 
 ### Replay 測試
 

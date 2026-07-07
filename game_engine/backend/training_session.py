@@ -45,6 +45,7 @@ def create_evolution_rngs(
 class TrainingSession:
     population_size: int
     mutation_rate: int
+    fitness_strategy: str | None = None
     evolution_seed: int = DEFAULT_EVOLUTION_SEED
     generation: int = 1
     alive_count: int = 0
@@ -53,6 +54,7 @@ class TrainingSession:
     show_sensor_lines: bool = False
     show_player: bool = True
     show_debug_overlay: bool = True
+    generation_duration_seconds: float = GENERATION_DURATION_SECONDS
     mlp_init_rng: np.random.Generator = field(init=False, repr=False)
     mutation_rng: random.Random = field(init=False, repr=False)
 
@@ -68,6 +70,7 @@ class TrainingSession:
             alive_count=settings.population_size,
             show_player=settings.show_player,
             show_debug_overlay=settings.show_debug_overlay,
+            generation_duration_seconds=settings.auto_breed_seconds,
         )
 
     def toggle_selected_car(self, car: Any) -> None:
@@ -116,7 +119,7 @@ class TrainingSession:
         if elapsed_seconds < 0:
             raise ValueError("elapsed_seconds cannot be negative")
         return (
-            elapsed_seconds >= GENERATION_DURATION_SECONDS
+            elapsed_seconds >= self.generation_duration_seconds
             or self.alive_count <= 0
         )
 

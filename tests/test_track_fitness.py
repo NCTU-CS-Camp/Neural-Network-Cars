@@ -4,13 +4,14 @@ from dataclasses import dataclass
 
 import pytest
 
-from GA.fitness import BeginnerMix
+from GA.fitness import FitnessStrategy
 from game_engine.backend.fitness_tracker import FitnessTracker
 from game_engine.backend.settings import TRAINING_MAP_METADATA
 from game_engine.backend.track_geometry import (
     TrackGeometry,
     load_track_geometry,
 )
+from shared.contracts import FitnessConfig
 
 
 @dataclass
@@ -40,8 +41,7 @@ def test_manual_training_maps_build_ordered_track_geometry() -> None:
 
 def test_tracker_supplies_real_progress_to_gangexp_strategy() -> None:
     track = TrackGeometry.from_route_cells([(0, 1), (0, 0)])
-    strategy = BeginnerMix()
-    strategy.configure({"rewards": {"progress": 100}})
+    strategy = FitnessStrategy(name="progress", config=FitnessConfig(progress=100))
     car = FakeCar(*track.start_position, angle=track.start_angle)
     tracker = FitnessTracker.for_car(
         car,
@@ -58,15 +58,17 @@ def test_tracker_supplies_real_progress_to_gangexp_strategy() -> None:
     )
 
     assert result.progress_delta == pytest.approx(5.0)
-    assert result.reverse_progress_delta == 0.0
+    assert result.is_wrong_way is False
     assert tracker.total_fitness > 0.0
     assert car.fitness_score == tracker.total_fitness
 
 
 def test_tracker_detects_reverse_progress() -> None:
     track = TrackGeometry.from_route_cells([(0, 1), (0, 0)])
-    strategy = BeginnerMix()
-    strategy.configure({"penalties": {"wrong_way": 100}})
+    strategy = FitnessStrategy(
+        name="wrong-way",
+        config=FitnessConfig(wrong_way=100),
+    )
     car = FakeCar(*track.start_position, angle=track.start_angle)
     car.y -= 10
     tracker = FitnessTracker.for_car(
@@ -84,7 +86,7 @@ def test_tracker_detects_reverse_progress() -> None:
     )
 
     assert result.progress_delta == 0.0
-    assert result.reverse_progress_delta == pytest.approx(5.0)
+    assert result.is_wrong_way is True
     assert tracker.total_fitness < 0.0
 
 
@@ -94,7 +96,7 @@ def test_tracker_stops_at_fixed_frame_limit() -> None:
     tracker = FitnessTracker.for_car(
         car,
         track=track,
-        strategy=BeginnerMix(),
+        strategy=FitnessStrategy(name="empty", config=FitnessConfig()),
         fps=30,
         max_frames=1,
     )

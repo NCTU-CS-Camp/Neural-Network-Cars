@@ -84,13 +84,21 @@ uv run python main.py
 此指令會從 `game_engine/frontend/app.py` 啟動 Pygame simulator。
 訓練時按 `U` 可將目前最佳車的 weights 提交到 server。
 
-Client 使用的 API 位址由專案根目錄的 `.env` 設定：
+首次啟動或登入 token 到期時，請在登入畫面選擇組別，輸入姓名
+（作為帳號）、8 位數字生日（`YYYYMMDD`，作為密碼）與想使用的暱稱。
+登入後 client 會通過 `PATCH /v2/me` 更新暱稱。本機會保存 server 回傳的
+12 小時 bearer token 與暱稱，但不保存生日密碼；Eligibility 與 Upload
+submission 會自動攜帶此 token。
 
-```dotenv
-COMPETITION_SERVER_URL=http://127.0.0.1:8000
+Client 使用的 API 位址由專案根目錄的 `settings.json` 設定：
+
+```json
+{
+  "server_url": "http://127.0.0.1:8000"
+}
 ```
 
-請先複製 `.env.example` 為 `.env`，再依本機環境修改 IP、protocol 與 port。`.env`、`settings.json`、`profile.json`、`records.json` 與隨機賽道輸出皆為本機執行期資料，不納入版本控制。登入畫面不允許使用者修改此位址；若作業系統環境變數中也有 `COMPETITION_SERVER_URL`，環境變數優先。
+請依本機環境修改 `server_url` 的 IP、protocol 與 port。`.env`、`settings.json`、`profile.json`、`records.json` 與隨機賽道輸出皆為本機執行期資料，不納入版本控制。Game Engine 不會再用 `.env` 或 `COMPETITION_SERVER_URL` 覆蓋這個位址。
 
 `main.py` 保留為訓練用 simulator。競賽提交請使用符合 v2 `client_result` 契約的
 competition client；repository 內提供 `competition_main.py` 作為人工訓練與測試提交入口。
@@ -102,6 +110,12 @@ uv run python server/app.py
 ```
 
 此指令會在 `http://127.0.0.1:8000` 啟動本地 server。排行榜頁面位於 `http://127.0.0.1:8000/leaderboard`，助教管理頁面位於 `http://127.0.0.1:8000/admin`。預設 admin token 是 `admin`，正式活動可用 `COMPETITION_ADMIN_TOKEN` 環境變數覆蓋。
+
+若要讓同 subnet 的學生電腦連進來，請改用：
+
+```bash
+uv run uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
 
 ### 產生 mock submissions
 
@@ -129,56 +143,68 @@ uv run python competition_main.py
 ```
 
 此測試 client 可在 Easy、Hard、Final competition maps 上訓練新 weights，手動輸入
-User ID 與 Group ID，產生或覆寫 test-only `client_result`，並提交到 v2 APIs。
+User ID、Group ID 與 admin 建立的 temporary password，產生或覆寫 test-only
+`client_result`，並用 v2 authenticated APIs 提交。
 
 ## Competition 操作流程
 
-以下四個入口使用同一個 competition server，統一使用
-`http://127.0.0.1:8000`。啟動 Pygame client 前可明確設定：
+以下四個入口使用同一個 competition server。Game Engine 與
+Competition Test Main 會讀取 `settings.json` 的 `server_url`：
 
-```bash
-export COMPETITION_SERVER_URL=http://127.0.0.1:8000
+```json
+{
+  "server_url": "http://127.0.0.1:8000"
+}
 ```
 
 ### 1. Admin：設定賽程與建立 snapshot
 
-開啟 `http://127.0.0.1:8000/admin`，輸入 admin token。開發環境預設為 `admin`。
+開啟 `http://127.0.0.1:8000/admin`，輸入 admin token。開發環境預設為 `admin`。後台內容會在 token 驗證成功後才顯示。
 
 1. 將 stage 設為 `phase_one`，開放個人 Easy 與 Hard submission。
-2. 將 stage 設為 `final`，關閉 Easy/Hard，開放每個 `group_id` 一筆 Final submission。
-3. `Phase 1 interval` 可設定 Easy/Hard batch 與 cooldown 間隔，目前支援 1、2、5 分鐘，預設 1 分鐘。
-4. `Create Demo Snapshot` 會立即封存目前 queued 的 Easy/Hard submissions，方便測試；正式比賽則由目前 interval 的 UTC 邊界自動封存。
-5. `Restart Replay` 會通知大螢幕 Pygame client 立即從 spawn 重新播放目前 Top 15，不改變排行榜或 snapshot。
-6. `Reset Competition Data` 會刪除所有 submissions、cooldown 與 snapshots，但保留目前 stage 與 competition interval。
+2. 將 stage 設為 `final`，關閉 Easy/Hard，開放 Final submissions；Final cooldown 以 `(group_id, username)` 個人為單位，但排行榜以小組最佳代表上榜。
+3. `Snapshot interval` 可設定 snapshot 與 cooldown 間隔，目前支援 1、2、5 分鐘，預設 1 分鐘。
+4. `User Management` 可建立/更新使用者 temporary password 與 nickname、批次匯入帳號、enable/disable 帳號；測試帳號可從 `docs/test-users.csv` 匯入。CSV 可使用 `group_id,username,password`，也可多一欄 `nickname`。
+5. `Run Snapshot Now` 會立即封存目前 queued submissions，方便測試；正式比賽則由目前 interval 的 UTC 邊界自動封存。
+6. `Restart Replay` 會通知大螢幕 Pygame client 立即從 spawn 重新播放目前 Top 15，不改變排行榜或 snapshot。
+7. `Submissions` 區可 soft-delete 單筆 submission；刪除後會從 leaderboard/replay/cooldown 中排除並重新排名。
+8. `Reset Competition Data` 會刪除所有 submissions、cooldown 與 snapshots，但保留目前 stage、competition interval 與 admin 建立的使用者帳號。
 
 Admin 頁也會固定顯示 Easy、Hard、Final 三張 competition map 預覽。這三張 map 不能在 admin 頁任意替換。
 
 ### 2. Competition Test Main：訓練並模擬不同玩家提交
 
 ```bash
-COMPETITION_SERVER_URL=http://127.0.0.1:8000 uv run python competition_main.py
+uv run python competition_main.py
 ```
 
 Competition test main 的操作：
 
-- 直接在右側表單輸入 `User ID`、`Group ID`、server URL 與選用 admin token。
+- 直接在右側表單輸入 `User ID`、`Group ID`、Password、Skin ID、Max Speed、server URL 與選用 admin token。
+- `I`：用目前 User ID / Group ID / Password 登入 server；`U` 提交前也會在尚未登入時自動嘗試登入。
 - `E`、`H`、`F`：切換 Easy、Hard、Final competition map；切圖會保留目前 weights。
 - 左鍵選兩台車、`B` 手動 breed；或按 `G` 自動挑目前分數最高的兩台車 breed。
 - `V`：用目前 best car 在選定 competition map 上跑一次，產生 test-only `client_result`。
-- `O`：切換 manual result override，可手動輸入 completed、lap ticks、max progress 與 ticks。
-- `U`：先呼叫 eligibility API；可提交時才送出目前 best car weights 與 `client_result`。
-- `P`：用 admin token 呼叫 `Create Demo Snapshot`，讓 queued Easy/Hard submissions 立即進 leaderboard/replay。
+- `O`：切換 manual result override，可手動輸入 completed、lap ticks、`max_progress` 百分比（`0–100`）與 ticks。
+- `U`：先呼叫 eligibility API；可提交時才送出目前 best car weights、`client_result`、`skin_id` 與 `max_speed`。
+- 訓練紀錄會保存開始訓練時已裝備的商店 `skin_id`；稍後從該紀錄 Upload 時會沿用這個皮膚。
+- `P`：用 admin token 呼叫 `Run Snapshot Now`，讓 queued submissions 立即進 leaderboard/replay。
 
-Easy/Hard 對同一 `(group_id, username)` 各自有一段 cooldown，長度由 Admin 的 `Phase 1 interval` 決定。Final 必須先由 admin 切到 `final` stage，且每個 group 只能成功提交一次。
+Easy/Hard 對同一 `(group_id, username)` 各自有一段 cooldown，長度由 Admin 的 `Snapshot interval` 決定。Final 必須先由 admin 切到 `final` stage，cooldown 同樣以 `(group_id, username)` 為單位，但 leaderboard 只保留每個 group 的歷史最佳 non-deleted submission。
+
+`group_id` 與 `username` 是固定身份 key；`nickname` 只是可變顯示名稱。Partner frontend 或 CLI 可透過 `GET /v2/me` 與 `PATCH /v2/me` 讀取/更新 nickname，browser leaderboard 這一版只提供登入與查看，不提供編輯 nickname UI。
 
 ### 3. Leaderboard：公開查看排名
 
 開啟 `http://127.0.0.1:8000/leaderboard`，使用 Easy、Hard、Final tabs 切換排行榜。
 
-- Easy/Hard：每個 `(group_id, username)` 只保留歷史最佳 completed submission。
-- Final：每個 `group_id` 只顯示鎖定的 model；username 顯示實際提交者。
-- 完成模型依圈速排序；未完成模型依最大 progress、到達該 progress 的 tick 排序。
-- Phase 1 的 queued submission 會在下一個 snapshot 後才進入排行榜。
+- Easy/Hard：每個 `(group_id, username)` 只保留歷史最佳 completed submission，主名稱顯示 nickname，小字顯示 `Group N · username`。
+- Final：每個 `group_id` 只顯示小組最佳 model；主名稱顯示代表提交者 nickname，小字顯示 `Group N · username`。
+- 完成模型依圈速排序；未完成模型依最大圈進度百分比（`0–100`）、到達該進度的 tick 排序。
+- queued submission 會在下一個 snapshot 後才進入排行榜。
+- Public leaderboard 不需登入；登入後頁面底部 sticky bar 會顯示目前 tab 的個人成績、next submission time 與 submission history；Final tab 會顯示小組代表成績、代表提交者與自己的最新提交。
+- Leaderboard 登入的 Group ID 使用固定 `1` 到 `10` 下拉選單；username/password 仍需手動輸入。
+- Group 顯示統一使用 `Group 8` 這種格式。
 
 公開頁面不會暴露任何人的 weights 或 biases。
 
@@ -190,7 +216,17 @@ COMPETITION_REPLAY_TOKEN=admin \
 uv run python replay.py
 ```
 
-Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛。Phase 1 同時呈現 Easy 與 Hard 各自的排行榜 Top 15；Final 會自動改為單一賽道與 group leaderboard。每一輪動畫結束才重新抓取資料，因此 snapshot 更新不會中斷正在播放的車輛。車輛完成第一圈會標為 `FINISHED` 並停止，連續 180 ticks 未離開最後有效位置 24px 時會標為 `STALLED` 並停止；所有車輛完成、撞毀或停滯後，replay 會暫停 3 秒再抓取目前 replay payload，若沒有新 snapshot 則重播同一批資料。Replay header 會顯示目前狀態、本輪 elapsed time、下一輪 replay 倒數與下一次 snapshot 倒數。
+Replay 需要 admin/replay token，因為它會讀取模型參數來播放車輛。Phase 1 同時呈現 Easy 與 Hard 各自的排行榜 Top 15；Final 會自動改為單一賽道與 group leaderboard。每一輪動畫結束才重新抓取資料，因此 snapshot 更新不會中斷正在播放的車輛。車輛完成第一圈、撞牆，或連續 180 ticks 未離開最後有效位置 24px 時會停止並變暗；所有車輛完成、撞毀或停滯後，replay 會暫停 3 秒再抓取目前 replay payload，若沒有新 snapshot 則重播同一批資料。Replay header 會顯示目前狀態、本輪 elapsed time、下一輪 replay 倒數與下一次 snapshot 倒數。
+
+Replay 目前採 safe-reveal 流程：新 snapshot 或 stage change 抵達時不會中斷目前畫面，而是在本輪 replay 結束後才採用。第一次播放新 leaderboard 時會先隱藏排行榜，等該 Easy/Hard/Final session 結束後再揭示；同一批 snapshot 的後續 replay 會直接顯示排行榜。
+
+Replay 會使用 submission metadata 呈現車子：`skin_id=0` 是白車、`skin_id=1` 是綠車，`max_speed` 會套用到 replay 車速上限。車名優先顯示 nickname，並使用非灰色排行色；車輛 finished/crashed/stalled 後車體與名字會變暗。下一個 snapshot 剩 5 秒內，active map panel 會覆蓋半透明 F1 start-light 風格倒數燈號；若倒數到 0 時 replay 還在跑，會先用目前排名從 spawn 重新播放，並顯示「等待新快照，先重播目前排名」，新快照仍會等安全邊界才揭榜。
+
+若教室電腦的 Pygame 無法正確顯示中文狀態文字，可以指定 CJK 字型：
+
+```bash
+COMPETITION_REPLAY_FONT_PATH=/path/to/NotoSansCJK-Regular.ttc uv run python replay.py
+```
 
 ## 開發指令
 

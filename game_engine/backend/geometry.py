@@ -28,4 +28,12 @@ def move(point, angle, unit):
 
 
 def sigmoid(z):
-    return 1.0 / (1.0 + np.exp(-z))
+    values = np.asarray(z, dtype=float)
+    result = np.empty_like(values)
+    positive = values >= 0
+
+    result[positive] = 1.0 / (1.0 + np.exp(-values[positive]))
+    negative_exp = np.exp(values[~positive])
+    result[~positive] = negative_exp / (1.0 + negative_exp)
+
+    return result.item() if result.ndim == 0 else result

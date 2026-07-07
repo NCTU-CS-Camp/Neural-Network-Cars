@@ -16,8 +16,8 @@ LAYER_SIZES = [2, 3, 1]
 
 
 def test_submission_and_validation_population_sizes() -> None:
-    assert SUBMISSION_POPULATION_SIZE == 100
-    assert VALIDATION_POPULATION_SIZE == 100
+    assert SUBMISSION_POPULATION_SIZE == 50
+    assert VALIDATION_POPULATION_SIZE == 50
     candidates = _build_candidates(
         Car(LAYER_SIZES),
         Car(LAYER_SIZES),
@@ -25,7 +25,7 @@ def test_submission_and_validation_population_sizes() -> None:
         mutation_rate=0,
     )
 
-    assert len(candidates) == 100
+    assert len(candidates) == 50
 
 
 def test_submission_candidates_follow_parent_seed_reproducibly() -> None:
@@ -70,11 +70,36 @@ def test_legacy_training_record_defaults_seed_to_3057() -> None:
     )
 
     assert record.mlp_init_seed == 3057
+    assert record.skin_id == 0
     assert record.best_fitness_score is None
     assert record.mlp_init_rng_state is None
     assert record.mutation_rng_state is None
     assert record.to_dict()["mlp_init_seed"] == 3057
+    assert record.to_dict()["skin_id"] == 0
     assert record.to_dict()["best_fitness_score"] is None
+
+
+def test_training_record_preserves_equipped_skin_for_later_submission() -> None:
+    data = {
+        "record_id": "skinned",
+        "record_name": "Orange car",
+        "saved_at": "2026-07-03T00:00:00+08:00",
+        "group_id": "7",
+        "username": "1234",
+        "layer_sizes": LAYER_SIZES,
+        "parent_a_weights": [],
+        "parent_a_biases": [],
+        "parent_b_weights": [],
+        "parent_b_biases": [],
+        "fitness_config": {},
+        "map_difficulty": 1,
+        "skin_id": 3,
+    }
+
+    record = TrainingRecord.from_dict(data)
+
+    assert record.skin_id == 3
+    assert record.to_dict()["skin_id"] == 3
 
 
 def test_submission_continues_json_round_tripped_training_rng_states() -> None:
