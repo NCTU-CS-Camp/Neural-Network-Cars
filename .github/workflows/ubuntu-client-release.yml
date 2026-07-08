@@ -1,0 +1,49 @@
+name: Build Ubuntu client
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-ubuntu-client:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv and Python 3.12
+        uses: astral-sh/setup-uv@v8
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Build and test Ubuntu client
+        run: ./scripts/build_ubuntu.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: NeuralNetworkCars-Ubuntu-x86_64
+          path: dist/NeuralNetworkCars-Ubuntu-x86_64.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release and upload client
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          asset="dist/NeuralNetworkCars-Ubuntu-x86_64.tar.gz"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$asset" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$asset" --generate-notes --title "$RELEASE_TAG"
+          fi

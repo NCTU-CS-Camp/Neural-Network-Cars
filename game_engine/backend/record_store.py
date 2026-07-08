@@ -4,11 +4,11 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from game_engine.backend.settings import PROJECT_ROOT
+from game_engine.backend.settings import USER_DATA_DIR
 from shared.contracts import TrainingRecord
 
 
-RECORDS_PATH = PROJECT_ROOT / "records.json"
+RECORDS_PATH = USER_DATA_DIR / "records.json"
 
 
 class RecordStore:

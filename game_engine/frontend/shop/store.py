@@ -11,11 +11,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from game_engine.backend.settings import PROJECT_ROOT
+from game_engine.backend.settings import USER_DATA_DIR
 from game_engine.frontend.profile_store import load_login_profile
 from game_engine.frontend.shop.config import DEFAULT_SKIN_ID
 
-SHOP_STATE_PATH = PROJECT_ROOT / "shop_state.json"
+SHOP_STATE_PATH = USER_DATA_DIR / "shop_state.json"
 
 
 def _default_entry() -> dict[str, Any]:

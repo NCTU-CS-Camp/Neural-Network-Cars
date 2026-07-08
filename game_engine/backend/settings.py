@@ -1,7 +1,29 @@
+import os
+import sys
 from pathlib import Path
 
 # settings.py 位於 game_engine/backend/，往上兩層才是專案根目錄
+# PyInstaller preserves this relative layout inside its bundle, so read-only
+# assets can continue to be resolved from PROJECT_ROOT when frozen.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def _user_data_dir() -> Path:
+    """Return a persistent, writable directory for runtime-generated data."""
+    if not IS_FROZEN:
+        return PROJECT_ROOT
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    return base / "NeuralNetworkCars"
+
+
+USER_DATA_DIR = _user_data_dir()
+USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 IMAGES_DIR = PROJECT_ROOT / "Images"
 SPRITES_DIR = IMAGES_DIR / "Sprites"
@@ -22,9 +44,10 @@ VALID_MAPS_DIR = MAPS_DIR / "valid_maps"
 
 DEFAULT_TRACK_BACK_PATH = TRACKS_DIR / "bg4.png"
 DEFAULT_TRACK_FRONT_PATH = TRACKS_DIR / "bg7.png"
-TRACK_BACK_PATH = TRACKS_DIR / "randomGeneratedTrackBack.png"
-TRACK_FRONT_PATH = TRACKS_DIR / "randomGeneratedTrackFront.png"
-TRACK_METADATA_PATH = TRACKS_DIR / "randomGeneratedTrack.json"
+GENERATED_TRACKS_DIR = USER_DATA_DIR / "generated_tracks" if IS_FROZEN else TRACKS_DIR
+TRACK_BACK_PATH = GENERATED_TRACKS_DIR / "randomGeneratedTrackBack.png"
+TRACK_FRONT_PATH = GENERATED_TRACKS_DIR / "randomGeneratedTrackFront.png"
+TRACK_METADATA_PATH = GENERATED_TRACKS_DIR / "randomGeneratedTrack.json"
 
 SCREEN_SIZE = WIDTH, HEIGHT = 1600, 900
 FPS = 30

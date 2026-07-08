@@ -4,11 +4,11 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from game_engine.backend.settings import PROJECT_ROOT
+from game_engine.backend.settings import USER_DATA_DIR
 from shared.contracts import LoginProfile
 
 
-PROFILE_PATH = PROJECT_ROOT / "profile.json"
+PROFILE_PATH = USER_DATA_DIR / "profile.json"
 
 
 def load_login_profile(path: Path = PROFILE_PATH) -> LoginProfile | None:

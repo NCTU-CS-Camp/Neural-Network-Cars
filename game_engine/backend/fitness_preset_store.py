@@ -5,11 +5,11 @@ from pathlib import Path
 from uuid import uuid4
 
 from GA.fitness import fitness_strategy_names
-from game_engine.backend.settings import PROJECT_ROOT
+from game_engine.backend.settings import USER_DATA_DIR
 from shared.contracts import CustomFitnessPreset, FitnessConfig
 
 
-PRESETS_PATH = PROJECT_ROOT / "configs" / "fitness_presets.json"
+PRESETS_PATH = USER_DATA_DIR / "configs" / "fitness_presets.json"
 SCHEMA_VERSION = 1
 
 
