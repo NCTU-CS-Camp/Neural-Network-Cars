@@ -3,6 +3,8 @@ name: Build Ubuntu client
 on:
   workflow_dispatch:
   push:
+    branches:
+      - dev
     tags:
       - "v*"
 

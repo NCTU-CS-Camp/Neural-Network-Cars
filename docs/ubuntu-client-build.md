@@ -11,7 +11,12 @@ http://192.168.15.1:8000
 
 ## 從 GitHub Actions 手動打包
 
-1. 將打包相關修改 commit 並 push／merge 到 GitHub 的預設 branch。
+每次 push 到 `dev` branch 都會自動執行打包，完成後可直接從該次 Actions
+執行下載 artifact，不需要先合併到 `main`。
+
+手動按鈕模式則需要 workflow 已存在於 GitHub 的預設 branch：
+
+1. 將打包 workflow merge 到 GitHub 的預設 branch。
 2. 開啟 <https://github.com/NCTU-CS-Camp/Neural-Network-Cars/actions>。
 3. 左側選擇 `Build Ubuntu client`。
 4. 點 `Run workflow`。
