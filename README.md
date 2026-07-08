@@ -81,6 +81,19 @@ settings.json  本地執行設定（不納入版控）
 uv run python main.py
 ```
 
+### 建置 Ubuntu client
+
+專案提供 GitHub Actions，在 Ubuntu 22.04 runner 自動測試並產出純 Pygame
+client：`NeuralNetworkCars-Ubuntu-x86_64.tar.gz`。產物不包含 FastAPI server
+或 SQLite database，client 預設連線到 `http://192.168.15.1:8000`。
+
+在 GitHub repository 的 `Actions` 頁選擇 `Build Ubuntu client`，按
+`Run workflow` 即可建置。推送 `v*` tag 時，workflow
+也會自動建立或更新 GitHub Release。完整步驟請見
+[`docs/ubuntu-client-build.md`](docs/ubuntu-client-build.md)。
+
+Ubuntu 打包版會將可寫資料放在 `~/.local/share/NeuralNetworkCars`。
+
 此指令會從 `game_engine/frontend/app.py` 啟動 Pygame simulator。
 訓練時按 `U` 可將目前最佳車的 weights 提交到 server。
 
@@ -90,7 +103,9 @@ uv run python main.py
 12 小時 bearer token 與暱稱，但不保存生日密碼；Eligibility 與 Upload
 submission 會自動攜帶此 token。
 
-Client 使用的 API 位址由專案根目錄的 `settings.json` 設定：
+原始碼模式的 API 位址由專案根目錄的 `settings.json` 設定；Ubuntu 打包版則
+於首次啟動讀取建置時指定的網址，之後保存在
+`~/.local/share/NeuralNetworkCars/settings.json`：
 
 ```json
 {
