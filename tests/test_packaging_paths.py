@@ -59,3 +59,25 @@ def test_frozen_client_overrides_saved_server_url(
     runtime_settings = config_store.load_runtime_settings(settings_path)
 
     assert runtime_settings.server_url == "http://192.168.15.1:8000"
+
+
+def test_frozen_client_overrides_saved_training_population(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    defaults_path = tmp_path / "client_defaults.json"
+    defaults_path.write_text(
+        '{"server_url": "http://192.168.15.1:8000"}',
+        encoding="utf-8",
+    )
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        '{"population_size": 300}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_store, "CLIENT_DEFAULTS_PATH", defaults_path)
+    monkeypatch.setattr(config_store, "IS_FROZEN", True)
+
+    runtime_settings = config_store.load_runtime_settings(settings_path)
+
+    assert runtime_settings.population_size == 200

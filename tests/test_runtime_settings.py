@@ -29,7 +29,7 @@ def test_runtime_settings_default_server_url() -> None:
 def test_runtime_settings_default_training_population() -> None:
     settings = RuntimeSettings.from_dict({})
 
-    assert settings.population_size == 300
+    assert settings.population_size == 200
 
 
 def test_runtime_settings_load_max_speed() -> None:

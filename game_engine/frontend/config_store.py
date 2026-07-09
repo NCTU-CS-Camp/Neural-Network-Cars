@@ -30,7 +30,9 @@ def load_runtime_settings(path: Path = SETTINGS_PATH) -> RuntimeSettings:
     data = json.loads(path.read_text(encoding="utf-8"))
     settings = RuntimeSettings.from_dict(data)
     if IS_FROZEN:
-        settings.server_url = _default_runtime_settings().server_url
+        defaults = _default_runtime_settings()
+        settings.server_url = defaults.server_url
+        settings.population_size = defaults.population_size
     return settings
 
 
