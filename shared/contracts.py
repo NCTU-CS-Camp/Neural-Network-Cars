@@ -52,7 +52,7 @@ class RuntimeSettings:
     nickname: str = "player1"
     server_url: str = DEFAULT_SERVER_URL
     fps: int = 30
-    population_size: int = 300
+    population_size: int = 200
     mutation_rate: int = 90
     show_player: bool = True
     show_debug_overlay: bool = True
